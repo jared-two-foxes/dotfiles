@@ -1,0 +1,47 @@
+[core]
+    autocrlf = false
+    safecrlf = warn
+    editor = nvim
+    whitespace = trailing-space,space-before-tab
+    excludesfile = ~/.gitignore_global
+
+[init]
+    defaultBranch = main
+
+[pull]
+    rebase = true
+
+[rebase]
+    autoStash = true
+
+[merge]
+    conflictstyle = diff3
+    tool = nvim
+
+[diff]
+    colorMoved = zebra
+
+[fetch]
+    prune = true
+
+[alias]
+    st   = status -sb
+    lg   = log --oneline --graph --decorate --all
+    co   = checkout
+    br   = branch
+    cp   = cherry-pick
+    undo = reset HEAD~1 --mixed
+    wip  = "!git add -A && git commit -m 'WIP'"
+    unwip = "!git log -1 --format='%s' | grep -q 'WIP' && git reset HEAD~1"
+    aliases = config --get-regexp alias
+
+[color]
+    ui = auto
+
+[credential]
+    helper = manager
+
+# Machine-specific overrides: email, signingkey, credential helpers, etc.
+# Create ~/.gitconfig.local (or local/git/.gitconfig.local from repo template)
+[include]
+    path = ~/.gitconfig.local

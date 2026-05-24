@@ -1,0 +1,67 @@
+# =============================================================
+# starship.toml — cross-platform prompt configuration
+# Docs: https://starship.rs/config/
+# =============================================================
+
+# Wait 500ms for shell commands before timing out
+command_timeout = 500
+
+# Prompt format: newline for breathing room
+format = """
+$username$hostname$directory$git_branch$git_status$python$nodejs$rust$cmd_duration
+$character"""
+
+[character]
+success_symbol = "[❯](bold green)"
+error_symbol   = "[❯](bold red)"
+
+[directory]
+truncation_length       = 4
+truncate_to_repo        = true
+style                   = "bold cyan"
+read_only               = " 󰌾"
+home_symbol             = "~"
+
+[git_branch]
+symbol = " "
+style  = "bold purple"
+
+[git_status]
+style           = "bold yellow"
+conflicted      = "✖ "
+ahead           = "⇡${count} "
+behind          = "⇣${count} "
+diverged        = "⇕⇡${ahead_count}⇣${behind_count} "
+untracked       = "? "
+stashed         = "$ "
+modified        = "! "
+staged          = "+ "
+renamed         = "» "
+deleted         = "✘ "
+
+[cmd_duration]
+min_time          = 2_000     # Only show if command took > 2s
+style             = "yellow"
+format            = "took [$duration]($style) "
+
+[python]
+symbol           = " "
+style            = "bold yellow"
+pyenv_version_name = true
+
+[nodejs]
+symbol = " "
+style  = "bold green"
+
+[rust]
+symbol = " "
+style  = "bold red"
+
+[username]
+show_always = false           # Only show on SSH or root
+style_user  = "bold blue"
+style_root  = "bold red"
+
+[hostname]
+ssh_only = true               # Only show on SSH sessions
+style    = "bold green"

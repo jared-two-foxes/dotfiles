@@ -1,0 +1,56 @@
+# VS Code Extensions
+# One extension ID per line.
+# Install all with:
+#   Get-Content extensions.txt | Where-Object { $_ -and $_ -notmatch '^#' } | ForEach-Object { code --install-extension $_ }
+#
+# Find an extension's ID in the marketplace URL or the Extensions panel (...) menu.
+
+# --- Themes & UI ---------------------------------------------
+PKief.material-icon-theme
+
+# --- Editor enhancements -------------------------------------
+editorconfig.editorconfig
+esbenp.prettier-vscode
+streetsidesoftware.code-spell-checker
+usernamehw.errorlens
+oderwat.indent-rainbow
+mechatroner.rainbow-csv
+
+# --- Git -----------------------------------------------------
+eamodio.gitlens
+mhutchie.git-graph
+
+# --- Languages -----------------------------------------------
+# Python
+ms-python.python
+ms-python.black-formatter
+ms-python.isort
+ms-python.pylint
+
+# JavaScript / TypeScript
+dbaeumer.vscode-eslint
+
+# Rust
+rust-lang.rust-analyzer
+
+# C / C++
+ms-vscode.cpptools
+
+# Lua (for Neovim config editing)
+sumneko.lua
+
+# TOML
+tamasfe.even-better-toml
+
+# Markdown
+yzhang.markdown-all-in-one
+DavidAnson.vscode-markdownlint
+
+# --- Remote / containers -------------------------------------
+ms-vscode-remote.remote-wsl
+ms-vscode-remote.remote-ssh
+ms-vscode.remote-explorer
+
+# --- Productivity --------------------------------------------
+alefragnani.bookmarks
+formulahendry.code-runner

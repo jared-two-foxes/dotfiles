@@ -1,3 +1,21 @@
-plugin/
-lazy-lock.json
+# =============================================================
+# .gitignore
+# =============================================================
 
+# --- Neovim runtime artifacts --------------------------------
+shared/nvim/plugin/
+shared/nvim/lazy-lock.json
+
+# --- Local machine overrides ---------------------------------
+# Track *.template files only; ignore populated copies
+local/**
+!local/**/*.template
+
+# PowerShell local profile (sits alongside the main profile
+# after install — not in the repo)
+windows/powershell/profile.local.ps1
+
+# --- OS artifacts --------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,35 @@
+root = true
+
+# Defaults for all files
+[*]
+charset                  = utf-8
+end_of_line              = lf
+insert_final_newline     = true
+trim_trailing_whitespace = true
+indent_style             = space
+indent_size              = 4
+
+# Web / config formats — 2-space indent is conventional
+[*.{js,jsx,ts,tsx,vue,html,css,scss,sass,less,json,jsonc,yaml,yml,toml}]
+indent_size = 2
+
+# Markdown — preserve trailing spaces (two spaces = line break)
+[*.{md,mdx}]
+trim_trailing_whitespace = false
+
+# Makefiles require real tabs
+[Makefile]
+indent_style = tab
+
+# Go uses tabs by convention
+[*.go]
+indent_style = tab
+
+# Batch files need CRLF
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# PowerShell
+[*.{ps1,psm1,psd1}]
+indent_size = 4
+end_of_line = crlf
