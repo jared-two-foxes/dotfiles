@@ -7,7 +7,10 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [switch]$Force  # Overwrite existing files/links
+    [Parameter(Mandatory)]
+    [ValidateSet('home', 'work')]
+    [string]$Machine,   # Machine profile to deploy (home|work)
+    [switch]$Force      # Overwrite existing files/links
 )
 
 Set-StrictMode -Version Latest
@@ -46,14 +49,40 @@ function New-Symlink {
     Write-Ok "$Link -> $Target"
 }
 
-function Copy-Template {
-    param([string]$Template, [string]$Dest)
-    if (Test-Path $Dest) {
-        Write-Skip "$Dest already exists — skipping template copy"
+function Copy-MachineProfile {
+    param(
+        [string]$File,  # Filename within local/machines/$Machine/
+        [string]$Dest   # Destination path on system
+    )
+    $machineFile  = Join-Path $RepoRoot "local\machines\$Machine\$File"
+    $templateFile = Join-Path $RepoRoot "local\git\.gitconfig.local.template"  # generic fallback
+
+    # Pick the most specific source available
+    $source = if (Test-Path $machineFile) {
+        $machineFile
+    } else {
+        # Try to find a matching template as fallback
+        $candidate = Join-Path $RepoRoot "local\$($File -replace '^\.', '' -replace '$', '.template')"
+        if (Test-Path $candidate) { $candidate } else { $null }
+    }
+
+    if (-not $source) {
+        Write-Warn "No machine profile or template found for $File — skipping"
         return
     }
-    Copy-Item -LiteralPath $Template -Destination $Dest
-    Write-Ok "Created $Dest from template"
+
+    $destDir = Split-Path $Dest
+    if (-not (Test-Path $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+
+    if ((Test-Path $Dest) -and -not $Force) {
+        Write-Skip "$Dest already exists (use -Force to overwrite)"
+        return
+    }
+
+    Copy-Item -LiteralPath $source -Destination $Dest -Force
+    Write-Ok "$Dest (from machines\$Machine\$File)"
 }
 
 # --- Check for symlink capability ----------------------------
@@ -80,9 +109,9 @@ New-Symlink `
     -Target (Join-Path $RepoRoot 'shared\git\.gitignore_global') `
     -Link   (Join-Path $env:USERPROFILE '.gitignore_global')
 
-Copy-Template `
-    -Template (Join-Path $RepoRoot 'local\git\.gitconfig.local.template') `
-    -Dest     (Join-Path $env:USERPROFILE '.gitconfig.local')
+Copy-MachineProfile `
+    -File '.gitconfig.local' `
+    -Dest (Join-Path $env:USERPROFILE '.gitconfig.local')
 
 # --- Neovim --------------------------------------------------
 Write-Host "`n[Neovim]" -ForegroundColor White
@@ -130,9 +159,9 @@ New-Symlink `
     -Target (Join-Path $RepoRoot 'windows\powershell\modules') `
     -Link   (Join-Path $psProfileDir 'modules')
 
-Copy-Template `
-    -Template (Join-Path $RepoRoot 'local\powershell\profile.local.ps1.template') `
-    -Dest     (Join-Path $psProfileDir 'profile.local.ps1')
+Copy-MachineProfile `
+    -File 'profile.local.ps1' `
+    -Dest (Join-Path $psProfileDir 'profile.local.ps1')
 
 # --- VS Code -------------------------------------------------
 Write-Host "`n[VS Code]" -ForegroundColor White

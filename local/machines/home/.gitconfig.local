@@ -1,0 +1,18 @@
+# =============================================================
+# local/machines/home/.gitconfig.local
+# Home machine git identity and overrides.
+#
+# COMMITTED — contains no secrets. Fill in your values.
+# Deployed to ~/.gitconfig.local by the install script.
+# =============================================================
+
+[user]
+    name  = Your Name
+    email = you@personal.com
+
+    # GPG signing key fingerprint (optional)
+    # signingkey = ABCDEF1234567890
+
+[commit]
+    # Uncomment to sign all commits with GPG
+    # gpgsign = true

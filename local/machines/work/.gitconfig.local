@@ -1,0 +1,31 @@
+# =============================================================
+# local/machines/work/.gitconfig.local
+# Work machine git identity and overrides.
+# Shared between work Windows and work Linux installs.
+#
+# COMMITTED — contains no secrets. Fill in your values.
+# Deployed to ~/.gitconfig.local by the install script.
+# =============================================================
+
+[user]
+    name  = Your Name
+    email = you@work.com
+
+    # GPG signing key fingerprint (optional)
+    # signingkey = ABCDEF1234567890
+
+[commit]
+    # Uncomment to sign all commits with GPG
+    # gpgsign = true
+
+[credential]
+    # Corporate SSO credential helper — uncomment if required
+    # helper = manager
+
+[http]
+    # Corporate proxy — uncomment and set if required
+    # proxy = http://proxy.company.com:8080
+
+[url "git@github.com:"]
+    # Force SSH instead of HTTPS for GitHub (optional)
+    # insteadOf = https://github.com/

@@ -7,8 +7,10 @@ shared/nvim/plugin/
 shared/nvim/lazy-lock.json
 
 # --- Local machine overrides ---------------------------------
-# Track *.template files only; ignore populated copies
+# Track machine profiles and *.template files; ignore populated copies
 local/**
+!local/machines/
+!local/machines/**
 !local/**/*.template
 
 # PowerShell local profile (sits alongside the main profile

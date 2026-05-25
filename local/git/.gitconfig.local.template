@@ -1,0 +1,35 @@
+# =============================================================
+# .gitconfig.local.template — Fallback template for git overrides
+#
+# PREFERRED: Use local/machines/<home|work>/.gitconfig.local
+# instead of this template. The install script will deploy the
+# correct machine profile automatically.
+#
+# USAGE (manual fallback):
+#   Copy this file to ~/.gitconfig.local and fill in the values.
+#   The dotfiles .gitconfig includes this file automatically.
+#   ~/.gitconfig.local is gitignored — never commit it.
+# =============================================================
+
+[user]
+    name  = Your Name
+    email = you@example.com
+
+    # GPG signing key fingerprint (optional)
+    # signingkey = ABCDEF1234567890
+
+[commit]
+    # Uncomment to sign all commits with GPG
+    # gpgsign = true
+
+[credential]
+    # Override credential helper if needed (e.g. for work SSO)
+    # helper = manager
+
+[http]
+    # Corporate proxy — uncomment and set if needed
+    # proxy = http://proxy.company.com:8080
+
+[url "git@github.com:"]
+    # Force SSH instead of HTTPS for GitHub (optional)
+    # insteadOf = https://github.com/

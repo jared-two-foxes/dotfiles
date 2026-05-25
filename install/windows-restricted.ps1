@@ -7,7 +7,10 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [switch]$Force  # Overwrite existing files even if unchanged
+    [Parameter(Mandatory)]
+    [ValidateSet('home', 'work')]
+    [string]$Machine,   # Machine profile to deploy (home|work)
+    [switch]$Force      # Overwrite existing files even if unchanged
 )
 
 Set-StrictMode -Version Latest
@@ -58,6 +61,36 @@ function Copy-DotfileDir {
     Write-Ok "$Dest (directory)"
 }
 
+function Copy-MachineProfile {
+    param(
+        [string]$File,  # Filename within local/machines/$Machine/
+        [string]$Dest   # Destination path on system
+    )
+    $machineFile = Join-Path $RepoRoot "local\machines\$Machine\$File"
+
+    if (-not (Test-Path $machineFile)) {
+        Write-Warn "No machine profile found for $File in machines\$Machine\ — skipping"
+        return
+    }
+
+    $destDir = Split-Path $Dest
+    if (-not (Test-Path $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+
+    if ((Test-Path $Dest) -and -not $Force) {
+        $srcHash = (Get-FileHash $machineFile -Algorithm MD5).Hash
+        $dstHash = (Get-FileHash $Dest        -Algorithm MD5).Hash
+        if ($srcHash -eq $dstHash) {
+            Write-Skip "$Dest (up to date)"
+            return
+        }
+    }
+
+    Copy-Item -LiteralPath $machineFile -Destination $Dest -Force
+    Write-Ok "$Dest (from machines\$Machine\$File)"
+}
+
 function Copy-Template {
     param([string]$Template, [string]$Dest)
     if (Test-Path $Dest) {
@@ -79,9 +112,9 @@ Copy-Dotfile `
     -Source (Join-Path $RepoRoot 'shared\git\.gitignore_global') `
     -Dest   (Join-Path $env:USERPROFILE '.gitignore_global')
 
-Copy-Template `
-    -Template (Join-Path $RepoRoot 'local\git\.gitconfig.local.template') `
-    -Dest     (Join-Path $env:USERPROFILE '.gitconfig.local')
+Copy-MachineProfile `
+    -File '.gitconfig.local' `
+    -Dest (Join-Path $env:USERPROFILE '.gitconfig.local')
 
 # --- Neovim --------------------------------------------------
 Write-Host "`n[Neovim]" -ForegroundColor White
@@ -137,9 +170,9 @@ Copy-DotfileDir `
     -Source (Join-Path $psSourceDir 'modules') `
     -Dest   $modulesTarget
 
-Copy-Template `
-    -Template (Join-Path $RepoRoot 'local\powershell\profile.local.ps1.template') `
-    -Dest     (Join-Path $psProfileDir 'profile.local.ps1')
+Copy-MachineProfile `
+    -File 'profile.local.ps1' `
+    -Dest (Join-Path $psProfileDir 'profile.local.ps1')
 
 # --- VS Code -------------------------------------------------
 Write-Host "`n[VS Code]" -ForegroundColor White
