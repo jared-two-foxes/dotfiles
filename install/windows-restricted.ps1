@@ -102,48 +102,53 @@ function Copy-Template {
 }
 
 # --- Git -----------------------------------------------------
-Write-Host "`n[Git]" -ForegroundColor White
+Write-Host "
+[Git]" -ForegroundColor White
 
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'shared\git\.gitconfig') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'shared\git\.gitconfig') 
     -Dest   (Join-Path $env:USERPROFILE '.gitconfig')
 
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'shared\git\.gitignore_global') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'shared\git\.gitignore_global') 
     -Dest   (Join-Path $env:USERPROFILE '.gitignore_global')
 
-Copy-MachineProfile `
-    -File '.gitconfig.local' `
+Copy-MachineProfile 
+    -File '.gitconfig.local' 
     -Dest (Join-Path $env:USERPROFILE '.gitconfig.local')
 
 # --- Neovim --------------------------------------------------
-Write-Host "`n[Neovim]" -ForegroundColor White
+Write-Host "
+[Neovim]" -ForegroundColor White
 
 $nvimConfigDir = Join-Path $env:LOCALAPPDATA 'nvim'
-Copy-DotfileDir `
-    -Source (Join-Path $RepoRoot 'shared\nvim') `
+Copy-DotfileDir 
+    -Source (Join-Path $RepoRoot 'shared\nvim') 
     -Dest   $nvimConfigDir
 
 # --- Vim -----------------------------------------------------
-Write-Host "`n[Vim]" -ForegroundColor White
+Write-Host "
+[Vim]" -ForegroundColor White
 
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'shared\vim\.vimrc') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'shared\vim\.vimrc') 
     -Dest   (Join-Path $env:USERPROFILE '.vimrc')
 
 # --- EditorConfig --------------------------------------------
-Write-Host "`n[EditorConfig]" -ForegroundColor White
+Write-Host "
+[EditorConfig]" -ForegroundColor White
 
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') 
     -Dest   (Join-Path $env:USERPROFILE '.editorconfig')
 
 # --- Starship ------------------------------------------------
-Write-Host "`n[Starship]" -ForegroundColor White
+Write-Host "
+[Starship]" -ForegroundColor White
 
 $starshipConfigDir = Join-Path $env:USERPROFILE '.config'
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'shared\starship\starship.toml') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'shared\starship\starship.toml') 
     -Dest   (Join-Path $starshipConfigDir 'starship.toml')
 
 # Remind user where to place starship.exe
@@ -155,32 +160,34 @@ if (-not (Get-Command starship -ErrorAction SilentlyContinue)) {
 }
 
 # --- PowerShell profile --------------------------------------
-Write-Host "`n[PowerShell]" -ForegroundColor White
+Write-Host "
+[PowerShell]" -ForegroundColor White
 
 $psProfileDir    = Split-Path $PROFILE
 $psSourceDir     = Join-Path $RepoRoot 'windows\powershell'
 
-Copy-Dotfile `
-    -Source (Join-Path $psSourceDir 'Microsoft.PowerShell_profile.ps1') `
+Copy-Dotfile 
+    -Source (Join-Path $psSourceDir 'Microsoft.PowerShell_profile.ps1') 
     -Dest   $PROFILE
 
 # Copy all modules
 $modulesTarget = Join-Path $psProfileDir 'modules'
-Copy-DotfileDir `
-    -Source (Join-Path $psSourceDir 'modules') `
+Copy-DotfileDir 
+    -Source (Join-Path $psSourceDir 'modules') 
     -Dest   $modulesTarget
 
-Copy-MachineProfile `
-    -File 'profile.local.ps1' `
+Copy-MachineProfile 
+    -File 'profile.local.ps1' 
     -Dest (Join-Path $psProfileDir 'profile.local.ps1')
 
 # --- VS Code -------------------------------------------------
-Write-Host "`n[VS Code]" -ForegroundColor White
+Write-Host "
+[VS Code]" -ForegroundColor White
 
 $vsCodeUserDir = Join-Path $env:APPDATA 'Code\User'
 
-Copy-Dotfile `
-    -Source (Join-Path $RepoRoot 'windows\vscode\settings.json') `
+Copy-Dotfile 
+    -Source (Join-Path $RepoRoot 'windows\vscode\settings.json') 
     -Dest   (Join-Path $vsCodeUserDir 'settings.json')
 
 # Install extensions (code CLI doesn't need admin)
@@ -199,19 +206,38 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
+# --- Copilot custom agents ------------------------------------
+Write-Host "
+[Copilot Agents]" -ForegroundColor White
+
+Copy-DotfileDir 
+    -Source (Join-Path $RepoRoot 'agents') 
+    -Dest   (Join-Path $env:USERPROFILE '.copilot\agents')
+
+# --- Templates -----------------------------------------------
+Write-Host "
+[Templates]" -ForegroundColor White
+
+Copy-DotfileDir 
+    -Source (Join-Path $RepoRoot 'templates') 
+    -Dest   (Join-Path $env:USERPROFILE '.dotfiles\templates')
+
 # --- Windows Terminal ----------------------------------------
-Write-Host "`n[Windows Terminal]" -ForegroundColor White
+Write-Host "
+[Windows Terminal]" -ForegroundColor White
 
 $wtSettingsDir = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState'
 if (Test-Path $wtSettingsDir) {
-    Copy-Dotfile `
-        -Source (Join-Path $RepoRoot 'windows\terminal\settings.json') `
+    Copy-Dotfile 
+        -Source (Join-Path $RepoRoot 'windows\terminal\settings.json') 
         -Dest   (Join-Path $wtSettingsDir 'settings.json')
 } else {
     Write-Skip "Windows Terminal not found — skipping"
 }
 
 # --- Done ----------------------------------------------------
-Write-Host "`nInstall complete." -ForegroundColor Green
+Write-Host "
+Install complete." -ForegroundColor Green
 Write-Host "NOTE: This is a copy-based install. Re-run this script after pulling repo changes."
-Write-Host "Restart your shell for all changes to take effect.`n"
+Write-Host "Restart your shell for all changes to take effect.
+"

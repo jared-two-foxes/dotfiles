@@ -86,7 +86,8 @@ function Copy-MachineProfile {
 }
 
 # --- Check for symlink capability ----------------------------
-Write-Host "`nChecking symlink capability..." -ForegroundColor White
+Write-Host "
+Checking symlink capability..." -ForegroundColor White
 $testLink = Join-Path $env:TEMP 'dotfiles_symlink_test'
 try {
     New-Item -ItemType SymbolicLink -Path $testLink -Target $PSCommandPath -Force | Out-Null
@@ -99,77 +100,84 @@ try {
 Write-Ok "Symlinks available"
 
 # --- Git -----------------------------------------------------
-Write-Host "`n[Git]" -ForegroundColor White
+Write-Host "
+[Git]" -ForegroundColor White
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\git\.gitconfig') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\git\.gitconfig') 
     -Link   (Join-Path $env:USERPROFILE '.gitconfig')
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\git\.gitignore_global') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\git\.gitignore_global') 
     -Link   (Join-Path $env:USERPROFILE '.gitignore_global')
 
-Copy-MachineProfile `
-    -File '.gitconfig.local' `
+Copy-MachineProfile 
+    -File '.gitconfig.local' 
     -Dest (Join-Path $env:USERPROFILE '.gitconfig.local')
 
 # --- Neovim --------------------------------------------------
-Write-Host "`n[Neovim]" -ForegroundColor White
+Write-Host "
+[Neovim]" -ForegroundColor White
 
 $nvimConfigDir = Join-Path $env:LOCALAPPDATA 'nvim'
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\nvim') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\nvim') 
     -Link   $nvimConfigDir
 
 # --- Vim -----------------------------------------------------
-Write-Host "`n[Vim]" -ForegroundColor White
+Write-Host "
+[Vim]" -ForegroundColor White
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\vim\.vimrc') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\vim\.vimrc') 
     -Link   (Join-Path $env:USERPROFILE '.vimrc')
 
 # --- EditorConfig --------------------------------------------
-Write-Host "`n[EditorConfig]" -ForegroundColor White
+Write-Host "
+[EditorConfig]" -ForegroundColor White
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') 
     -Link   (Join-Path $env:USERPROFILE '.editorconfig')
 
 # --- Starship ------------------------------------------------
-Write-Host "`n[Starship]" -ForegroundColor White
+Write-Host "
+[Starship]" -ForegroundColor White
 
 $starshipConfigDir = Join-Path $env:USERPROFILE '.config'
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'shared\starship\starship.toml') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'shared\starship\starship.toml') 
     -Link   (Join-Path $starshipConfigDir 'starship.toml')
 
 # --- PowerShell profile --------------------------------------
-Write-Host "`n[PowerShell]" -ForegroundColor White
+Write-Host "
+[PowerShell]" -ForegroundColor White
 
 # Determine the PowerShell profile directory
 $psProfileDir = Split-Path $PROFILE
 $psProfileTarget = Join-Path $RepoRoot 'windows\powershell\Microsoft.PowerShell_profile.ps1'
 
-New-Symlink `
-    -Target $psProfileTarget `
+New-Symlink 
+    -Target $psProfileTarget 
     -Link   $PROFILE
 
 # Symlink the modules directory alongside the profile
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'windows\powershell\modules') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'windows\powershell\modules') 
     -Link   (Join-Path $psProfileDir 'modules')
 
-Copy-MachineProfile `
-    -File 'profile.local.ps1' `
+Copy-MachineProfile 
+    -File 'profile.local.ps1' 
     -Dest (Join-Path $psProfileDir 'profile.local.ps1')
 
 # --- VS Code -------------------------------------------------
-Write-Host "`n[VS Code]" -ForegroundColor White
+Write-Host "
+[VS Code]" -ForegroundColor White
 
 $vsCodeUserDir = Join-Path $env:APPDATA 'Code\User'
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'windows\vscode\settings.json') `
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'windows\vscode\settings.json') 
     -Link   (Join-Path $vsCodeUserDir 'settings.json')
 
 # Install extensions
@@ -188,18 +196,37 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
+# --- Copilot custom agents ------------------------------------
+Write-Host "
+[Copilot Agents]" -ForegroundColor White
+
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'agents') 
+    -Link   (Join-Path $env:USERPROFILE '.copilot\agents')
+
+# --- Templates -----------------------------------------------
+Write-Host "
+[Templates]" -ForegroundColor White
+
+New-Symlink 
+    -Target (Join-Path $RepoRoot 'templates') 
+    -Link   (Join-Path $env:USERPROFILE '.dotfiles\templates')
+
 # --- Windows Terminal ----------------------------------------
-Write-Host "`n[Windows Terminal]" -ForegroundColor White
+Write-Host "
+[Windows Terminal]" -ForegroundColor White
 
 $wtSettingsDir = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState'
 if (Test-Path $wtSettingsDir) {
-    New-Symlink `
-        -Target (Join-Path $RepoRoot 'windows\terminal\settings.json') `
+    New-Symlink 
+        -Target (Join-Path $RepoRoot 'windows\terminal\settings.json') 
         -Link   (Join-Path $wtSettingsDir 'settings.json')
 } else {
     Write-Skip "Windows Terminal not found — skipping"
 }
 
 # --- Done ----------------------------------------------------
-Write-Host "`nInstall complete." -ForegroundColor Green
-Write-Host "Restart your shell for all changes to take effect.`n"
+Write-Host "
+Install complete." -ForegroundColor Green
+Write-Host "Restart your shell for all changes to take effect.
+"
