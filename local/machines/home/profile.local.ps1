@@ -11,5 +11,8 @@
 # $localBin = 'C:\tools\bin'
 # if (Test-Path $localBin) { $env:PATH = "$localBin;$env:PATH" }
 
+# --- Knowledge base root (Librarian / Lorekeeper agents) ------
+$env:VAULT_ROOT = 'C:\Users\iapet\knowledge\vault'
+
 # --- Personal aliases / functions ----------------------------
 # function proj { Set-Location 'C:\Users\you\projects' }

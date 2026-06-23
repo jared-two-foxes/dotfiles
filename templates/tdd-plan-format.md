@@ -45,33 +45,35 @@ concerns.
 
 ## Acceptance Criteria source marker
 
-Immediately below the ## Acceptance Criteria heading, Planner records
-whether the criteria came rom ticket (extracted verbatim/normalized
-from an explicit AC or Definition-of-Done section) or were derived
-(inferred from a vaguer description). Derived criteria must be confirmed
-by the user before Planner writes the file.
-
-## Appended by Tester
-
-After writing failing tests, Tester appends:
-
-\\\markdown
-## Test Files
-- [path] — covers: [AC numbers or short description]
-(list all test files created/modified)
-\\\
+Immediately below the ## Acceptance Criteria heading, Planner records the
+source as ticket. Planner is single-shot and does not derive acceptance
+criteria from vague input — if the source has no explicit AC or
+Definition-of-Done section, Planner fails fast instead of writing a plan.
+Run the Interrogator agent first to surface edge cases and open questions
+from a ticket/description before adding explicit acceptance criteria.
 
 ## Rules
 
-- Planner is the only agent that may derive acceptance criteria from
-  vague input — and only with user confirmation.
+- Planner never derives acceptance criteria from vague input — it fails
+  fast and asks for an explicit AC/DoD section instead.
+- Edge cases may originate from .updated-plan.md (written by the
+  Interrogator agent — see templates/updated-plan-format.md) as well as
+  from the explicit acceptance criteria.
 - Tester and Validator must not proceed without an ## Acceptance
-  Criteria section containing at least one item. If .tdd-plan.md is
-  missing or the section is empty, they stop and tell the user to run
-  Planner (or supply explicit criteria directly).
+  Criteria section containing at least one item. If none is available
+  in the prompt context or in .tdd-plan.md, they stop and tell the user
+  to run Planner (or supply explicit criteria directly).
 - Implementor treats ## Implementation Plan as guardrails: significant
   deviation should be flagged to the user, not silently done.
 - Reviewer uses ## Implementation Plan and ## Edge Cases to check for
   scope creep and missed cases.
 - This file is overwritten by Planner on each new planning pass — it
   reflects the current ticket/task, not a running history.
+
+## Context Injection
+
+In orchestrated environments, agents receive .tdd-plan.md content as
+injected context in the prompt rather than reading the file directly.
+The .tdd-plan.md file on disk remains the canonical persistence layer
+for human reference and non-orchestrated use. Both paths must converge
+on the same format.

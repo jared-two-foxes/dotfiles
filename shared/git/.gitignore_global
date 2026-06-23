@@ -53,3 +53,5 @@ venv/
 !.env.example
 *.pem
 *.key
+
+**/.claude/settings.local.json

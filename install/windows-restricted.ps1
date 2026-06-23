@@ -101,20 +101,144 @@ function Copy-Template {
     Write-Ok "Created $Dest from template"
 }
 
+function Test-WingetPackageInstalled {
+    param([string]$Id)
+    winget list --id $Id -e --accept-source-agreements 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+function Install-WingetPackage {
+    param(
+        [string]$Id,       # winget package identifier
+        [string]$Name,     # Display name for log output
+        [string]$Scope,    # Optional: 'user' or 'machine'
+        [string]$Override, # Optional: installer-specific override args (e.g. VS Build Tools workloads)
+        [string]$Command   # Optional: CLI command to check first (any installed version counts — no version matching yet)
+    )
+    if ($Command -and (Get-Command $Command -ErrorAction SilentlyContinue)) {
+        Write-Skip "$Name already installed ($Command found on PATH)"
+        return
+    }
+
+    if (Test-WingetPackageInstalled -Id $Id) {
+        Write-Skip "$Name already installed"
+        return
+    }
+
+    Write-Step "Installing $Name..."
+    $wingetArgs = @('install', '--id', $Id, '-e', '--silent', '--accept-package-agreements', '--accept-source-agreements')
+    if ($Scope)    { $wingetArgs += @('--scope', $Scope) }
+    if ($Override) { $wingetArgs += @('--override', $Override) }
+
+    $proc = Start-Process winget -ArgumentList $wingetArgs -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -eq 0) {
+        Write-Ok "$Name"
+    } else {
+        Write-Skip "$Name (winget exit code $($proc.ExitCode); some packages don't support user scope without admin)"
+    }
+}
+
+function Install-NerdFont {
+    param(
+        [string]$ReleaseAsset = 'CascadiaCode',             # nerd-fonts release zip name
+        [string]$FilePrefix   = 'CaskaydiaCoveNerdFont-'    # ttf filename prefix to install (non-Mono variant)
+    )
+    $userFontsDir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+    if (Test-Path (Join-Path $userFontsDir "${FilePrefix}Regular.ttf")) {
+        Write-Skip "CaskaydiaCove Nerd Font already installed"
+        return
+    }
+
+    Write-Step "Downloading CaskaydiaCove Nerd Font..."
+    $zipPath    = Join-Path $env:TEMP "$ReleaseAsset.zip"
+    $extractDir = Join-Path $env:TEMP "$ReleaseAsset-NF"
+    try {
+        Invoke-WebRequest -Uri "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/$ReleaseAsset.zip" -OutFile $zipPath -UseBasicParsing
+    } catch {
+        Write-Skip "Could not download Nerd Font (no network?) — skipping"
+        return
+    }
+
+    if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+    New-Item -ItemType Directory -Path $userFontsDir -Force | Out-Null
+
+    $shell       = New-Object -ComObject Shell.Application
+    $fontsFolder = $shell.Namespace(0x14)
+    $fontFiles   = Get-ChildItem $extractDir -Filter "$FilePrefix*.ttf"
+    foreach ($f in $fontFiles) {
+        Copy-Item $f.FullName -Destination $userFontsDir -Force
+        $fontsFolder.CopyHere($f.FullName, 0x10)
+    }
+
+    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+    Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Ok "Installed $($fontFiles.Count) CaskaydiaCove Nerd Font files"
+}
+
+# --- Applications ----------------------------------------------
+Write-Host "
+[Applications]" -ForegroundColor White
+
+if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Skip "winget not found — skipping application installs"
+} else {
+    Install-WingetPackage -Id 'Git.Git'                    -Name 'Git'           -Scope 'user' -Command 'git'
+    Install-WingetPackage -Id 'Python.Python.3.13'         -Name 'Python'        -Scope 'user' -Command 'python'
+    Install-WingetPackage -Id 'Rustlang.Rustup'            -Name 'Rust (rustup)' -Scope 'user' -Command 'rustc'
+    Install-WingetPackage -Id 'Neovim.Neovim'              -Name 'Neovim'        -Scope 'user' -Command 'nvim'
+    Install-WingetPackage -Id 'Microsoft.VisualStudioCode' -Name 'VS Code'       -Scope 'user' -Command 'code'
+    Install-WingetPackage `
+        -Id       'Microsoft.VisualStudio.2022.BuildTools' `
+        -Name     'Visual Studio Build Tools (C++)' `
+        -Scope    'user' `
+        -Override '--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended'
+
+    # Build tooling
+    Install-WingetPackage -Id 'Kitware.CMake'    -Name 'CMake'  -Scope 'user' -Command 'cmake'
+    Install-WingetPackage -Id 'Ninja-build.Ninja' -Name 'Ninja' -Scope 'user' -Command 'ninja'
+
+    # Shell / terminal
+    Install-WingetPackage -Id 'Starship.Starship'         -Name 'Starship'         -Scope 'user' -Command 'starship'
+    Install-WingetPackage -Id 'Microsoft.WindowsTerminal' -Name 'Windows Terminal' -Scope 'user' -Command 'wt'
+
+    # CLI tools
+    Install-WingetPackage -Id 'BurntSushi.ripgrep.MSVC' -Name 'ripgrep' -Scope 'user' -Command 'rg'
+    Install-WingetPackage -Id 'junegunn.fzf'            -Name 'fzf'     -Scope 'user' -Command 'fzf'
+    Install-WingetPackage -Id 'sharkdp.fd'              -Name 'fd'      -Scope 'user' -Command 'fd'
+    Install-WingetPackage -Id 'jqlang.jq'               -Name 'jq'      -Scope 'user' -Command 'jq'
+    Install-WingetPackage -Id 'JesseDuffield.lazygit'   -Name 'lazygit' -Scope 'user' -Command 'lazygit'
+
+    # Containers / Linux
+    Install-WingetPackage -Id 'Docker.DockerDesktop' -Name 'Docker Desktop' -Scope 'user' -Command 'docker'
+    Install-WingetPackage -Id 'Microsoft.WSL'        -Name 'WSL'            -Scope 'user' -Command 'wsl'
+
+    # AI agent tools
+    Install-WingetPackage -Id 'Anthropic.Claude'    -Name 'Claude (desktop)'   -Scope 'user'
+    Install-WingetPackage -Id 'GitHub.Copilot'      -Name 'GitHub Copilot CLI' -Scope 'user'
+    Install-WingetPackage -Id 'SST.OpenCodeDesktop' -Name 'OpenCode'          -Scope 'user' -Command 'opencode'
+}
+
+# --- Fonts -------------------------------------------------------
+Write-Host "
+[Fonts]" -ForegroundColor White
+
+Install-NerdFont
+
 # --- Git -----------------------------------------------------
 Write-Host "
 [Git]" -ForegroundColor White
 
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'shared\git\.gitconfig') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'shared\git\.gitconfig') `
     -Dest   (Join-Path $env:USERPROFILE '.gitconfig')
 
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'shared\git\.gitignore_global') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'shared\git\.gitignore_global') `
     -Dest   (Join-Path $env:USERPROFILE '.gitignore_global')
 
-Copy-MachineProfile 
-    -File '.gitconfig.local' 
+Copy-MachineProfile `
+    -File '.gitconfig.local' `
     -Dest (Join-Path $env:USERPROFILE '.gitconfig.local')
 
 # --- Neovim --------------------------------------------------
@@ -122,24 +246,24 @@ Write-Host "
 [Neovim]" -ForegroundColor White
 
 $nvimConfigDir = Join-Path $env:LOCALAPPDATA 'nvim'
-Copy-DotfileDir 
-    -Source (Join-Path $RepoRoot 'shared\nvim') 
+Copy-DotfileDir `
+    -Source (Join-Path $RepoRoot 'shared\nvim') `
     -Dest   $nvimConfigDir
 
 # --- Vim -----------------------------------------------------
 Write-Host "
 [Vim]" -ForegroundColor White
 
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'shared\vim\.vimrc') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'shared\vim\.vimrc') `
     -Dest   (Join-Path $env:USERPROFILE '.vimrc')
 
 # --- EditorConfig --------------------------------------------
 Write-Host "
 [EditorConfig]" -ForegroundColor White
 
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'shared\editorconfig\.editorconfig') `
     -Dest   (Join-Path $env:USERPROFILE '.editorconfig')
 
 # --- Starship ------------------------------------------------
@@ -147,8 +271,8 @@ Write-Host "
 [Starship]" -ForegroundColor White
 
 $starshipConfigDir = Join-Path $env:USERPROFILE '.config'
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'shared\starship\starship.toml') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'shared\starship\starship.toml') `
     -Dest   (Join-Path $starshipConfigDir 'starship.toml')
 
 # Remind user where to place starship.exe
@@ -166,18 +290,18 @@ Write-Host "
 $psProfileDir    = Split-Path $PROFILE
 $psSourceDir     = Join-Path $RepoRoot 'windows\powershell'
 
-Copy-Dotfile 
-    -Source (Join-Path $psSourceDir 'Microsoft.PowerShell_profile.ps1') 
+Copy-Dotfile `
+    -Source (Join-Path $psSourceDir 'Microsoft.PowerShell_profile.ps1') `
     -Dest   $PROFILE
 
 # Copy all modules
 $modulesTarget = Join-Path $psProfileDir 'modules'
-Copy-DotfileDir 
-    -Source (Join-Path $psSourceDir 'modules') 
+Copy-DotfileDir `
+    -Source (Join-Path $psSourceDir 'modules') `
     -Dest   $modulesTarget
 
-Copy-MachineProfile 
-    -File 'profile.local.ps1' 
+Copy-MachineProfile `
+    -File 'profile.local.ps1' `
     -Dest (Join-Path $psProfileDir 'profile.local.ps1')
 
 # --- VS Code -------------------------------------------------
@@ -186,8 +310,8 @@ Write-Host "
 
 $vsCodeUserDir = Join-Path $env:APPDATA 'Code\User'
 
-Copy-Dotfile 
-    -Source (Join-Path $RepoRoot 'windows\vscode\settings.json') 
+Copy-Dotfile `
+    -Source (Join-Path $RepoRoot 'windows\vscode\settings.json') `
     -Dest   (Join-Path $vsCodeUserDir 'settings.json')
 
 # Install extensions (code CLI doesn't need admin)
@@ -210,17 +334,46 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
 Write-Host "
 [Copilot Agents]" -ForegroundColor White
 
-Copy-DotfileDir 
-    -Source (Join-Path $RepoRoot 'agents') 
-    -Dest   (Join-Path $env:USERPROFILE '.copilot\agents')
+Copy-DotfileDir `
+    -Source (Join-Path $RepoRoot 'agents') `
+    -Dest   (Join-Path $vsCodeUserDir 'agents')
+
+# --- Copilot prompts -----------------------------------------
+Write-Host "
+[Copilot Prompts]" -ForegroundColor White
+
+Copy-DotfileDir `
+    -Source (Join-Path $RepoRoot 'prompts') `
+    -Dest   (Join-Path $vsCodeUserDir 'prompts')
 
 # --- Templates -----------------------------------------------
 Write-Host "
 [Templates]" -ForegroundColor White
 
-Copy-DotfileDir 
-    -Source (Join-Path $RepoRoot 'templates') 
+Copy-DotfileDir `
+    -Source (Join-Path $RepoRoot 'templates') `
     -Dest   (Join-Path $env:USERPROFILE '.dotfiles\templates')
+
+# --- bin -------------------------------------------------------
+Write-Host "
+[bin]" -ForegroundColor White
+
+Copy-DotfileDir `
+    -Source (Join-Path $RepoRoot 'bin') `
+    -Dest   (Join-Path $env:USERPROFILE 'bin')
+
+$binRequirements = Join-Path $RepoRoot 'bin\requirements.txt'
+if (Get-Command python -ErrorAction SilentlyContinue) {
+    Write-Step "Installing Python dependencies for bin/ scripts..."
+    python -m pip install --user -r $binRequirements --quiet
+    if ($LASTEXITCODE -eq 0) {
+        Write-Ok "bin/ Python dependencies"
+    } else {
+        Write-Warn "bin/ Python dependencies (pip exit code $LASTEXITCODE)"
+    }
+} else {
+    Write-Skip "python not found on PATH - skipping bin/ Python dependencies"
+}
 
 # --- Windows Terminal ----------------------------------------
 Write-Host "
@@ -228,8 +381,8 @@ Write-Host "
 
 $wtSettingsDir = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState'
 if (Test-Path $wtSettingsDir) {
-    Copy-Dotfile 
-        -Source (Join-Path $RepoRoot 'windows\terminal\settings.json') 
+    Copy-Dotfile `
+        -Source (Join-Path $RepoRoot 'windows\terminal\settings.json') `
         -Dest   (Join-Path $wtSettingsDir 'settings.json')
 } else {
     Write-Skip "Windows Terminal not found — skipping"

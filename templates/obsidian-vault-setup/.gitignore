@@ -1,0 +1,7 @@
+# Obsidian workspace state — machine-specific, do not commit
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache
+
+# Session note — transient, never committed
+.session-note.md
