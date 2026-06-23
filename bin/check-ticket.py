@@ -241,6 +241,67 @@ def extract_plan_commands(plan_content: str) -> list[list[str]]:
     return commands
 
 
+COMMAND_OUTPUT_MAX_LINES = 100
+
+
+def truncate_command_output(output: str, max_lines: int = COMMAND_OUTPUT_MAX_LINES) -> str:
+    """
+    Cap output to its last `max_lines` lines - a position-based fallback
+    for when no subcommand-specific pattern applies (see
+    summarize_command_output) or matched nothing. Used directly for a
+    clean pass with no signal lines to extract, where "no output of
+    note" is itself the evidence.
+    """
+    lines = output.splitlines()
+    if len(lines) <= max_lines:
+        return output
+    omitted = len(lines) - max_lines
+    return f"(omitted {omitted} earlier lines)\n" + "\n".join(lines[-max_lines:])
+
+
+# Patterns pull out the lines that actually carry evidence for each
+# subcommand, rather than assuming the signal is concentrated near the
+# end of the output - true for `cargo test`'s pass/fail summary, but not
+# for `clippy`/`build`/`check` (errors and warnings appear as soon as
+# rustc finds them, anywhere in the output) or `fmt --check` (one "Diff
+# in <file>" line per misformatted file, in directory-walk order).
+_TEST_SIGNAL_RE = re.compile(r"FAILED|^test result:|panicked at|^---- ")
+_COMPILE_SIGNAL_RE = re.compile(r"^(error|warning)(:|\[)|^\s*-->")
+_FMT_SIGNAL_RE = re.compile(r"^Diff in")
+
+COMMAND_SIGNAL_PATTERNS = {
+    "test": _TEST_SIGNAL_RE,
+    "clippy": _COMPILE_SIGNAL_RE,
+    "build": _COMPILE_SIGNAL_RE,
+    "check": _COMPILE_SIGNAL_RE,
+    "fmt": _FMT_SIGNAL_RE,
+}
+
+
+def summarize_command_output(subcommand: str, output: str) -> str:
+    """
+    Extract just the evidence-bearing lines for `subcommand`'s output
+    before it's embedded in the validator's prompt - a plain tail (see
+    truncate_command_output) would silently drop clippy/build/check
+    errors and fmt's per-file diffs that occur before the last
+    COMMAND_OUTPUT_MAX_LINES lines, since those subcommands don't
+    concentrate their signal at the end the way `cargo test` does.
+
+    Falls back to a tail truncation if there's no pattern for this
+    subcommand, or the pattern matched nothing - either a clean pass
+    with no error/warning/diff lines to report (itself valid evidence),
+    or output that didn't look like what was expected, in which case the
+    raw tail is still better than nothing.
+    """
+    pattern = COMMAND_SIGNAL_PATTERNS.get(subcommand)
+    if pattern is None:
+        return truncate_command_output(output)
+    matched = [line for line in output.splitlines() if pattern.search(line)]
+    if not matched:
+        return truncate_command_output(output)
+    return truncate_command_output("\n".join(matched))
+
+
 def gather_build_status(plan_content: str) -> str:
     commands = extract_plan_commands(plan_content)
     if not commands:
@@ -252,6 +313,7 @@ def gather_build_status(plan_content: str) -> str:
         print(f"-- Running '{rendered}' for validation evidence ...", flush=True)
         result = subprocess.run(command_tokens, capture_output=True, text=True, check=False)
         output = (result.stdout + result.stderr).strip() or "(no output)"
+        output = summarize_command_output(command_tokens[1], output)
         blocks.append(
             f"### `{rendered}` (exit code {result.returncode})\n```\n{output}\n```"
         )
@@ -304,9 +366,14 @@ def build_planner_prompt(ticket_content: str) -> str:
         f"This is a clean run: {PLAN_FILE} and {UPDATED_PLAN_FILE} do not "
         f"exist yet - there is no prior plan or interrogation output to "
         f"check for, so don't spend a tool call confirming that.\n\n"
-        f"Use read_file/list_dir for any other files you need to inspect "
-        f"before planning. Produce a TDD plan in the exact format from "
-        f"Step 4 above. Your final response (no further tool calls) must "
+        f"Use read_file/list_dir/search_files for any other files you need "
+        f"to inspect before planning - but only files you have a concrete "
+        f"reason to need, not speculative browsing; every tool call you "
+        f"make gets resent in full on every subsequent turn, so prefer one "
+        f"targeted search_files call over open-ended directory browsing "
+        f"when you're looking for something specific. Produce a TDD plan "
+        f"in the exact format from Step 4 above. Your final response (no "
+        f"further tool calls) must "
         f"be exactly that plan text - the caller writes it to {PLAN_FILE} "
         f"itself, so do not call write_file and do not add any chat "
         f"header or commentary around the plan."
@@ -340,7 +407,12 @@ def build_validator_prompt(
         f"criteria name (e.g. `cargo test`), captured just now - you have "
         f"no way to run these yourself, so this is the evidence for any "
         f"command-based criteria:\n\n{build_status_content}\n\n"
-        f"Use read_file/list_dir for anything else you need. Check whether "
+        f"Use read_file/list_dir/search_files for anything else you need - "
+        f"when hunting for evidence of a criterion across the codebase, "
+        f"prefer one targeted search_files call over list_dir-then-read_file "
+        f"fishing; every tool call gets resent in full on every subsequent "
+        f"turn, so fewer, more targeted calls keep this cheaper without "
+        f"costing you any evidence. Check whether "
         f"the acceptance criteria are fully satisfied, per the steps and "
         f"rules in your instructions. Treat any criterion with no file "
         f"evidence and no command output above as UNKNOWN rather than "
