@@ -52,6 +52,7 @@ import tomllib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ai_client  # noqa: E402
 from ai_client import AIError, DEFAULT_MODEL, run_with_tools  # noqa: E402
 from render import render_markdown  # noqa: E402
 import tools  # noqa: E402
@@ -101,6 +102,7 @@ DEFAULT_COMMANDS = {
 
 def die(msg: str) -> None:
     print(f"error: {msg}", file=sys.stderr)
+    print(f"-- Token usage so far: {ai_client.usage}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -370,6 +372,7 @@ def main() -> None:
     result = run_command(commands["test_cmd"], "initial test run")
     if result.returncode == 0:
         print("\n-- Tests already pass against existing code. Success.", flush=True)
+        print(f"-- Token usage: {ai_client.usage}", flush=True)
         return
 
     # ── Step 7: Implement (test files write-protected) ────────────────────
@@ -422,6 +425,7 @@ def main() -> None:
 
     # ── Step 11: Success ─────────────────────────────────────────────────────
     print("\n-- Implementation complete, tests pass, review approved. Success.", flush=True)
+    print(f"-- Token usage: {ai_client.usage}", flush=True)
 
 
 if __name__ == "__main__":

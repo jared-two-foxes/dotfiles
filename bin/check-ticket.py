@@ -44,6 +44,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ai_client  # noqa: E402
 from ai_client import AIError, DEFAULT_MODEL, run_with_tools  # noqa: E402
 from render import render_markdown  # noqa: E402
 import tools  # noqa: E402
@@ -80,6 +81,7 @@ AUTO_PREAMBLE = (
 
 def die(msg: str) -> None:
     print(f"error: {msg}", file=sys.stderr)
+    print(f"-- Token usage so far: {ai_client.usage}", file=sys.stderr)
     sys.exit(1)
 
 
@@ -433,7 +435,7 @@ def main() -> None:
         die(str(e))
 
     render_markdown(result.text)
-    print("\n-- Done.", flush=True)
+    print(f"\n-- Done. Token usage: {ai_client.usage}", flush=True)
 
 
 if __name__ == "__main__":

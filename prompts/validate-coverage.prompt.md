@@ -82,15 +82,23 @@ For each acceptance criterion:
 
 ## Final answer
 
-Give your final text answer (no more tool calls) starting with:
+Step 1 and Step 2 are still required - you must do the reading and the
+per-criterion mapping to reach a correct verdict. But your final text
+answer (no more tool calls) is just the verdict, not that work shown.
+Start with:
 
 > **🤖 Coverage Validator**
 
-Then report:
-- What "current state" was treated as (Step 1)
-- Acceptance criteria table: criterion → PASS/FAIL/UNKNOWN → evidence
+Then report only:
 - Verdict: APPROVED, REVISIONS REQUIRED, or INCOMPLETE REVIEW
-- If INCOMPLETE REVIEW or any UNKNOWN: which files/context you'd need
+- If REVISIONS REQUIRED: list only the FAILing criteria, one line each
+  (criterion - why it fails - file/evidence pointer)
+- If INCOMPLETE REVIEW: list only the UNKNOWN criteria and which
+  files/context you'd need to resolve them
+
+Omit PASS criteria and the Step 1 "what current state means" narration
+from the final answer entirely - they were necessary work, not necessary
+output.
 
 ## Rules
 
