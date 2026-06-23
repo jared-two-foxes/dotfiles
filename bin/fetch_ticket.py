@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Fetch a Linear ticket by identifier, e.g. ./fetch_linear_ticket.py SA-456 [output.md]"""
+"""
+Fetch a Linear ticket by identifier and print the rendered markdown to
+stdout, e.g. ./fetch_ticket.py SA-456
+
+Prints to stdout rather than writing a file itself so the caller (see
+the TICKET_SCRIPT handling in check-ticket.py / tdd-pipeline.py) can
+write the result via tools.write_file - the same tool layer used for
+every other file write in the pipeline, instead of this script doing
+its own filesystem I/O. Any TICKET_SCRIPT swapped in for this one
+should follow the same contract: ticket-id arg in, rendered markdown on
+stdout, nothing written to disk.
+"""
 
 import sys
 import json
@@ -82,16 +93,14 @@ def render(data: dict) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) not in (2, 3):
-        print(f"Usage: {sys.argv[0]} <ticket-id> [output-file]  (e.g. SA-456 .ticket.md)")
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} <ticket-id>  (e.g. SA-456)", file=sys.stderr)
         sys.exit(1)
     identifier = sys.argv[1]
-    output_path = Path(sys.argv[2]) if len(sys.argv) == 3 else Path(".ticket.md")
     try:
         data = fetch_ticket(identifier)
         content = render(data)
-        output_path.write_text(content, encoding="utf-8")
-        print(f"Written to {output_path}")
+        sys.stdout.write(content)
     except urllib.error.HTTPError as e:
         print(f"HTTP {e.code}: {e.read().decode()}", file=sys.stderr)
         sys.exit(1)

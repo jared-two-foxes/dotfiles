@@ -203,6 +203,37 @@ def list_dir(path: str = ".") -> str:
     return "\n".join(entries) if entries else "(empty)"
 
 
+def summarize_tool_call(name: str, args: dict) -> str:
+    """
+    One-line human-readable summary of a tool call for console logging -
+    the raw name(args) form is noisy (full file contents for write_file,
+    repeated path/range tuples) and not what anyone watching the run
+    actually wants to see.
+    """
+    path = args.get("path")
+    if name == "read_file":
+        if path is None:
+            return "Read file"
+        start, end = args.get("start_line"), args.get("end_line")
+        if start is None and end is None:
+            return f"Read {path}"
+        if start is not None and start < 0:
+            return f"Read {path} (last {-start} lines)"
+        return f"Read {path} (lines {start or 1}-{end or '?'})"
+    if name == "write_file":
+        return f"Write {path}" if path else "Write file"
+    if name == "list_dir":
+        return f"List {path or '.'}"
+    if name == "search_files":
+        pattern = args.get("pattern", "")
+        return f"Search for {pattern!r} in {args.get('path', '.')}"
+    if name == "ask_user_prompt":
+        return "Ask user a clarifying question"
+    if name == "run_command":
+        return f"Attempt to run command: {args.get('command', '')}"
+    return f"{name}({args})"
+
+
 # ---------------------------------------------------------------------------
 # OpenAI-style tool schemas
 # ---------------------------------------------------------------------------

@@ -101,12 +101,17 @@ def run_prompt(prompt: str, label: str, model: str = DEFAULT_MODEL) -> AIResult:
     return AIResult(text=text)
 
 
+def _default_summarize_call(name: str, args: dict) -> str:
+    return f"{name}({args})"
+
+
 def run_with_tools(
     prompt: str,
     tools: list[dict],
     executor: Callable[[str, dict], str],
     label: str,
     model: str = DEFAULT_MODEL,
+    summarize_call: Callable[[str, dict], str] = _default_summarize_call,
 ) -> AIResult:
     """
     Send `prompt` to opencode zen with `tools` available. Whenever the
@@ -115,6 +120,11 @@ def run_with_tools(
     result back as a tool message, then send another request - repeating
     until a response comes back with no tool_calls, which is treated as
     the final answer.
+
+    `summarize_call` turns (name, args) into the one-line console log
+    shown for each call - defaults to the raw name(args) form, but
+    callers using tools.py should pass tools.summarize_tool_call so the
+    log reads "Read foo.rs" instead of "read_file({'path': 'foo.rs'})".
 
     No turn cap: this is turn-taking inherent to function-calling, not a
     retry loop - each turn is the model reacting to real tool output, not
@@ -150,7 +160,7 @@ def run_with_tools(
                 args = json.loads(function.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {}
-            print(f"   tool call: {name}({args})", flush=True)
+            print(f"   {summarize_call(name, args)}", flush=True)
             result_text = executor(name, args)
             messages.append({
                 "role": "tool",

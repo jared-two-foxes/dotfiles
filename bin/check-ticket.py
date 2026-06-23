@@ -266,16 +266,24 @@ def clean_stale_state() -> None:
 
 
 def run_fetch(ticket_script: Path, ticket_id: str) -> None:
+    """
+    Runs the ticket script and writes its stdout via tools.write_file,
+    rather than letting the script write the file itself - this keeps
+    the ticket write on the same tool layer (path-confinement guard,
+    etc.) as every other file write in the pipeline.
+    """
     print(f"-- Fetching ticket {ticket_id} ...", flush=True)
     result = subprocess.run(
         [sys.executable, str(ticket_script), ticket_id],
+        capture_output=True,
+        text=True,
         check=False,
     )
     if result.returncode != 0:
-        die(f"Ticket fetch failed (exit {result.returncode}).")
-    if not TICKET_FILE.exists():
-        die(f"Fetch script completed but {TICKET_FILE} was not written.")
-    print(f"   Written -> {TICKET_FILE}", flush=True)
+        die(f"Ticket fetch failed (exit {result.returncode}): {result.stderr.strip()}")
+    if not result.stdout.strip():
+        die("Ticket fetch script produced no output on stdout.")
+    print(f"   {tools.write_file(str(TICKET_FILE), result.stdout)}", flush=True)
 
 
 def build_planner_prompt() -> str:
@@ -398,6 +406,7 @@ def main() -> None:
             tools.make_executor(preloaded_paths={str(TICKET_FILE)}),
             "plan",
             model=model,
+            summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
@@ -418,6 +427,7 @@ def main() -> None:
             tools.make_executor(allow_write=False, preloaded_paths=preloaded),
             "validate",
             model=model,
+            summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
