@@ -33,10 +33,11 @@ these tools; everything you produce, write with write_file.
 
 ## Step 1 - Load the plan
 
-Read `.tdd-plan.md` with `read_file`. Use its ## Acceptance Criteria and
+The TDD plan is provided directly in the prompt below - no need to
+`read_file` `.tdd-plan.md` again. Use its ## Acceptance Criteria and
 ## Edge Cases sections as what to test.
 
-- **If `.tdd-plan.md` doesn't exist:** stop. Do not derive your own
+- **If no plan content appears below:** stop. Do not derive your own
   criteria. Return as your final answer:
 
   > **🤖 Tester**

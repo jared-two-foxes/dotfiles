@@ -32,13 +32,14 @@ read with these tools.
 
 ## Step 1 - Load context
 
-Read `.tdd-plan.md` for ## Source, ## Implementation Plan, and
-## Edge Cases. The caller's task prompt will name the files that were
-changed or created - read each of them in full.
+The TDD plan's ## Source, ## Implementation Plan, and ## Edge Cases are
+provided directly in the prompt below - no need to `read_file`
+`.tdd-plan.md` again. The caller's task prompt will name the files that
+were changed or created - read each of them in full.
 
-- **If `.tdd-plan.md` doesn't exist:** proceed, but note that scope-creep
-  checks (Step 2) are limited to general judgment without a plan to
-  check against.
+- **If no plan content appears below:** proceed, but note that
+  scope-creep checks (Step 2) are limited to general judgment without a
+  plan to check against.
 - **If no changed files are named or readable:** stop. Return as your
   final answer:
 

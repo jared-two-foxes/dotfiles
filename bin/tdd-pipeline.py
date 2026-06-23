@@ -39,21 +39,21 @@ Build/test commands are read from a project-local TOML config (see
 though the default commands and the prompts' assumptions lean Rust today.
 
 Usage:
-    tdd-pipeline <ticket-id> [--ticket-script <path>] [--model <model-id>]
-                 [--config <path>]
+    tdd-pipeline <ticket-id> [--model <model-id>] [--config <path>]
 """
 
 import argparse
-import os
 import shlex
 import subprocess
 import sys
 import tomllib
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 from ai_client import AIError, DEFAULT_MODEL, run_with_tools  # noqa: E402
+import fetch_ticket as ticket_source  # noqa: E402
 from render import render_markdown  # noqa: E402
 import tools  # noqa: E402
 
@@ -79,15 +79,13 @@ AUTO_PREAMBLE = (
     "best inference from the ticket context. Then produce the full TDD plan.\n\n"
 )
 
-# Plan only needs to read the ticket and write the plan - no need to
-# browse the rest of the workspace. ask_user_prompt is included so an
-# ambiguous ticket fails fast with a clear reason instead of the model
+# The ticket is embedded directly in the plan prompt and the plan text
+# is returned (not written by the model itself - see write_file_block in
+# main()), so the plan step never needs write access; read-only tools
+# cover browsing the rest of the workspace, and ask_user_prompt lets an
+# ambiguous ticket fail fast with a clear reason instead of the model
 # guessing or stalling.
-PLAN_TOOLS = [
-    tools.READ_FILE_SCHEMA,
-    tools.WRITE_FILE_SCHEMA,
-    tools.ASK_USER_PROMPT_SCHEMA,
-]
+PLAN_TOOLS = tools.READ_ONLY_TOOLS
 
 # Rust defaults, used only if no project-local config file is present.
 DEFAULT_COMMANDS = {
@@ -182,25 +180,20 @@ def find_verdict(text: str, tokens_by_priority: list[str]) -> str | None:
     return None
 
 
-def run_fetch(ticket_script: Path, ticket_id: str) -> None:
+def fetch_ticket_text(ticket_id: str) -> str:
     """
-    Runs the ticket script and writes its stdout via tools.write_file,
-    rather than letting the script write the file itself - this keeps
-    the ticket write on the same tool layer (path-confinement guard,
-    etc.) as every other file write in the pipeline.
+    Calls fetch_ticket.py's fetch_ticket()/render() directly and returns
+    the rendered markdown - no subprocess, no file I/O here. The caller
+    pipes the result through tools.write_file_block to persist it, and
+    passes the same in-memory string straight into the prompt builders
+    instead of re-reading it off disk.
     """
     print(f"-- Fetching ticket {ticket_id} ...", flush=True)
-    result = subprocess.run(
-        [sys.executable, str(ticket_script), ticket_id],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        die(f"Ticket fetch failed (exit {result.returncode}): {result.stderr.strip()}")
-    if not result.stdout.strip():
-        die("Ticket fetch script produced no output on stdout.")
-    print(f"   {tools.write_file(str(TICKET_FILE), result.stdout)}", flush=True)
+    try:
+        data = ticket_source.fetch_ticket(ticket_id)
+    except urllib.error.HTTPError as e:
+        die(f"Ticket fetch failed: HTTP {e.code}: {e.read().decode()}")
+    return ticket_source.render(data)
 
 
 # ---------------------------------------------------------------------------
@@ -208,57 +201,67 @@ def run_fetch(ticket_script: Path, ticket_id: str) -> None:
 # need to point the model at the right paths, not inline content.
 # ---------------------------------------------------------------------------
 
-def build_plan_prompt() -> str:
+def build_plan_prompt(ticket_text: str) -> str:
     instructions = load_prompt_body(PLAN_PROMPT_FILE)
     return (
         f"{instructions}\n\n---\n\n"
         f"{AUTO_PREAMBLE}"
-        f"Use read_file to read the ticket at {TICKET_FILE}. Produce a TDD "
-        f"plan in the exact format from Step 4 above, then use write_file "
-        f"to write it to {PLAN_FILE}. Once written, give a short final "
-        f"confirmation as your last response with no further tool calls - "
-        f"you do not need to repeat the plan's full text."
+        f"Here is the ticket ({TICKET_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{ticket_text}\n\n"
+        f"Use read_file/list_dir for any other files you need to inspect "
+        f"before planning. Produce a TDD plan in the exact format from "
+        f"Step 4 above. Your final response (no further tool calls) must "
+        f"be exactly that plan text - the caller writes it to {PLAN_FILE} "
+        f"itself, so do not call write_file and do not add any chat "
+        f"header or commentary around the plan."
     )
 
 
-def build_test_prompt() -> str:
+def build_test_prompt(plan_text: str) -> str:
     instructions = load_prompt_body(TEST_PROMPT_FILE)
     return (
         f"{instructions}\n\n---\n\n"
-        f"Write failing tests for the plan at {PLAN_FILE}."
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"Write failing tests for this plan."
     )
 
 
-def build_test_coverage_prompt(test_files: list[str]) -> str:
+def build_test_coverage_prompt(test_files: list[str], plan_text: str) -> str:
     instructions = load_prompt_body(TEST_COVERAGE_PROMPT_FILE)
     file_list = "\n".join(f"- {p}" for p in test_files)
     return (
         f"{instructions}\n\n---\n\n"
-        f"The plan is at {PLAN_FILE}. The following test files were just "
-        f"written and should be judged:\n{file_list}\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"The following test files were just written and should be "
+        f"judged:\n{file_list}\n\n"
         f"Judge whether these tests adequately encode the acceptance "
         f"criteria, per the steps and rules in your instructions."
     )
 
 
-def build_implement_prompt(test_files: list[str]) -> str:
+def build_implement_prompt(test_files: list[str], plan_text: str) -> str:
     instructions = load_prompt_body(IMPLEMENT_PROMPT_FILE)
     file_list = "\n".join(f"- {p}" for p in test_files)
     return (
         f"{instructions}\n\n---\n\n"
-        f"The plan is at {PLAN_FILE}. The following failing test files "
-        f"must be made to pass without modifying them:\n{file_list}\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"The following failing test files must be made to pass without "
+        f"modifying them:\n{file_list}\n\n"
         f"Implement the changes needed."
     )
 
 
-def build_review_prompt(changed_files: list[str]) -> str:
+def build_review_prompt(changed_files: list[str], plan_text: str) -> str:
     instructions = load_prompt_body(REVIEW_PROMPT_FILE)
     file_list = "\n".join(f"- {p}" for p in changed_files)
     return (
         f"{instructions}\n\n---\n\n"
-        f"The plan is at {PLAN_FILE}. The following files were changed or "
-        f"created:\n{file_list}\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"The following files were changed or created:\n{file_list}\n\n"
         f"Review these per the steps and rules in your instructions."
     )
 
@@ -276,12 +279,6 @@ def main() -> None:
     )
     parser.add_argument("ticket_id", help="Linear ticket ID, e.g. NEB-42")
     parser.add_argument(
-        "--ticket-script",
-        default=None,
-        help="Path to your Linear fetch script (default: $TICKET_SCRIPT or "
-             "fetch_ticket.py next to this script).",
-    )
-    parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
@@ -294,44 +291,36 @@ def main() -> None:
     args = parser.parse_args()
     model = args.model
 
-    ticket_script_path = (
-        Path(args.ticket_script)
-        if args.ticket_script
-        else Path(os.environ.get("TICKET_SCRIPT", SCRIPT_DIR / "fetch_ticket.py"))
-    )
-    if not ticket_script_path.exists():
-        die(
-            f"Ticket fetch script not found: {ticket_script_path}\n"
-            f"  Pass --ticket-script <path> or set the TICKET_SCRIPT env var."
-        )
-
     commands = load_pipeline_config(Path(args.config))
 
     # ── Step 1: Fetch ticket ────────────────────────────────────────────────
-    run_fetch(ticket_script_path, args.ticket_id)
+    ticket_text = fetch_ticket_text(args.ticket_id)
+    tools.write_file_block(str(TICKET_FILE))(ticket_text)
 
-    # ── Step 2: Plan (model reads ticket, writes plan, via tools) ─────────
+    # ── Step 2: Plan (ticket embedded in prompt; plan text returned) ──────
     try:
         result = run_with_tools(
-            build_plan_prompt(),
+            build_plan_prompt(ticket_text),
             PLAN_TOOLS,
-            tools.make_executor(),
+            tools.make_executor(allow_write=False, preloaded_paths={str(TICKET_FILE)}),
             "plan",
             model=model,
             summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
-    if not PLAN_FILE.exists():
-        die(f"Plan step finished but {PLAN_FILE} was not written.")
-    render_markdown(result.text)
-    print(f"   Plan written -> {PLAN_FILE}", flush=True)
+    if "## Acceptance Criteria" not in result.text:
+        render_markdown(result.text)
+        die("Planner did not produce a valid plan (see output above).")
+    print("-- Plan generated, writing to disk ...", flush=True)
+    plan_text = tools.write_file_block(str(PLAN_FILE))(result.text)
+    render_markdown(plan_text)
 
     # ── Step 3: Tests (model reads plan, writes test files, via tools) ────
     test_files: list[str] = []
     try:
         result = run_with_tools(
-            build_test_prompt(),
+            build_test_prompt(plan_text),
             tools.READ_WRITE_TOOLS,
             tools.make_executor(written_paths=test_files),
             "test",
@@ -352,7 +341,7 @@ def main() -> None:
     # ── Step 5: Gate - tests adequately encode the acceptance criteria ────
     try:
         coverage_result = run_with_tools(
-            build_test_coverage_prompt(test_files),
+            build_test_coverage_prompt(test_files, plan_text),
             tools.READ_ONLY_TOOLS,
             tools.make_executor(allow_write=False),
             "test-coverage",
@@ -378,7 +367,7 @@ def main() -> None:
     # ── Step 7: Implement (test files write-protected) ────────────────────
     try:
         result = run_with_tools(
-            build_implement_prompt(test_files),
+            build_implement_prompt(test_files, plan_text),
             tools.READ_WRITE_TOOLS,
             tools.make_executor(
                 written_paths=(changed_files := []), protected_paths=set(test_files)
@@ -409,7 +398,7 @@ def main() -> None:
     # ── Step 10: Gate - code review ─────────────────────────────────────────
     try:
         review_result = run_with_tools(
-            build_review_prompt(changed_files),
+            build_review_prompt(changed_files, plan_text),
             tools.READ_ONLY_TOOLS,
             tools.make_executor(allow_write=False),
             "review",

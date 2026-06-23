@@ -33,8 +33,9 @@ Paths are relative to the project root.
 
 ## Step 1 - Load the plan and the failing tests
 
-Read `.tdd-plan.md` with `read_file`. Treat its ## Implementation Plan
-as the set of files/components and approach to follow. Treat
+The TDD plan is provided directly in the prompt below - no need to
+`read_file` `.tdd-plan.md` again. Treat its ## Implementation Plan as
+the set of files/components and approach to follow. Treat
 ## Acceptance Criteria and ## Edge Cases as context for *why* - not
 something to re-derive or re-validate.
 
@@ -42,7 +43,7 @@ Locate and read the failing test files (the caller's task prompt will
 point you at them, or check near the plan's named files / use
 `list_dir`).
 
-- **If `.tdd-plan.md` doesn't exist:** stop. Return as your final answer:
+- **If no plan content appears below:** stop. Return as your final answer:
 
   > **🤖 Implementor**
   >

@@ -40,9 +40,13 @@ and `list_dir`.
 
 ## Step 0 - Load acceptance criteria
 
-Read `.tdd-plan.md` with `read_file` for its ## Acceptance Criteria.
+The ticket and the TDD plan (`.tdd-plan.md`) are provided directly in
+the prompt below - no need to `read_file` either of those again. Use its
+## Acceptance Criteria section. Only use `read_file`/`list_dir` for the
+evidence-gathering in Step 2, against everything else in the codebase.
 
-- **If `.tdd-plan.md` doesn't exist:** stop. Return as your final answer:
+- **If no plan content appears below:** stop. Return as your final
+  answer:
 
   > **🤖 Coverage Validator**
   >

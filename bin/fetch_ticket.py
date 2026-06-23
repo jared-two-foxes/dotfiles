@@ -3,13 +3,12 @@
 Fetch a Linear ticket by identifier and print the rendered markdown to
 stdout, e.g. ./fetch_ticket.py SA-456
 
-Prints to stdout rather than writing a file itself so the caller (see
-the TICKET_SCRIPT handling in check-ticket.py / tdd-pipeline.py) can
-write the result via tools.write_file - the same tool layer used for
-every other file write in the pipeline, instead of this script doing
-its own filesystem I/O. Any TICKET_SCRIPT swapped in for this one
-should follow the same contract: ticket-id arg in, rendered markdown on
-stdout, nothing written to disk.
+fetch_ticket() and render() are plain functions with no file I/O -
+check-ticket.py and tdd-pipeline.py import this module directly and
+call them rather than subprocessing this file, so the ticket content
+never touches disk except via tools.write_file_block in those scripts.
+This file's __main__ block is just a thin CLI wrapper around the same
+two functions, for manual/standalone use.
 """
 
 import sys

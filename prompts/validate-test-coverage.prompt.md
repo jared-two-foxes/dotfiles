@@ -38,12 +38,14 @@ tools.
 
 ## Step 0 - Load acceptance criteria and tests
 
-Read `.tdd-plan.md` for ## Acceptance Criteria. Locate the test files
-the Tester step wrote - check the plan's ## Implementation Plan section
-and nearby directories with `list_dir`/`read_file` to find them; the
-caller may also name the exact test file paths in your task prompt.
+The TDD plan's relevant sections are provided directly in the prompt
+below - no need to `read_file` `.tdd-plan.md` again. Use its
+## Acceptance Criteria. Locate the test files the Tester step wrote -
+check the plan's ## Implementation Plan section and nearby directories
+with `list_dir`/`read_file` to find them; the caller may also name the
+exact test file paths in your task prompt.
 
-- **If `.tdd-plan.md` doesn't exist:** stop. Return as your final answer:
+- **If no plan content appears below:** stop. Return as your final answer:
 
   > **🤖 Test Coverage Validator**
   >

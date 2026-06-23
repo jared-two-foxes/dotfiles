@@ -11,6 +11,7 @@ shape produced by make_executor() below.
 import os
 import re
 from pathlib import Path
+from typing import Callable
 
 
 class ToolError(RuntimeError):
@@ -191,6 +192,19 @@ def write_file(path: str, content: str) -> str:
     resolved.parent.mkdir(parents=True, exist_ok=True)
     resolved.write_text(content, encoding="utf-8")
     return f"wrote {path} ({len(content)} bytes)"
+
+
+def write_file_block(path: str) -> Callable[[str], str]:
+    """
+    Returns a block (str -> str) that writes its input to `path` via
+    write_file and returns the input unchanged, so a write can be a
+    pipeline stage - write_file_block(PLAN_FILE)(plan_text) - instead of
+    a tool call inside an agentic step.
+    """
+    def block(content: str) -> str:
+        print(f"   {write_file(path, content)}", flush=True)
+        return content
+    return block
 
 
 def list_dir(path: str = ".") -> str:

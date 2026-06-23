@@ -25,27 +25,25 @@ run_command is intentionally refused as a model-callable tool (see
 tools.py).
 
 Usage:
-    check-ticket <ticket-id> [--ticket-script <path>] [--model <model-id>]
+    check-ticket <ticket-id> [--model <model-id>]
 
 Options:
-    --ticket-script     Path to your Linear fetch script.
-                        Defaults to the TICKET_SCRIPT env var or 'fetch_ticket.py'
-                        in the same directory as this script.
     --model             opencode zen model ID, e.g. deepseek-v4-flash-free.
                         Defaults to "default".
 """
 
 import argparse
-import os
 import re
 import shlex
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 from ai_client import AIError, DEFAULT_MODEL, run_with_tools  # noqa: E402
+import fetch_ticket as ticket_source  # noqa: E402
 from render import render_markdown  # noqa: E402
 import tools  # noqa: E402
 
@@ -267,28 +265,23 @@ def clean_stale_state() -> None:
             print(f"-- Removed stale {path} from a previous run", flush=True)
 
 
-def run_fetch(ticket_script: Path, ticket_id: str) -> None:
+def run_fetch(ticket_id: str) -> str:
     """
-    Runs the ticket script and writes its stdout via tools.write_file,
-    rather than letting the script write the file itself - this keeps
-    the ticket write on the same tool layer (path-confinement guard,
-    etc.) as every other file write in the pipeline.
+    Calls fetch_ticket.py's fetch_ticket()/render() directly and returns
+    the rendered markdown - no subprocess, no file I/O here. The caller
+    pipes the result through tools.write_file_block to persist it, and
+    passes the same in-memory string straight into the prompt builders
+    instead of re-reading it off disk.
     """
     print(f"-- Fetching ticket {ticket_id} ...", flush=True)
-    result = subprocess.run(
-        [sys.executable, str(ticket_script), ticket_id],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        die(f"Ticket fetch failed (exit {result.returncode}): {result.stderr.strip()}")
-    if not result.stdout.strip():
-        die("Ticket fetch script produced no output on stdout.")
-    print(f"   {tools.write_file(str(TICKET_FILE), result.stdout)}", flush=True)
+    try:
+        data = ticket_source.fetch_ticket(ticket_id)
+    except urllib.error.HTTPError as e:
+        die(f"Ticket fetch failed: HTTP {e.code}: {e.read().decode()}")
+    return ticket_source.render(data)
 
 
-def build_planner_prompt() -> str:
+def build_planner_prompt(ticket_content: str) -> str:
     """
     Embeds the ticket content and a root directory listing directly,
     rather than making the model spend tool-call turns fetching things
@@ -300,7 +293,6 @@ def build_planner_prompt() -> str:
     variance of whether/when the model gets around to asking for it.
     """
     instructions = load_prompt_body(PLAN_PROMPT_FILE)
-    ticket_content = TICKET_FILE.read_text(encoding="utf-8")
     root_listing = tools.list_dir(".")
     return (
         f"{instructions}\n\n---\n\n"
@@ -314,15 +306,15 @@ def build_planner_prompt() -> str:
         f"check for, so don't spend a tool call confirming that.\n\n"
         f"Use read_file/list_dir for any other files you need to inspect "
         f"before planning. Produce a TDD plan in the exact format from "
-        f"Step 4 above, then use write_file to write it to {PLAN_FILE}. "
-        f"Once written, give a short final confirmation as your last "
-        f"response with no further tool calls - you do not need to repeat "
-        f"the plan's full text."
+        f"Step 4 above. Your final response (no further tool calls) must "
+        f"be exactly that plan text - the caller writes it to {PLAN_FILE} "
+        f"itself, so do not call write_file and do not add any chat "
+        f"header or commentary around the plan."
     )
 
 
 def build_validator_prompt(
-    plan_content: str, plan_file_context: str, build_status_content: str
+    ticket_content: str, plan_content: str, plan_file_context: str, build_status_content: str
 ) -> str:
     """
     Embeds the ticket, the plan, and the files the plan's Implementation
@@ -333,7 +325,6 @@ def build_validator_prompt(
     the planner looked at."
     """
     instructions = load_prompt_body(VALIDATE_PROMPT_FILE)
-    ticket_content = TICKET_FILE.read_text(encoding="utf-8")
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the original ticket ({TICKET_FILE}) - already complete "
@@ -369,12 +360,6 @@ def main() -> None:
     )
     parser.add_argument("ticket_id", help="Linear ticket ID, e.g. NEB-42")
     parser.add_argument(
-        "--ticket-script",
-        default=None,
-        help="Path to your Linear fetch script (default: $TICKET_SCRIPT or "
-             "fetch_ticket.py next to this script).",
-    )
-    parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
@@ -382,49 +367,39 @@ def main() -> None:
     args = parser.parse_args()
     model = args.model
 
-    # Resolve ticket fetch script
-    ticket_script_path = (
-        Path(args.ticket_script)
-        if args.ticket_script
-        else Path(os.environ.get("TICKET_SCRIPT", SCRIPT_DIR / "fetch_ticket.py"))
-    )
-    if not ticket_script_path.exists():
-        die(
-            f"Ticket fetch script not found: {ticket_script_path}\n"
-            f"  Pass --ticket-script <path> or set the TICKET_SCRIPT env var."
-        )
-
     # ── Step 0: Clean slate ─────────────────────────────────────────────────
     clean_stale_state()
 
     # ── Step 1: Fetch ticket ────────────────────────────────────────────────
-    run_fetch(ticket_script_path, args.ticket_id)
+    ticket_content = run_fetch(args.ticket_id)
+    tools.write_file_block(str(TICKET_FILE))(ticket_content)
 
-    # ── Step 2: Plan (model reads ticket, writes plan, via tools) ─────────
+    # ── Step 2: Plan (ticket embedded in prompt; plan text returned) ──────
     try:
         result = run_with_tools(
-            build_planner_prompt(),
-            tools.READ_WRITE_TOOLS,
-            tools.make_executor(preloaded_paths={str(TICKET_FILE)}),
+            build_planner_prompt(ticket_content),
+            tools.READ_ONLY_TOOLS,
+            tools.make_executor(allow_write=False, preloaded_paths={str(TICKET_FILE)}),
             "plan",
             model=model,
             summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
-    if not PLAN_FILE.exists():
-        die(f"Plan step finished but {PLAN_FILE} was not written.")
-    render_markdown(result.text)
-    print(f"   Plan written -> {PLAN_FILE}", flush=True)
+    if "## Acceptance Criteria" not in result.text:
+        render_markdown(result.text)
+        die("Planner did not produce a valid plan (see output above).")
+    print("-- Plan generated, writing to disk ...", flush=True)
+    plan_content = tools.write_file_block(str(PLAN_FILE))(result.text)
+    render_markdown(plan_content)
 
     # ── Step 3: Validate (model reads via tools; commands run by us) ──────
-    plan_content = PLAN_FILE.read_text(encoding="utf-8")
     plan_file_context, plan_file_paths = gather_plan_file_context(plan_content)
     build_status_content = gather_build_status(plan_content)
     preloaded = {str(TICKET_FILE), str(PLAN_FILE)} | plan_file_paths
     try:
         result = run_with_tools(
-            build_validator_prompt(plan_content, plan_file_context, build_status_content),
+            build_validator_prompt(ticket_content, plan_content, plan_file_context, build_status_content),
             tools.READ_ONLY_TOOLS,
             tools.make_executor(allow_write=False, preloaded_paths=preloaded),
             "validate",
