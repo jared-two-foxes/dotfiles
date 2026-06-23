@@ -1,0 +1,6 @@
+# Python dependencies for scripts in bin/. Installed by install/*.ps1 via
+# `python -m pip install --user -r bin/requirements.txt`. Add a line per
+# package actually imported by something in this directory - keep it to
+# what's used, not what might be nice.
+
+rich   # console markdown rendering (render.py)
