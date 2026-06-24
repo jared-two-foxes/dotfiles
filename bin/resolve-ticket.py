@@ -20,10 +20,12 @@ done - see pipeline_lib.walk):
   1. Fetch ticket from Linear.
   2. Generate a TDD plan from the ticket.
   3. Narrow the plan to just the acceptance criteria the current
-     codebase doesn't satisfy yet (read-only evidence-gathering, same as
-     check-ticket.py's validate step) - written to .gap-plan.md in the
-     same format as the plan itself. Zero remaining criteria means the
-     ticket is already fully implemented.
+     codebase doesn't satisfy yet (read-only evidence-gathering) -
+     written to .gap-plan.md in the same format as the plan itself.
+     Zero remaining criteria means the ticket is already fully
+     implemented. check-ticket.py runs this same narrow step and writes
+     the same file, so if it reports a gap, resolve-ticket.py skips
+     straight to the implementation pipeline below on the next run.
 
 Implementation pipeline (iterates per acceptance criterion in the gap
 plan; each criterion's own scoped test is both its witness of

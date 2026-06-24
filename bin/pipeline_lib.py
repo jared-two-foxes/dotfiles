@@ -63,8 +63,11 @@ PIPELINE_LOG_FILE = Path(".pipeline-log.jsonl")
 # on, find ambiguous, or waste a tool-call turn checking for. Used only
 # by check-ticket.py - resolve-ticket.py is re-entrant by design and
 # persists state across invocations instead (see reset_pipeline_state
-# for its explicit --reset opt-out).
-STALE_FILES = (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE)
+# for its explicit --reset opt-out). Includes GAP_PLAN_FILE since
+# check-ticket.py now runs the narrow step too (same .gap-plan.md
+# resolve-ticket.py reads on startup) - a stale gap plan from an earlier
+# ticket would otherwise look like a valid, already-narrowed result.
+STALE_FILES = (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE)
 
 # Used only by resolve-ticket.py's --reset flag. Deliberately excludes
 # any test/implementation source file the pipeline wrote - those are
@@ -73,7 +76,6 @@ STALE_FILES = (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE)
 RESETTABLE_FILES = (TICKET_FILE, PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
 
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
-VALIDATE_PROMPT_FILE = PROMPTS_DIR / "validate-coverage.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 TEST_PROMPT_FILE = PROMPTS_DIR / "test-singlepass.prompt.md"
 TEST_COVERAGE_PROMPT_FILE = PROMPTS_DIR / "validate-test-coverage.prompt.md"
@@ -618,76 +620,16 @@ def gather_build_status(plan_content: str) -> str:
     return "\n\n".join(blocks)
 
 
-def build_validator_prompt(
-    ticket_content: str, plan_content: str, plan_file_context: str, build_status_content: str
-) -> str:
-    """
-    Embeds the ticket, the plan, and the files the plan's Implementation
-    Plan section names - the validator runs as a fresh session with no
-    memory of the plan step, so without this it would have to
-    rediscover all of this from scratch via read_file/list_dir. See
-    gather_plan_file_context for why this is narrower than "everything
-    the planner looked at."
-    """
-    instructions = load_prompt_body(VALIDATE_PROMPT_FILE)
-    return (
-        f"{instructions}\n\n---\n\n"
-        f"Here is the original ticket ({TICKET_FILE}) - already complete "
-        f"and current, no need to read_file it again:\n\n{ticket_content}\n\n"
-        f"Here is the TDD plan to validate ({PLAN_FILE}) - already "
-        f"complete and current, no need to read_file it again:\n\n"
-        f"{plan_content}\n\n"
-        f"Here is the current content of the files the plan's "
-        f"Implementation Plan section names - already provided, no need "
-        f"to read_file these again unless you need a file the plan didn't "
-        f"name:\n\n{plan_file_context}\n\n"
-        f"Here is the output of running the exact commands the acceptance "
-        f"criteria name (e.g. `cargo test`), captured just now - you have "
-        f"no way to run these yourself, so this is the evidence for any "
-        f"command-based criteria:\n\n{build_status_content}\n\n"
-        f"Use read_file/list_dir/search_files for anything else you need - "
-        f"when hunting for evidence of a criterion across the codebase, "
-        f"prefer one targeted search_files call over list_dir-then-read_file "
-        f"fishing; every tool call gets resent in full on every subsequent "
-        f"turn, so fewer, more targeted calls keep this cheaper without "
-        f"costing you any evidence. Check whether "
-        f"the acceptance criteria are fully satisfied, per the steps and "
-        f"rules in your instructions. Treat any criterion with no file "
-        f"evidence and no command output above as UNKNOWN rather than "
-        f"FAIL or PASS."
-    )
-
-
-def run_validate_step(ticket_content: str, plan_content: str, model: str):
-    """
-    Runs the validate step end to end: gathers the plan's named-file
-    context and command-output evidence, builds the prompt, and returns
-    the AIResult unrendered and unbranched - the caller decides what to
-    do with the verdict (check-ticket.py just renders and reports;
-    resolve-ticket.py branches on it to decide whether to continue into
-    a TDD implementation flow).
-    """
-    plan_file_context, plan_file_paths = gather_plan_file_context(plan_content)
-    build_status_content = gather_build_status(plan_content)
-    preloaded = {str(TICKET_FILE), str(PLAN_FILE)} | plan_file_paths
-    try:
-        return run_with_tools(
-            build_validator_prompt(ticket_content, plan_content, plan_file_context, build_status_content),
-            tools.READ_ONLY_TOOLS,
-            tools.make_executor(allow_write=False, preloaded_paths=preloaded),
-            "validate",
-            model=model,
-            summarize_call=tools.summarize_tool_call,
-        )
-    except (AIError, tools.PipelineAbort) as e:
-        die(str(e))
-
-
 # ---------------------------------------------------------------------------
-# Narrow step (resolve-ticket.py only) - same evidence-gathering as
-# validate, but the output is plan-shaped (like the plan step's own
-# output) instead of a prose verdict, so its check() is "file exists,
-# well-formed" rather than a re-judgment of freshness on every resume.
+# Narrow step (check-ticket.py and resolve-ticket.py) - same
+# evidence-gathering a coverage validator would need, but the output is
+# plan-shaped (like the plan step's own output) instead of a prose
+# verdict: check-ticket.py reports completion by counting the remaining
+# '## Acceptance Criteria' bullets, and resolve-ticket.py's check() is
+# "file exists, well-formed" rather than a re-judgment of freshness on
+# every resume. Both write to the same GAP_PLAN_FILE, so a remaining-gap
+# report from check-ticket.py is exactly what resolve-ticket.py needs to
+# re-enter straight into its per-criterion implementation loop.
 # ---------------------------------------------------------------------------
 
 
