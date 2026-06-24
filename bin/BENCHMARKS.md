@@ -19,6 +19,19 @@ choice, so future work can extend rather than re-derive this.
   `accounting_webhooks.rs` already implements the structs, but lacks Debug
   redaction - the known failure mode is models proposing to split it into
   new per-struct files instead of fixing the existing one in place).
+  - `ticket.md`, `plan-good.md`, `plan-bad.md`, `gapplan-good.md` - inputs
+    for `plan`/`narrow`/`test-criterion`, described above.
+  - `test-debug-redaction.rs` + `test-debug-redaction.meta.json` - a known-
+    good *output* of `test-criterion`, captured from a passing gpt-5.4-mini
+    trial: the full `accounting_webhooks.rs` with the failing test already
+    appended (compiles, fails red against the unfixed code). This is the
+    input `implement-criterion` benchmarking needs - copy this file over
+    `target_file` (from the `.meta.json`) in the worktree before running
+    that block, so the worktree starts in the state `run_test_for_criterion`
+    would have left it in. `qualified_test_name` in the `.meta.json` is the
+    green-check target for grading; `target_file` is also what
+    `run_implement_for_criterion`'s `protected_paths` needs, to stop the
+    implementer from editing the test it's supposed to satisfy.
 
 ### Usage
 
@@ -169,6 +182,25 @@ front-runner (ties the two priciest models at a fraction of the cost) but
 has only 3 trials here, not the ~10-25 that gave `plan`'s number real
 confidence. Treat this table as a first pass, not a settled choice.
 
+### `implement-criterion` (implements one criterion against its failing test)
+
+Grader: real check, mirror of `test-criterion`'s - `cargo build` must
+succeed, then the seeded test must pass when run scoped (green). Fixture:
+`gapplan-good.md` + `test-debug-redaction.rs`/`.meta.json` (a known-good
+*output* of `test-criterion`, captured from a passing gpt-5.4-mini trial -
+the full `accounting_webhooks.rs` with the failing test already appended,
+copied into the worktree before the implementer runs so it starts in the
+state `test-criterion` would have left it in).
+
+| Model | Trials | Pass rate | Avg cost | Avg time |
+|---|---|---|---|---|
+| gpt-5.4-mini | 1 (smoke test) | 1/1 | $0.065 | 410s |
+
+Only smoke-tested so far (confirms the wiring works end to end - implements
+the Debug redaction, compiles, scoped test goes green). Needs a real trial
+batch (5-10+ per model, several models) before drawing any conclusion about
+which model to default to here.
+
 ## How to extend this
 
 - **More trials on an existing model/block**: rerun with a higher `--trials`
@@ -180,12 +212,15 @@ confidence. Treat this table as a first pass, not a settled choice.
   `/v1/models` list 401 ("No provider available") - that's been persistent,
   not transient, for the Gemini models tried so far, so don't burn retries
   assuming it'll clear up.
-- **A new block** (e.g. `implement-criterion`, `review`): add a grader to
-  `bench_block.py`'s dispatch (text heuristic if cheap/fast is enough, real
-  compile/run check if not - `implement-criterion` should probably reuse
-  the compile+green check the same way `test-criterion` reuses compile+red),
-  wire the new `--block` choice through `bench.py`'s `build_jobs`/argparse,
-  and add whatever fixture that block needs under `fixtures/<ticket>/`.
+- **A new block** (e.g. `review`): add a grader to `bench_block.py`'s
+  dispatch (text heuristic if cheap/fast is enough, real compile/run check
+  if not - see `implement-criterion`'s compile+green check for the pattern
+  to follow), wire the new `--block` choice through `bench.py`'s
+  `build_jobs`/argparse/`CARGO_BLOCKS` (if it touches cargo), and add
+  whatever fixture that block needs under `fixtures/<ticket>/`.
+- **`implement-criterion` is wired but unbenchmarked** - it exists (see
+  table above) but only has a 1-trial smoke test. Next step here is a real
+  trial batch, same as was done for `plan`/`narrow`/`test-criterion`.
 - **A new ticket scenario** (beyond SA-452): add a `fixtures/<ticket-name>/`
   directory with the same fixture shape (`ticket.md`, `plan-good.md` /
   `plan-bad.md` for narrow, `gapplan-good.md` for test-criterion), and a

@@ -30,6 +30,14 @@ a compile error and not an accidental pass. This is slower (real cargo
 invocations) but answers the actual question instead of guessing from
 text.
 
+Grading for implement-criterion is the mirror of test-criterion: the
+worktree is seeded with a known-good failing test (a fixture captured
+from a real test-criterion trial - see fixtures/<ticket>/*.meta.json),
+the model implements against it, and the check is the same compile step
+followed by the same scoped run - but this time requiring it to pass
+(green). The test file is passed to run_implement_for_criterion as a
+protected path, same as the real pipeline.
+
 Prints exactly one line of JSON to stdout:
   {"success": bool, "reason": str, "duration_s": float,
    "cost_usd": float, "tokens_total": int, "error": str|null}
@@ -92,6 +100,29 @@ def grade_test_criterion_compiles_and_red(file_path: str, qualified_test_name: s
     return True, f"test ({file_path}::{qualified_test_name}) compiles and correctly fails red"
 
 
+def grade_implement_compiles_and_green(qualified_test_name: str) -> tuple[bool, str]:
+    """
+    Real correctness check for implement-criterion: the implementation
+    must (a) compile, and (b) make the seeded test pass when run scoped
+    to just that test. A compile failure is an Implementer bug; a still-
+    failing scoped test means the implementation didn't actually satisfy
+    the criterion the test exercises.
+    """
+    commands = lib.load_pipeline_config(Path(lib.PIPELINE_CONFIG_FILE))
+
+    build_result = lib.run_command(commands["build_cmd"], "bench build gate")
+    if build_result.returncode != 0:
+        tail = (build_result.stdout + build_result.stderr)[-1500:]
+        return False, f"implementation does not compile (exit {build_result.returncode}): {tail}"
+
+    green_result = lib.run_scoped_test(qualified_test_name, commands, "bench green check")
+    if green_result.returncode != 0:
+        tail = (green_result.stdout + green_result.stderr)[-1500:]
+        return False, f"test still fails after implementation (exit {green_result.returncode}): {tail}"
+
+    return True, f"implementation compiles and {qualified_test_name} passes green"
+
+
 GRADERS = {
     ("sa452", "plan"): grade_sa452_no_file_split,
     ("sa452", "narrow"): grade_sa452_no_file_split,
@@ -100,11 +131,26 @@ GRADERS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--block", required=True, choices=["plan", "narrow", "test-criterion"])
+    parser.add_argument(
+        "--block", required=True,
+        choices=["plan", "narrow", "test-criterion", "implement-criterion"],
+    )
     parser.add_argument("--ticket-name", required=True, help="Grader key, e.g. sa452")
     parser.add_argument("--ticket-file", required=True, type=Path)
-    parser.add_argument("--plan-file", type=Path, help="Required for --block narrow/test-criterion")
-    parser.add_argument("--criterion", help="Required for --block test-criterion")
+    parser.add_argument(
+        "--plan-file", type=Path,
+        help="Required for --block narrow/test-criterion/implement-criterion",
+    )
+    parser.add_argument("--criterion", help="Required for --block test-criterion/implement-criterion")
+    parser.add_argument(
+        "--test-file",
+        help="Required for --block implement-criterion - path to the seeded failing test, "
+             "passed through as run_implement_for_criterion's protected path",
+    )
+    parser.add_argument(
+        "--qualified-test-name",
+        help="Required for --block implement-criterion - the scoped test name to green-check",
+    )
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
 
@@ -130,7 +176,7 @@ def main() -> None:
             plan_content = args.plan_file.read_text(encoding="utf-8")
             output_text = lib.run_narrow_step(ticket_content, plan_content, args.model)
             success, reason = grader(output_text)
-        else:  # test-criterion
+        elif args.block == "test-criterion":
             if not args.plan_file:
                 raise ValueError("--plan-file (the gap plan) is required for --block test-criterion")
             if not args.criterion:
@@ -140,6 +186,20 @@ def main() -> None:
                 args.criterion, plan_content, args.model
             )
             success, reason = grade_test_criterion_compiles_and_red(file_path, qualified_test_name)
+        else:  # implement-criterion
+            missing = [
+                name for name, val in (
+                    ("--plan-file", args.plan_file), ("--criterion", args.criterion),
+                    ("--test-file", args.test_file), ("--qualified-test-name", args.qualified_test_name),
+                ) if not val
+            ]
+            if missing:
+                raise ValueError(f"--block implement-criterion requires {', '.join(missing)}")
+            plan_content = args.plan_file.read_text(encoding="utf-8")
+            lib.run_implement_for_criterion(
+                args.criterion, plan_content, args.model, args.test_file
+            )
+            success, reason = grade_implement_compiles_and_green(args.qualified_test_name)
     except SystemExit as e:
         error = f"block aborted (exit {e.code}) - see die() output above"
     except Exception as e:  # noqa: BLE001 - report any failure as a graded trial, not a crash
