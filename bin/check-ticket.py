@@ -37,11 +37,19 @@ run_command is intentionally refused as a model-callable tool (see
 tools.py).
 
 Usage:
-    check-ticket <ticket-id> [--model <model-id>]
+    check-ticket <ticket-id> [--model <model-id>] [--narrow-model <model-id>]
 
 Options:
     --model             opencode zen model ID, e.g. deepseek-v4-flash-free.
-                        Defaults to "default".
+                        Defaults to "default". Used for the plan step.
+    --narrow-model      opencode zen model ID for the narrow step. Narrowing
+                        needs to reconcile a criterion's literal wording
+                        against existing repo conventions, which flash/budget
+                        models trialled against SA-452 (deepseek-v4-flash,
+                        kimi-k2.6, grok-build-0.1) got wrong - they recommended
+                        new files instead of recognizing the work belonged in
+                        an existing convention file. Defaults to "glm-5", the
+                        cheapest trialled model that got it right.
 """
 
 import argparse
@@ -65,7 +73,12 @@ def main() -> None:
     parser.add_argument(
         "--model",
         default=DEFAULT_MODEL,
-        help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
+        help=f"opencode zen model ID to use for the plan step (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--narrow-model",
+        default=lib.NARROW_DEFAULT_MODEL,
+        help=f"opencode zen model ID to use for the narrow step (default: {lib.NARROW_DEFAULT_MODEL}).",
     )
     args = parser.parse_args()
     model = args.model
@@ -81,7 +94,7 @@ def main() -> None:
     plan_content = lib.run_plan_step(ticket_content, model)
 
     # ── Step 3: Narrow (model reads via tools; commands run by us) ────────
-    gap_plan_content = lib.run_narrow_step(ticket_content, plan_content, model)
+    gap_plan_content = lib.run_narrow_step(ticket_content, plan_content, args.narrow_model)
 
     remaining = lib.extract_acceptance_criteria(gap_plan_content)
     if remaining:

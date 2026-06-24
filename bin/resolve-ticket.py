@@ -69,7 +69,12 @@ check-ticket.py and tdd-pipeline.py are unaffected by any of this - they
 keep their existing single-shot behavior unchanged.
 
 Usage:
-    resolve-ticket <ticket-id> [--model <model-id>] [--config <path>] [--reset]
+    resolve-ticket <ticket-id> [--model <model-id>] [--narrow-model <model-id>]
+                   [--config <path>] [--reset]
+
+--narrow-model defaults to pipeline_lib.NARROW_DEFAULT_MODEL ("glm-5"),
+decoupled from --model - see check-ticket.py's docstring for why the
+narrow step gets its own model default.
 """
 
 import argparse
@@ -96,6 +101,11 @@ def main() -> None:
         "--model",
         default=DEFAULT_MODEL,
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--narrow-model",
+        default=lib.NARROW_DEFAULT_MODEL,
+        help=f"opencode zen model ID to use for the narrow step (default: {lib.NARROW_DEFAULT_MODEL}).",
     )
     parser.add_argument(
         "--config",
@@ -137,7 +147,7 @@ def main() -> None:
             run=lambda: lib.run_narrow_step(
                 lib.TICKET_FILE.read_text(encoding="utf-8"),
                 lib.PLAN_FILE.read_text(encoding="utf-8"),
-                model,
+                args.narrow_model,
             ),
         ),
     ]
