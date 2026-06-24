@@ -32,6 +32,27 @@ choice, so future work can extend rather than re-derive this.
     green-check target for grading; `target_file` is also what
     `run_implement_for_criterion`'s `protected_paths` needs, to stop the
     implementer from editing the test it's supposed to satisfy.
+- [fixtures/sa500/](fixtures/sa500/) - the **"standard"/easy baseline**
+  fixture, deliberately without a trap: add one new field
+  (`webhook_retry_rate_limit`) to the existing `RateLimitConfig` in
+  `infra/rate_limit_config.rs`, following an established pattern exactly
+  (mirrors the field-per-env-var shape every other field there already
+  uses). No ambiguity about file location, no security/secrets concerns,
+  no plausible reason for a model to do anything but the obvious thing.
+  Exists to catch the case SA-452 can't: a model that's bad at *everything*,
+  not just at reconciling stale ticket paths. A FAIL on SA-500 is a much
+  stronger signal than a FAIL on SA-452.
+  - `ticket.md`, `plan-good.md`, `gapplan-good.md` - same shape as SA-452's.
+    No `plan-bad.md`: there's no known plausible mistake to encode as a
+    trap fixture (that's the point), so `narrow` benchmarking for SA-500
+    should pass `--plan-fixture good` explicitly rather than `both`.
+  - No `test-debug-redaction.rs`/`.meta.json` equivalent yet - capture one
+    the same way SA-452's was captured (see the implement-criterion bullet
+    above) before benchmarking `implement-criterion` against this ticket.
+
+`--fixtures-dir` defaults to `fixtures/<--ticket-name>/`, so
+`--ticket-name sa500` alone is enough to point everything at the right
+fixtures - only pass `--fixtures-dir` to override.
 
 ### Usage
 
@@ -200,6 +221,25 @@ Only smoke-tested so far (confirms the wiring works end to end - implements
 the Debug redaction, compiles, scoped test goes green). Needs a real trial
 batch (5-10+ per model, several models) before drawing any conclusion about
 which model to default to here.
+
+### `sa500` - the "standard"/easy baseline ticket
+
+Grader: `grade_sa500_standard` - checks the plan/gap-plan references the
+real `rate_limit_config.rs`, mentions the new field/env var, and doesn't
+invent a new file for it. Only smoke-tested so far (`gpt-5.4-mini`, 1
+trial each):
+
+| Block | Model | Trials | Pass rate | Cost | Time |
+|---|---|---|---|---|---|
+| plan | gpt-5.4-mini | 1 | 1/1 | $0.015 | 12s |
+| narrow (good fixture) | gpt-5.4-mini | 1 | 1/1 | $0.008 | 121s |
+
+Notably faster than the equivalent SA-452 `plan` trial (12s vs ~30-100s) -
+consistent with this being a genuinely simple task with nothing to puzzle
+over. The real value of this fixture comes from running the models that
+*failed* SA-452 against it: if a model fails SA-500 too, that's a much
+stronger signal (it's bad in general, not just at reconciling a stale
+ticket path) than failing SA-452 alone suggested.
 
 ## How to extend this
 

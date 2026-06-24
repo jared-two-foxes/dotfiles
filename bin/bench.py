@@ -97,6 +97,7 @@ TRIAL_TIMEOUT_S = {"plan": 900, "narrow": 900, "test-criterion": 2400, "implemen
 # axis, just one fixed gap plan plus the one criterion under test.
 DEFAULT_CRITERIA = {
     "sa452": "- [ ] `Debug` output redacts the secret values",
+    "sa500": "- [ ] `WEBHOOK_RETRY_RATE_LIMIT` env var parsed into `RateLimitConfig.webhook_retry_rate_limit`",
 }
 
 
@@ -356,7 +357,10 @@ def main() -> None:
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
     parser.add_argument("--base-ref", default="HEAD")
     parser.add_argument("--ticket-name", default="sa452")
-    parser.add_argument("--fixtures-dir", default=str(SCRIPT_DIR / "fixtures" / "sa452"))
+    parser.add_argument(
+        "--fixtures-dir", default=None,
+        help="Default: fixtures/<ticket-name>/ - only pass this to override.",
+    )
     parser.add_argument("--plan-fixture", default="both", choices=["good", "bad", "both"],
                          help="Only used for --block narrow")
     parser.add_argument("--criterion", default=None,
@@ -373,6 +377,8 @@ def main() -> None:
              "machine has the RAM/pagefile for it.",
     )
     args = parser.parse_args()
+    if args.fixtures_dir is None:
+        args.fixtures_dir = str(SCRIPT_DIR / "fixtures" / args.ticket_name)
 
     if args.block in CARGO_BLOCKS and args.concurrency > 1 and not args.allow_concurrent_cargo:
         print(

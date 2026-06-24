@@ -100,6 +100,33 @@ def grade_test_criterion_compiles_and_red(file_path: str, qualified_test_name: s
     return True, f"test ({file_path}::{qualified_test_name}) compiles and correctly fails red"
 
 
+def grade_sa500_standard(plan_text: str) -> tuple[bool, str]:
+    """
+    SA-500 is the "standard"/easy baseline fixture, deliberately without
+    a trap: a single new field on an existing struct
+    (RateLimitConfig.webhook_retry_rate_limit), following an established
+    pattern exactly, with no ambiguity about which file it belongs in.
+    Where SA-452 measures whether a model resolves a stale/misleading
+    ticket path against reality, SA-500 measures the baseline case - does
+    the model do the obviously-right thing when nothing is trying to
+    mislead it. A FAIL here is a much stronger signal than a FAIL on
+    SA-452: it means the model struggled with a plain, unambiguous task.
+    """
+    lowered = plan_text.lower()
+    mentions_target_file = "rate_limit_config.rs" in lowered
+    mentions_env_var = "webhook_retry_rate_limit" in lowered
+    proposes_new_file = (
+        "new file" in lowered or "create" in lowered
+    ) and "rate_limit_config.rs" not in lowered
+    if not mentions_target_file:
+        return False, "plan never references the existing rate_limit_config.rs"
+    if not mentions_env_var:
+        return False, "plan doesn't mention webhook_retry_rate_limit/WEBHOOK_RETRY_RATE_LIMIT at all"
+    if proposes_new_file:
+        return False, "plan proposes a new file instead of extending rate_limit_config.rs"
+    return True, "plan correctly extends the existing RateLimitConfig in rate_limit_config.rs"
+
+
 def grade_implement_compiles_and_green(qualified_test_name: str) -> tuple[bool, str]:
     """
     Real correctness check for implement-criterion: the implementation
@@ -126,6 +153,8 @@ def grade_implement_compiles_and_green(qualified_test_name: str) -> tuple[bool, 
 GRADERS = {
     ("sa452", "plan"): grade_sa452_no_file_split,
     ("sa452", "narrow"): grade_sa452_no_file_split,
+    ("sa500", "plan"): grade_sa500_standard,
+    ("sa500", "narrow"): grade_sa500_standard,
 }
 
 
