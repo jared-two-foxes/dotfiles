@@ -35,6 +35,7 @@ with no fabricated cost.
 
 import json
 import os
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -163,6 +164,16 @@ def load_pricing() -> dict:
     return _pricing_cache
 
 
+# opencode zen intermittently returns a bare HTTP 500 ("Unknown Error")
+# or 502/503/504 with no useful body - observed to be transient gateway
+# flakiness, not a real request problem (the same payload succeeds on a
+# bare retry). 4xx errors (401 "No provider available", malformed
+# request, etc.) are not retried - those are real, persistent failures
+# that a retry won't fix.
+RETRYABLE_HTTP_STATUSES = {500, 502, 503, 504}
+MAX_RETRIES = 3
+RETRY_BACKOFF_BASE_S = 2.0
+
 BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1")
 API_KEY_FILE = Path.home() / ".secrets" / "opencode-key"
 API_KEY_ENV = "OPENCODE_ZEN_API_KEY"
@@ -190,22 +201,38 @@ def _load_api_key() -> str:
 def _post_chat_completion(payload: dict, label: str) -> dict:
     api_key = _load_api_key()
     body = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        f"{BASE_URL}/chat/completions",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "User-Agent": _USER_AGENT,
-        },
-    )
-    try:
-        with urllib.request.urlopen(req) as resp:
-            parsed = json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        raise AIError(f"{label} request failed: HTTP {e.code}: {e.read().decode()}") from e
-    except urllib.error.URLError as e:
-        raise AIError(f"{label} request failed: {e.reason}") from e
+
+    attempt = 0
+    while True:
+        req = urllib.request.Request(
+            f"{BASE_URL}/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": _USER_AGENT,
+            },
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                parsed = json.loads(resp.read())
+            break
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode()
+            if e.code not in RETRYABLE_HTTP_STATUSES or attempt >= MAX_RETRIES:
+                raise AIError(f"{label} request failed: HTTP {e.code}: {error_body}") from e
+        except urllib.error.URLError as e:
+            if attempt >= MAX_RETRIES:
+                raise AIError(f"{label} request failed: {e.reason}") from e
+
+        attempt += 1
+        backoff_s = RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
+        print(
+            f"   {label}: transient error, retrying in {backoff_s:.0f}s "
+            f"(attempt {attempt}/{MAX_RETRIES}) ...",
+            flush=True,
+        )
+        time.sleep(backoff_s)
 
     response_usage = parsed.get("usage")
     if response_usage:

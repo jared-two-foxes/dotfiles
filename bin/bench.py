@@ -32,6 +32,9 @@ worktree - see that file for the actual block invocation + grading.
 
 import argparse
 import json
+import os
+import queue
+import shutil
 import statistics
 import subprocess
 import sys
@@ -52,6 +55,45 @@ _WORKTREE_LOCK = threading.Lock()
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_REPO = Path.home() / "code" / "own" / "VirtualAssistant"
 
+# test-criterion trials actually invoke cargo (compile + scoped run) -
+# each worktree is a fresh checkout with no target/ directory, so a
+# fully cold CARGO_TARGET_DIR per trial would mean every trial rebuilds
+# the entire dependency tree from scratch. A *single* CARGO_TARGET_DIR
+# shared across concurrent trials looked tempting (cargo's lock file
+# supposedly serializes access) but empirically corrupted results - a
+# clean 3/3 pass rate for one model run alone dropped to 0/15 once 4
+# trials ran concurrently against the same target dir, almost certainly
+# from incremental-compilation cache entries leaking between worktrees
+# building the same crate with different (model-written) test source.
+# Fix: a fixed pool of N "lanes", each with its own target dir - a lane
+# is only ever used by one trial at a time (checked out from the queue,
+# returned when done), so compiles stay warm within a lane but two
+# trials never touch the same target dir simultaneously.
+_CARGO_LANES_BASE = Path(tempfile.gettempdir()) / "bench-cargo-target"
+_cargo_lane_pool: "queue.Queue[Path]" = queue.Queue()
+_cargo_lane_pool_size = 0
+
+
+def _ensure_cargo_lane_pool(n: int) -> None:
+    global _cargo_lane_pool_size
+    if _cargo_lane_pool_size >= n:
+        return
+    for i in range(_cargo_lane_pool_size, n):
+        _cargo_lane_pool.put(_CARGO_LANES_BASE / f"lane-{i}")
+    _cargo_lane_pool_size = n
+
+# plan/narrow trials are pure model calls (tens of seconds to a few
+# minutes); test-criterion additionally compiles and runs cargo, which
+# is much slower, especially before SHARED_CARGO_TARGET_DIR is warm.
+TRIAL_TIMEOUT_S = {"plan": 900, "narrow": 900, "test-criterion": 2400}
+
+# Blocks that need a fixed gap-plan fixture instead of plan/narrow's
+# own fixture handling - test-criterion has no "good/bad upstream plan"
+# axis, just one fixed gap plan plus the one criterion under test.
+DEFAULT_CRITERIA = {
+    "sa452": "- [ ] `Debug` output redacts the secret values",
+}
+
 
 @dataclass
 class Job:
@@ -62,6 +104,7 @@ class Job:
     plan_fixture: str | None  # "good" / "bad" / None (plan block has no upstream plan)
     plan_file: Path | None
     trial_index: int
+    criterion: str | None = None
 
 
 @dataclass
@@ -116,6 +159,7 @@ def run_trial(job: Job, repo: Path, base_ref: str) -> TrialResult:
         return result
     result.worktree_setup_s = round(time.monotonic() - setup_start, 2)
 
+    timeout_s = TRIAL_TIMEOUT_S.get(job.block, 900)
     try:
         cmd = [
             sys.executable,
@@ -127,10 +171,33 @@ def run_trial(job: Job, repo: Path, base_ref: str) -> TrialResult:
         ]
         if job.plan_file:
             cmd += ["--plan-file", str(job.plan_file)]
+        if job.criterion:
+            cmd += ["--criterion", job.criterion]
+
+        env = os.environ.copy()
+        cargo_lane = None
+        if job.block == "test-criterion":
+            cargo_lane = _cargo_lane_pool.get()
+            env["CARGO_TARGET_DIR"] = str(cargo_lane)
+            # sqlx's compile-time query! macros need DATABASE_URL to
+            # introspect schema - the repo's .env + database.db that
+            # normally provide it are both gitignored, so a fresh
+            # worktree has neither. Pointing every trial at the *same*
+            # database.db file looked safe (read-only schema
+            # introspection) but wasn't: concurrent cargo processes
+            # opening the same SQLite file caused intermittent lock
+            # contention that surfaced as bogus "type annotations
+            # needed" compile errors - the same failure mode sqlx
+            # produces when it can't query the DB at all. Copying the DB
+            # into each worktree gives every trial its own file, so
+            # there's nothing left to contend over.
+            wt_db_path = wt_path / "database.db"
+            shutil.copyfile(repo / "database.db", wt_db_path)
+            env["DATABASE_URL"] = f"sqlite:{wt_db_path.as_posix()}"
 
         proc = subprocess.run(
-            cmd, cwd=str(wt_path), capture_output=True, text=True, timeout=900,
-            encoding="utf-8", errors="replace",
+            cmd, cwd=str(wt_path), capture_output=True, text=True, timeout=timeout_s,
+            encoding="utf-8", errors="replace", env=env,
         )
         if proc.returncode != 0 and "===BENCH_RESULT===" not in proc.stdout:
             result.crash = (
@@ -145,11 +212,13 @@ def run_trial(job: Job, repo: Path, base_ref: str) -> TrialResult:
         result.cost_usd = parsed["cost_usd"]
         result.tokens_total = parsed["tokens_total"]
     except subprocess.TimeoutExpired:
-        result.crash = "trial timed out after 900s"
+        result.crash = f"trial timed out after {timeout_s}s"
     except Exception as e:  # noqa: BLE001
         result.crash = f"{type(e).__name__}: {e}"
     finally:
         remove_worktree(repo, wt_path)
+        if cargo_lane is not None:
+            _cargo_lane_pool.put(cargo_lane)
 
     return result
 
@@ -171,7 +240,7 @@ def build_jobs(args) -> list[Job]:
                     ticket_file=ticket_file, plan_fixture=None, plan_file=None,
                     trial_index=trial,
                 ))
-    else:  # narrow
+    elif args.block == "narrow":
         variants = ["good", "bad"] if args.plan_fixture == "both" else [args.plan_fixture]
         for variant in variants:
             plan_file = fixtures_dir / f"plan-{variant}.md"
@@ -184,6 +253,22 @@ def build_jobs(args) -> list[Job]:
                         ticket_file=ticket_file, plan_fixture=variant, plan_file=plan_file,
                         trial_index=trial,
                     ))
+    else:  # test-criterion
+        gap_plan_file = fixtures_dir / "gapplan-good.md"
+        if not gap_plan_file.is_file():
+            raise SystemExit(f"missing gap-plan fixture: {gap_plan_file}")
+        criterion = args.criterion or DEFAULT_CRITERIA.get(args.ticket_name)
+        if not criterion:
+            raise SystemExit(
+                f"no --criterion given and no default for ticket '{args.ticket_name}'"
+            )
+        for model in models:
+            for trial in range(args.trials):
+                jobs.append(Job(
+                    model=model, block="test-criterion", ticket_name=args.ticket_name,
+                    ticket_file=ticket_file, plan_fixture=None, plan_file=gap_plan_file,
+                    trial_index=trial, criterion=criterion,
+                ))
     return jobs
 
 
@@ -214,7 +299,7 @@ def print_summary(results: list[TrialResult]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--block", required=True, choices=["plan", "narrow"])
+    parser.add_argument("--block", required=True, choices=["plan", "narrow", "test-criterion"])
     parser.add_argument("--models", required=True, help="Comma-separated model IDs")
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=4)
@@ -224,12 +309,33 @@ def main() -> None:
     parser.add_argument("--fixtures-dir", default=str(SCRIPT_DIR / "fixtures" / "sa452"))
     parser.add_argument("--plan-fixture", default="both", choices=["good", "bad", "both"],
                          help="Only used for --block narrow")
+    parser.add_argument("--criterion", default=None,
+                         help="Only used for --block test-criterion (default: DEFAULT_CRITERIA[ticket-name])")
     parser.add_argument("--out", default=None, help="Path to write results.jsonl (default: bench-<block>-<timestamp>.jsonl)")
+    parser.add_argument(
+        "--allow-concurrent-cargo", action="store_true",
+        help="Allow --concurrency > 1 for --block test-criterion. Off by default: running "
+             "multiple full `cargo test --no-run` workspace compiles at once exhausted this "
+             "machine's pagefile and produced corrupted builds (linker STATUS_STACK_BUFFER_OVERRUN, "
+             "bogus 'crate required in rlib format' errors) - not a logic bug, a real resource "
+             "ceiling. Only pass this if you've confirmed your machine has the RAM/pagefile for it.",
+    )
     args = parser.parse_args()
+
+    if args.block == "test-criterion" and args.concurrency > 1 and not args.allow_concurrent_cargo:
+        print(
+            f"-- --block test-criterion forces --concurrency 1 by default (was {args.concurrency}): "
+            f"concurrent cargo compiles corrupted builds on this machine (pagefile exhaustion). "
+            f"Pass --allow-concurrent-cargo to override.",
+            flush=True,
+        )
+        args.concurrency = 1
 
     out_path = Path(args.out) if args.out else Path(f"bench-{args.block}-{int(time.time())}.jsonl")
 
     jobs = build_jobs(args)
+    if args.block == "test-criterion":
+        _ensure_cargo_lane_pool(args.concurrency)
     print(f"-- Running {len(jobs)} trials across {args.concurrency} workers ...", flush=True)
 
     results: list[TrialResult] = []

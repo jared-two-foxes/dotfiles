@@ -16,10 +16,19 @@ live upstream result, which is the whole point: it separates "is this
 model good at narrow" from "did the model before it hand narrow a good
 or bad plan".
 
-Grading is a hardcoded heuristic per (ticket, block) pair - good enough
-to bulk-run many trials and get a pass-rate signal, but it's pattern
-matching on the plan text, not a real compiler/test check. Treat the
-reason string as a hint to spot-check, not ground truth.
+Grading for plan/narrow is a hardcoded text heuristic per (ticket,
+block) pair - good enough to bulk-run many trials and get a pass-rate
+signal, but it's pattern matching on the plan text, not a real
+compiler/test check. Treat the reason string as a hint to spot-check,
+not ground truth.
+
+Grading for test-criterion is a real check, not a heuristic: it
+compiles the test the model wrote (cargo test --no-run) and then runs
+it scoped (cargo test {filter}), requiring it to fail (red) - a
+criterion that isn't implemented yet should produce a failing test, not
+a compile error and not an accidental pass. This is slower (real cargo
+invocations) but answers the actual question instead of guessing from
+text.
 
 Prints exactly one line of JSON to stdout:
   {"success": bool, "reason": str, "duration_s": float,
@@ -59,6 +68,30 @@ def grade_sa452_no_file_split(plan_text: str) -> tuple[bool, str]:
     return True, "plan anchors the fix in the existing accounting_webhooks.rs"
 
 
+def grade_test_criterion_compiles_and_red(file_path: str, qualified_test_name: str) -> tuple[bool, str]:
+    """
+    Real correctness check (not a text heuristic) for any ticket: the
+    test the model wrote must (a) compile as part of the whole test
+    binary, and (b) fail when run scoped to just that test - the
+    criterion it covers isn't implemented yet in the fixture's gap plan,
+    so a correct test must be red. A test that doesn't compile is a
+    Tester bug; a test that passes green means it didn't actually
+    exercise the missing behavior (the gap "didn't reproduce").
+    """
+    commands = lib.load_pipeline_config(Path(lib.PIPELINE_CONFIG_FILE))
+
+    compile_result = lib.run_command(commands["test_compile_cmd"], "bench test compile gate")
+    if compile_result.returncode != 0:
+        tail = (compile_result.stdout + compile_result.stderr)[-1500:]
+        return False, f"test does not compile (exit {compile_result.returncode}): {tail}"
+
+    red_result = lib.run_scoped_test(qualified_test_name, commands, "bench red check")
+    if red_result.returncode == 0:
+        return False, "test passed without implementation - gap didn't reproduce (false green)"
+
+    return True, f"test ({file_path}::{qualified_test_name}) compiles and correctly fails red"
+
+
 GRADERS = {
     ("sa452", "plan"): grade_sa452_no_file_split,
     ("sa452", "narrow"): grade_sa452_no_file_split,
@@ -67,31 +100,46 @@ GRADERS = {
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--block", required=True, choices=["plan", "narrow"])
+    parser.add_argument("--block", required=True, choices=["plan", "narrow", "test-criterion"])
     parser.add_argument("--ticket-name", required=True, help="Grader key, e.g. sa452")
     parser.add_argument("--ticket-file", required=True, type=Path)
-    parser.add_argument("--plan-file", type=Path, help="Required for --block narrow")
+    parser.add_argument("--plan-file", type=Path, help="Required for --block narrow/test-criterion")
+    parser.add_argument("--criterion", help="Required for --block test-criterion")
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
 
-    grader = GRADERS.get((args.ticket_name, args.block))
-    if grader is None:
-        print(json.dumps({"error": f"no grader for ({args.ticket_name}, {args.block})"}))
-        sys.exit(1)
+    if args.block in ("plan", "narrow"):
+        grader = GRADERS.get((args.ticket_name, args.block))
+        if grader is None:
+            print(json.dumps({"error": f"no grader for ({args.ticket_name}, {args.block})"}))
+            sys.exit(1)
 
     ticket_content = args.ticket_file.read_text(encoding="utf-8")
 
     start = time.monotonic()
     error = None
-    output_text = ""
+    success = False
+    reason = ""
     try:
         if args.block == "plan":
             output_text = lib.run_plan_step(ticket_content, args.model)
-        else:
+            success, reason = grader(output_text)
+        elif args.block == "narrow":
             if not args.plan_file:
                 raise ValueError("--plan-file is required for --block narrow")
             plan_content = args.plan_file.read_text(encoding="utf-8")
             output_text = lib.run_narrow_step(ticket_content, plan_content, args.model)
+            success, reason = grader(output_text)
+        else:  # test-criterion
+            if not args.plan_file:
+                raise ValueError("--plan-file (the gap plan) is required for --block test-criterion")
+            if not args.criterion:
+                raise ValueError("--criterion is required for --block test-criterion")
+            plan_content = args.plan_file.read_text(encoding="utf-8")
+            file_path, qualified_test_name = lib.run_test_for_criterion(
+                args.criterion, plan_content, args.model
+            )
+            success, reason = grade_test_criterion_compiles_and_red(file_path, qualified_test_name)
     except SystemExit as e:
         error = f"block aborted (exit {e.code}) - see die() output above"
     except Exception as e:  # noqa: BLE001 - report any failure as a graded trial, not a crash
@@ -110,7 +158,6 @@ def main() -> None:
         result["success"] = False
         result["reason"] = error
     else:
-        success, reason = grader(output_text)
         result["success"] = success
         result["reason"] = reason
 

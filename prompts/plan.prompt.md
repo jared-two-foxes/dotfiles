@@ -49,6 +49,18 @@ unambiguous checklist of done-conditions).
 - If codebase context (file tree, key source files) is provided in the
   prompt, use it to formulate the plan - no independent search needed.
 - Otherwise, search the codebase for the areas the ticket/prompt affects.
+- **If the ticket names specific files to create or modify, verify those
+  paths against the actual codebase before trusting them.** Tickets are
+  written before implementation sometimes starts, and the named
+  structure can go stale - the described functionality (or its sibling)
+  may already exist under a different file/module than the ticket says.
+  Search for the struct/function/feature names the ticket mentions, not
+  just the literal paths. If you find the work already lives elsewhere
+  (e.g. alongside a sibling type that follows the same pattern), plan
+  against *that* file - do not propose splitting working code into new
+  files just because the ticket's path doesn't match reality. Only plan
+  a genuinely new file when the search confirms nothing implements that
+  functionality yet.
 - Produce an ordered list: [file or component]: [one-sentence
   description of the change].
 - Estimate complexity: trivial (<50 lines changed, no auth/secrets/

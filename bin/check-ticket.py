@@ -56,7 +56,7 @@ import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import tools  # noqa: E402
 
-DEFAULT_MODEL = "claude-haiku-4-5"
+DEFAULT_MODEL = "gpt-5.4-mini"
 
 
 def main() -> None:
