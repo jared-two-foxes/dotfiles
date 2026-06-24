@@ -75,17 +75,6 @@ STALE_FILES = (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE)
 # user's own job via git.
 RESETTABLE_FILES = (TICKET_FILE, PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
 
-# Default model for the narrow step specifically, distinct from the
-# generic ai_client.DEFAULT_MODEL used by every other step. Chosen by
-# trialling check-ticket.py against SA-452 across several models at
-# similar price tiers: flash/budget-tier models (deepseek-v4-flash,
-# kimi-k2.6, grok-build-0.1) consistently misread a criterion that named
-# a new file as requiring an actual new file, instead of recognizing the
-# work already lived in the codebase's existing convention file
-# (accounting_webhooks.rs, alongside its sibling config struct). glm-5
-# was the cheapest model tested that got this right.
-NARROW_DEFAULT_MODEL = "glm-5"
-
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 TEST_PROMPT_FILE = PROMPTS_DIR / "test-singlepass.prompt.md"
