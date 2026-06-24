@@ -260,11 +260,9 @@ def run_with_tools(
     relying on a turn count to eventually notice something's wrong.
     """
     messages = [{"role": "user", "content": prompt}]
-    turn = 0
 
+    print(f"\n-- Running '{label}' via {BASE_URL} (model={model}) ...", flush=True)
     while True:
-        turn += 1
-        print(f"\n-- Running '{label}' via {BASE_URL} (model={model}, turn {turn}) ...", flush=True)
         parsed = _post_chat_completion(
             {"model": model, "messages": messages, "tools": tools}, label
         )

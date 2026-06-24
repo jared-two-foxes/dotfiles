@@ -98,11 +98,22 @@ AUTO_PREAMBLE = (
 # test (a test binary compiles everything in it regardless of which
 # test you'll filter at runtime), so there's no filtered equivalent of
 # test_compile_cmd - only the run is ever scoped.
+#
+# fmt_fix_cmd/clippy_fix_cmd/fmt_check_cmd/clippy_cmd are used only by
+# resolve-ticket.py's run_lint_gate - lint/style checks run once, after
+# every criterion is implemented and passing, right before code review -
+# not as acceptance-criteria evidence (see ALLOWED_CARGO_SUBCOMMANDS).
+# The *_fix_cmd entries attempt the mechanical, no-judgment-call fix
+# before the *_check_cmd/clippy_cmd gate gets to fail anything.
 DEFAULT_COMMANDS = {
     "build_cmd": "cargo build",
     "test_compile_cmd": "cargo test --no-run",
     "test_cmd": "cargo test",
     "test_filter_cmd": "cargo test {filter}",
+    "fmt_fix_cmd": "cargo fmt",
+    "clippy_fix_cmd": "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs",
+    "fmt_check_cmd": "cargo fmt -- --check",
+    "clippy_cmd": "cargo clippy -- -D warnings",
 }
 
 # ---------------------------------------------------------------------------
@@ -492,7 +503,17 @@ CARGO_COMMAND_RE = re.compile(r"`(cargo [^`]+)`")
 # (see tools.py) precisely because we haven't designed a safe way to let
 # the model choose arbitrary commands; this allowlist is that design for
 # the one case (cargo verification commands named in AC) we need today.
-ALLOWED_CARGO_SUBCOMMANDS = {"test", "fmt", "clippy", "check", "build"}
+#
+# Only `test` - not `build`/`check`/`fmt`/`clippy`. `build`/`check` are
+# subsumed by `test` (compiling the test binary already compiles the
+# lib/bin first, so a passing test run is strictly stronger evidence
+# than a passing build/check) - running them separately as evidence
+# would just be redundant work for no extra signal. `fmt`/`clippy` are
+# lint/style checks, not evidence of whether a feature is implemented -
+# they don't belong in acceptance-criteria evidence-gathering at all;
+# see run_lint_gate, which runs them once at the end of the
+# implementation pipeline instead, right before code review.
+ALLOWED_CARGO_SUBCOMMANDS = {"test"}
 
 
 def extract_plan_commands(plan_content: str) -> list[list[str]]:
@@ -542,22 +563,16 @@ def truncate_command_output(output: str, max_lines: int = COMMAND_OUTPUT_MAX_LIN
     return f"(omitted {omitted} earlier lines)\n" + "\n".join(lines[-max_lines:])
 
 
-# Patterns pull out the lines that actually carry evidence for each
-# subcommand, rather than assuming the signal is concentrated near the
-# end of the output - true for `cargo test`'s pass/fail summary, but not
-# for `clippy`/`build`/`check` (errors and warnings appear as soon as
-# rustc finds them, anywhere in the output) or `fmt --check` (one "Diff
-# in <file>" line per misformatted file, in directory-walk order).
+# Pulls out the lines that actually carry evidence from `cargo test`'s
+# output - the pass/fail summary and any failure messages, not the
+# per-test progress noise. ALLOWED_CARGO_SUBCOMMANDS only ever gathers
+# `test` output now, so this is the only pattern needed; kept as a dict
+# (rather than a single regex) so a future evidence-relevant subcommand
+# can be added without changing summarize_command_output's shape.
 _TEST_SIGNAL_RE = re.compile(r"FAILED|^test result:|panicked at|^---- ")
-_COMPILE_SIGNAL_RE = re.compile(r"^(error|warning)(:|\[)|^\s*-->")
-_FMT_SIGNAL_RE = re.compile(r"^Diff in")
 
 COMMAND_SIGNAL_PATTERNS = {
     "test": _TEST_SIGNAL_RE,
-    "clippy": _COMPILE_SIGNAL_RE,
-    "build": _COMPILE_SIGNAL_RE,
-    "check": _COMPILE_SIGNAL_RE,
-    "fmt": _FMT_SIGNAL_RE,
 }
 
 
@@ -821,6 +836,46 @@ def criterion_test_exists(file_path: str, qualified_test_name: str) -> bool:
 def run_scoped_test(qualified_test_name: str, commands: dict, label: str) -> subprocess.CompletedProcess:
     command_str = commands["test_filter_cmd"].format(filter=qualified_test_name)
     return run_command(command_str, label)
+
+
+def run_lint_gate(commands: dict) -> None:
+    """
+    Runs lint/style checks once, after every criterion is implemented
+    and passing - not as acceptance-criteria evidence (see
+    ALLOWED_CARGO_SUBCOMMANDS, which deliberately excludes these; lint
+    is a code-quality signal, not a behavioral one).
+
+    Attempts the mechanical fix first: clippy --fix for whatever it can
+    auto-apply, then fmt to normalize formatting (including whatever
+    clippy --fix just rewrote). This isn't a retry - it's deterministic
+    tooling with no judgment call involved, not a second attempt at
+    anything an LLM step already tried, so it doesn't conflict with this
+    pipeline's single-shot philosophy. Runs over the whole project, test
+    files included: cargo fmt/clippy --fix are mechanical tools, not
+    agentic writes, so there's no risk of them weakening a test's
+    assertions the way an LLM implementer might - the write-protection
+    that guards implement steps doesn't apply here.
+
+    Whatever the auto-fix can't resolve (most semantic clippy warnings)
+    hits the hard gate below, with no further attempt: dies on failure.
+    """
+    run_command(commands["clippy_fix_cmd"], "clippy auto-fix")
+    run_command(commands["fmt_fix_cmd"], "fmt auto-fix")
+
+    result = run_command(commands["fmt_check_cmd"], "fmt check")
+    if result.returncode != 0:
+        die_with_log(
+            "lint",
+            f"cargo fmt --check failed (exit {result.returncode}) even after an "
+            f"auto-fix attempt. See output above.",
+        )
+    result = run_command(commands["clippy_cmd"], "clippy")
+    if result.returncode != 0:
+        die_with_log(
+            "lint",
+            f"cargo clippy failed (exit {result.returncode}) even after an "
+            f"auto-fix attempt. See output above.",
+        )
 
 
 # ---------------------------------------------------------------------------

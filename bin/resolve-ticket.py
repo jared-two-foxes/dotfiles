@@ -46,16 +46,22 @@ completion and its resume point):
     - gate: that one scoped test must now pass (green) - single-shot, no
       second implementation attempt if it doesn't.
 
-Final gate: code review (read-only) over every file changed across every
-criterion, against the *original* plan (full ticket scope, not just the
-narrowed gap) - single-shot, no retry.
+Once every criterion is implemented and passing: a lint gate (fmt
+--check, clippy), then code review (read-only) over every file changed
+across every criterion, against the *original* plan (full ticket scope,
+not just the narrowed gap). Both single-shot, no retry. Lint/style
+checks run only here, never as acceptance-criteria evidence during
+narrowing - they're not evidence of whether a feature is implemented,
+just of code health once it is.
 
 Build/test commands come from a project-local TOML config (see
 --config), same as tdd-pipeline.py, plus a templated test_filter_cmd
 (default "cargo test {filter}") for running one criterion's scoped test -
 compiling can't be scoped the same way (a test binary compiles
 everything in it regardless of which test you'll filter at runtime), so
-only the run is ever scoped, never the compile.
+only the run is ever scoped, never the compile. fmt_check_cmd/clippy_cmd
+(defaults: "cargo fmt -- --check" / "cargo clippy -- -D warnings") are
+the lint gate's commands.
 
 check-ticket.py and tdd-pipeline.py are unaffected by any of this - they
 keep their existing single-shot behavior unchanged.
@@ -197,8 +203,9 @@ def main() -> None:
                 criterion=criterion,
             )
 
-    # ── Final gate: code review over everything changed, vs the original plan ──
+    # ── Lint gate + final code review, once everything is implemented ─────
     if changed_files:
+        lib.run_lint_gate(commands)
         lib.run_review_gate(changed_files, plan_text, model)
 
     print("\n-- Gap implemented, tests pass, review approved. Success.", flush=True)
