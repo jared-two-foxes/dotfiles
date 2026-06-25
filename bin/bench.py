@@ -132,6 +132,44 @@ class TrialResult:
     crash: str | None = None
 
 
+def resolve_fixture_base_ref(fixtures_dir: Path) -> str:
+    """
+    Fixtures (ticket text, plans, captured test/implement outputs) encode
+    assumptions about the target repo's exact state at the time they were
+    captured - which fields exist on a struct, which files are where,
+    even line numbers in error messages a grader might match against. The
+    target repo (DEFAULT_REPO) is someone's live, moving codebase, not a
+    frozen fixture store - if every run defaulted to 'HEAD', the same
+    fixture would silently drift out of sync with the code it was written
+    against as that repo's main branch moves, and a bench failure later
+    could mean "the model got it wrong" or "the fixture no longer matches
+    reality" with no way to tell which from the numbers alone.
+
+    fixture.json (next to the fixture's ticket.md etc.) pins the exact
+    commit a fixture was authored/validated against, so re-running it
+    next month reproduces the same comparison instead of a moving one.
+    Falls back to 'HEAD' with a warning for fixtures that haven't been
+    pinned yet (or never will be, e.g. a throwaway one-off fixture) -
+    pinning is strongly recommended, not enforced.
+    """
+    meta_path = fixtures_dir / "fixture.json"
+    if not meta_path.is_file():
+        print(
+            f"-- warning: no {meta_path} pin found - using 'HEAD', which moves as the "
+            f"target repo's main branch moves. Results from this run may not be "
+            f"reproducible later. See resolve_fixture_base_ref's docstring.",
+            flush=True,
+        )
+        return "HEAD"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    base_ref = meta.get("base_ref")
+    if not base_ref:
+        print(f"-- warning: {meta_path} exists but has no base_ref key - using 'HEAD'.", flush=True)
+        return "HEAD"
+    print(f"-- Using fixture-pinned base_ref {base_ref} (from {meta_path})", flush=True)
+    return base_ref
+
+
 def create_worktree(repo: Path, base_ref: str) -> Path:
     wt_path = Path(tempfile.gettempdir()) / "bench-worktrees" / uuid.uuid4().hex[:12]
     with _WORKTREE_LOCK:
@@ -355,7 +393,14 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=3)
     parser.add_argument("--concurrency", type=int, default=4)
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
-    parser.add_argument("--base-ref", default="HEAD")
+    parser.add_argument(
+        "--base-ref", default=None,
+        help="Commit/ref to create each trial's worktree from. Default: read "
+             "fixtures/<ticket-name>/fixture.json's pinned base_ref, so results stay "
+             "reproducible as the target repo's main branch moves; falls back to 'HEAD' "
+             "(today's moving target) with a warning if the fixture has no pin yet. Pass "
+             "this explicitly to intentionally re-validate a fixture against a newer commit.",
+    )
     parser.add_argument("--ticket-name", default="sa452")
     parser.add_argument(
         "--fixtures-dir", default=None,
@@ -379,6 +424,9 @@ def main() -> None:
     args = parser.parse_args()
     if args.fixtures_dir is None:
         args.fixtures_dir = str(SCRIPT_DIR / "fixtures" / args.ticket_name)
+
+    if args.base_ref is None:
+        args.base_ref = resolve_fixture_base_ref(Path(args.fixtures_dir))
 
     if args.block in CARGO_BLOCKS and args.concurrency > 1 and not args.allow_concurrent_cargo:
         print(

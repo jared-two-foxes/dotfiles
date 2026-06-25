@@ -54,6 +54,49 @@ choice, so future work can extend rather than re-derive this.
 `--ticket-name sa500` alone is enough to point everything at the right
 fixtures - only pass `--fixtures-dir` to override.
 
+### Fixture pinning (`fixture.json`)
+
+Every fixture (ticket text, plan, gap plan, captured test/implement
+outputs) encodes assumptions about the exact state of the target repo
+(`--repo`, default `~/code/own/VirtualAssistant`) at the moment it was
+captured - which fields exist on a struct, which files construct it,
+even error message line numbers a grader might match against. That repo
+is someone's live, moving codebase, not a frozen fixture store. Before
+fixture pinning existed, `--base-ref` defaulted to `HEAD` - meaning the
+same fixture silently pointed at a different commit every time main
+moved, so a bench failure could mean "the model got it wrong" or "the
+fixture no longer matches the code" with no way to tell which from the
+numbers alone, and results from last week weren't reproducible today.
+
+Each fixture directory now has a `fixture.json` pinning the exact commit
+it was authored/validated against:
+
+```json
+{"base_ref": "<full commit sha>", "repo": "VirtualAssistant", "pinned_on": "<date>", "note": "..."}
+```
+
+`bench.py` reads this automatically (`resolve_fixture_base_ref`) whenever
+`--base-ref` isn't passed explicitly, and prints which ref it's using.
+Fixtures without a `fixture.json` still work - falls back to `HEAD` with
+a printed warning - so this is additive, not a breaking requirement.
+
+**Re-pinning a fixture deliberately** (e.g. because the target repo
+changed in a way that's relevant to this fixture's scenario): re-validate
+the fixture's ticket/plan/criterion text still describes reality at the
+new commit first (the struct/file/criterion it's testing may have moved
+or changed shape), *then* update `base_ref` - don't just bump it blindly.
+If the fixture's assumptions no longer hold at all, treat it as needing a
+new fixture, not a re-pin.
+
+**`--base-ref` still overrides the pin** when passed explicitly - useful
+for intentionally re-validating an existing fixture against the repo's
+current `HEAD` to check whether it's drifted, without committing to a
+new pin until you've confirmed the result still makes sense.
+
+Currently pinned: `sa452` and `sa500` are both pinned to
+`1737072afce89e118a3b4aee5c3a8419718ee8b1` (2026-06-24), the commit they
+were captured against.
+
 ### Usage
 
 ```
@@ -281,6 +324,46 @@ the final report. Re-ran: 1/1 pass, compiles and goes green - cost/time
 roughly doubled ($0.39->$0.69, 279s->457s) versus the failed attempt,
 consistent with the added reconciliation work, and worth it since the
 alternative was a build that doesn't compile at all.
+
+#### Sub-finding: `protected_paths` made the task impossible for inline tests
+
+Running the codegen-strength models (`claude-opus-4-8`, `gpt-5.4`) against
+this same fixture turned up a second, more serious bug: `test_file` was
+fully blocked via `protected_paths` to stop Implementor from tampering
+with the test it's supposed to satisfy - but when the test lives inline in
+the same file as the production code (Rust's `#[cfg(test)] mod tests`,
+this fixture's own convention, and the example the Tester prompt itself
+names), that *is* the file Implementor must edit. Blocking it entirely
+made the task structurally impossible, not safe. `claude-opus-4-8` hit
+`write_file` returning "refused to overwrite protected file", got nothing
+through, and aborted with "Implementor finished without writing any
+files" at $0.17-0.35/trial (2/2 in the codegen batch) - a fast, cheap,
+uniform failure that looked at first like a model-quality gap but wasn't.
+`gpt-5.4-mini` happened to dodge it by splitting the implementation into a
+new file (`rate_limit_config_impl.rs`) and re-exporting via `mod.rs` - a
+real workaround, not evidence the model was more capable, just luckier in
+how it interpreted the constraint.
+
+Fix: `run_implement_for_criterion` (`pipeline_lib.py`) no longer protects
+the whole file. It snapshots the named test function's exact source
+(`_extract_function_block`, a generic brace-counting extractor - works for
+Rust/TS/JS/C++/Java/Go, best-effort no-op for non-brace languages) before
+the run and verifies byte-for-byte afterward that it's unchanged, failing
+clearly if it was altered or removed. `implement-criterion.prompt.md` now
+tells Implementor explicitly that it may edit the file around an inline
+test, just never the test itself, and that this is checked mechanically.
+Both callers (`resolve-ticket.py`, `bench_block.py`) updated to pass
+`qualified_test_name` through.
+
+Re-ran `claude-opus-4-8` after the fix: no longer blocked - got all the way
+to a real compile/test outcome, and the integrity check passed silently
+(no tampering). It still failed, but for a *different, genuine* reason:
+declared the new field without `pub`, so other modules' `RateLimitConfig {
+..Default::default() }` sites failed with `E0451: field is private`
+(Rust's struct-update syntax requires every field be visible from outside
+the defining module) - $5.04/647s, expensive but a real model mistake
+this time, not a harness bug. This is the kind of failure the benchmark is
+supposed to be measuring; the earlier instant aborts were not.
 
 ### `sa500` - the "standard"/easy baseline ticket
 

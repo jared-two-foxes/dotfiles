@@ -263,6 +263,8 @@ def run_ai_step_with_retry(
         attempt += 1
         try:
             return step_fn()
+        except ai_client.StepBudgetExceeded:
+            raise
         except AIError as e:
             if attempt >= max_attempts:
                 raise
@@ -970,9 +972,55 @@ def build_implement_criterion_prompt(criterion: str, plan_text: str, test_file: 
     )
 
 
+def _extract_function_block(content: str, qualified_test_name: str) -> str | None:
+    """
+    Best-effort extraction of a test function's full source (signature
+    through closing brace) by its short name (the last `::`-separated
+    segment of qualified_test_name) - used to verify the test wasn't
+    altered when it can't be fully protected from writes (see
+    run_implement_for_criterion). Brace-counting only works for
+    brace-delimited languages (Rust/TS/JS/C++/Java/Go/...); returns None
+    for anything that doesn't match (e.g. Python), in which case the
+    caller skips the check rather than false-failing on a language this
+    can't parse.
+    """
+    short_name = qualified_test_name.rsplit("::", 1)[-1]
+    match = re.search(rf"^[ \t]*.*\b{re.escape(short_name)}\s*\(", content, re.MULTILINE)
+    if not match:
+        return None
+    brace_start = content.find("{", match.end())
+    if brace_start == -1:
+        return None
+    depth = 0
+    for i in range(brace_start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[match.start():i + 1]
+    return None
+
+
 def run_implement_for_criterion(
-    criterion: str, plan_text: str, model: str, test_file: str
+    criterion: str, plan_text: str, model: str, test_file: str, qualified_test_name: str
 ) -> list[str]:
+    # protected_paths can't be used here the way it is for other steps:
+    # when the test lives inline in the same file as the production code
+    # it covers (e.g. Rust's #[cfg(test)] mod tests, the convention this
+    # pipeline's own Tester prompt names as the default), test_file *is*
+    # the file Implementor must edit to satisfy the criterion - blocking
+    # writes to it entirely makes the task impossible, not safe. Instead,
+    # snapshot the named test's own source before the run and verify
+    # byte-for-byte afterward that it's unchanged, which protects against
+    # tampering without blocking the surrounding edits Implementor
+    # legitimately needs to make in the same file.
+    original_content = Path(test_file).read_text(encoding="utf-8") if Path(test_file).is_file() else None
+    original_block = (
+        _extract_function_block(original_content, qualified_test_name)
+        if original_content is not None else None
+    )
+
     changed_files: list[str] = []
 
     def attempt():
@@ -980,7 +1028,7 @@ def run_implement_for_criterion(
         return run_with_tools(
             build_implement_criterion_prompt(criterion, plan_text, test_file),
             tools.READ_WRITE_TOOLS,
-            tools.make_executor(written_paths=changed_files, protected_paths={test_file}),
+            tools.make_executor(written_paths=changed_files),
             "implement-criterion",
             model=model,
             summarize_call=tools.summarize_tool_call,
@@ -994,6 +1042,27 @@ def run_implement_for_criterion(
         die_with_log(
             "implement-criterion", "Implementor finished without writing any files.", criterion=criterion
         )
+
+    if original_block is not None and test_file in changed_files:
+        new_content = Path(test_file).read_text(encoding="utf-8")
+        new_block = _extract_function_block(new_content, qualified_test_name)
+        if new_block is None:
+            die_with_log(
+                "implement-criterion",
+                f"the named test {qualified_test_name} could not be found in "
+                f"{test_file} after implementation - it may have been removed "
+                f"or renamed, which isn't allowed.",
+                criterion=criterion,
+            )
+        if new_block != original_block:
+            die_with_log(
+                "implement-criterion",
+                f"the named test {qualified_test_name} in {test_file} was "
+                f"modified during implementation, which isn't allowed - only "
+                f"the surrounding production code may change.",
+                criterion=criterion,
+            )
+
     render_markdown(result.text)
     return changed_files
 

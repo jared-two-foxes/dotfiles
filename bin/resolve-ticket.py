@@ -187,7 +187,9 @@ def main() -> None:
             )
             continue
 
-        new_changed = lib.run_implement_for_criterion(criterion, gap_plan_text, model, file_path)
+        new_changed = lib.run_implement_for_criterion(
+            criterion, gap_plan_text, model, file_path, test_name
+        )
         changed_files.extend(new_changed)
 
         result = lib.run_command(commands["build_cmd"], "build gate")

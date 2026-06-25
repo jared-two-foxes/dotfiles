@@ -226,7 +226,7 @@ def main() -> None:
                 raise ValueError(f"--block implement-criterion requires {', '.join(missing)}")
             plan_content = args.plan_file.read_text(encoding="utf-8")
             lib.run_implement_for_criterion(
-                args.criterion, plan_content, args.model, args.test_file
+                args.criterion, plan_content, args.model, args.test_file, args.qualified_test_name
             )
             success, reason = grade_implement_compiles_and_green(args.qualified_test_name)
     except SystemExit as e:

@@ -71,8 +71,15 @@ target.
   and satisfy this one criterion.
 - Preserve existing architecture, patterns, and style visible in the
   files you've read - match what's already there.
-- Do not modify the named test file. If it genuinely looks wrong, say so
-  in your final answer instead of changing it.
+- If the named test lives inline in the same file as the production
+  code you need to change (e.g. Rust's `#[cfg(test)] mod tests` in the
+  same file), you may still edit that file - just never the test
+  function itself. Leave the named test's signature and body
+  byte-for-byte unchanged; write everything else in the file (and any
+  other files) as needed. This is checked mechanically after you
+  finish, not just by instruction.
+- If it genuinely looks wrong, say so in your final answer instead of
+  changing it.
 - Use `write_file` for every file you change or create, with its
   complete resulting content - never a partial file or diff.
 

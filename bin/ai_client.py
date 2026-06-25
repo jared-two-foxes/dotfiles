@@ -1,7 +1,12 @@
 """
 ai_client - shared AI invocation library for scripted (non-chat) prompts.
 
-Talks to opencode zen's OpenAI-compatible chat-completions endpoint.
+Talks to opencode zen's OpenAI-compatible chat-completions endpoint by
+default, or another registered provider (see PROVIDERS) by prefixing
+the model id with "<provider>:" (e.g. "ollama:llama3.1"). A bare model
+id with no recognized prefix always means opencode zen - every existing
+caller that passes a plain model string ("gpt-5.4-mini", "default", ...)
+keeps working unchanged.
 
 Two invocation modes:
   run_prompt()      - single request, plain text response. No tools.
@@ -46,6 +51,18 @@ from typing import Callable
 
 class AIError(RuntimeError):
     """Raised for any invocation failure. Let it propagate to die()."""
+
+
+class StepBudgetExceeded(AIError):
+    """
+    Raised by run_with_tools when a turn-count or cumulative-cost ceiling
+    is hit. Subclasses AIError so every existing call site's
+    `except AIError` still catches and dies on it with no code changes -
+    but it is NOT a transient/retryable condition: pipeline_lib's
+    run_ai_step_with_retry checks for this subclass explicitly and
+    re-raises it immediately rather than retrying, since retrying a
+    budget that's already exhausted just burns the budget further.
+    """
 
 
 @dataclass
@@ -174,14 +191,37 @@ RETRYABLE_HTTP_STATUSES = {500, 502, 503, 504}
 MAX_RETRIES = 3
 RETRY_BACKOFF_BASE_S = 2.0
 
-BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1")
-API_KEY_FILE = Path.home() / ".secrets" / "opencode-key"
-API_KEY_ENV = "OPENCODE_ZEN_API_KEY"
-DEFAULT_MODEL = "default"
+# Default ceiling on tool-call turns within a single run_with_tools call -
+# bounds a model that's merely confused (not stuck enough to call
+# ask_user_prompt/run_command, just looping search_files/read_file with
+# slightly different args turn after turn) rather than relying solely on
+# those pseudo-tools to catch every runaway case. Generous enough for real
+# multi-file exploration (see run_with_tools's own docstring reasoning),
+# but not unbounded.
+MAX_TURNS_PER_STEP = 40
+
+# Optional process-wide cumulative cost ceiling, opt-in via env var rather
+# than a hardcoded default: model-pricing.toml doesn't have an entry for
+# every model (see UsageTracker.total_cost_usd's own `unpriced` list), so
+# a default-on $ ceiling would silently fail to protect unpriced models
+# while looking like it does. Unset means no cost ceiling (today's
+# behavior).
+MAX_COST_USD_ENV = "PIPELINE_MAX_COST_USD"
+
+
+def _load_max_cost_usd() -> float | None:
+    raw = os.environ.get(MAX_COST_USD_ENV)
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        raise AIError(f"${MAX_COST_USD_ENV} must be a number, got {raw!r}")
 
 # urllib's default User-Agent ("Python-urllib/3.x") trips Cloudflare's
 # bot-fingerprint check (error 1010) on some endpoints - a normal-looking
-# UA avoids that.
+# UA avoids that. Harmless for providers that don't care (e.g. a local
+# Ollama server).
 _USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -189,29 +229,212 @@ _USER_AGENT = (
 )
 
 
-def _load_api_key() -> str:
-    if API_KEY_FILE.exists():
-        return API_KEY_FILE.read_text().strip()
-    api_key = os.environ.get(API_KEY_ENV)
-    if not api_key:
-        raise AIError(f"No key at {API_KEY_FILE} and ${API_KEY_ENV} is not set.")
-    return api_key
+@dataclass(frozen=True)
+class Provider:
+    """
+    One OpenAI-compatible chat-completions backend. `name` is the
+    "<name>:" prefix callers put on a model id to route to this provider
+    (see resolve_provider) - never sent over the wire, stripped before
+    the request.
+
+    requires_api_key=False means no Authorization header is sent at all
+    (e.g. a local Ollama server with no auth) - distinct from "key is
+    optional", since some local setups genuinely have nothing to send
+    and a missing-key error here would be wrong, not just inconvenient.
+
+    auth_headers, when set, takes over auth entirely instead of the
+    plain static-key Bearer header - for a provider whose auth isn't "one
+    key, sent as-is" (see COPILOT: a cached GitHub OAuth token has to be
+    exchanged for a short-lived session token first, plus extra required
+    headers beyond Authorization). Called fresh on every request so it
+    can refresh/cache internally; requires_api_key/api_key_file/
+    api_key_env are ignored when this is set.
+    """
+    name: str
+    base_url: str
+    requires_api_key: bool = True
+    api_key_file: Path | None = None
+    api_key_env: str | None = None
+    auth_headers: Callable[[], dict] | None = None
+
+    def load_api_key(self) -> str:
+        if self.api_key_file and self.api_key_file.exists():
+            return self.api_key_file.read_text().strip()
+        api_key = os.environ.get(self.api_key_env) if self.api_key_env else None
+        if not api_key:
+            where = f"{self.api_key_file} or ${self.api_key_env}" if self.api_key_file else f"${self.api_key_env}"
+            raise AIError(f"No API key found for provider '{self.name}' (checked {where}).")
+        return api_key
+
+    def request_headers(self) -> dict:
+        if self.auth_headers is not None:
+            return self.auth_headers()
+        if self.requires_api_key:
+            return {"Authorization": f"Bearer {self.load_api_key()}"}
+        return {}
+
+
+OPENCODE_ZEN = Provider(
+    name="opencode",
+    base_url=os.environ.get("OPENCODE_ZEN_BASE_URL", "https://opencode.ai/zen/v1"),
+    requires_api_key=True,
+    api_key_file=Path.home() / ".secrets" / "opencode-key",
+    api_key_env="OPENCODE_ZEN_API_KEY",
+)
+
+# A local model server (`ollama serve`, default port 11434) exposing
+# Ollama's built-in OpenAI-compatible endpoint - no API key needed since
+# it's not a hosted service. Model ids are whatever's been pulled
+# locally (`ollama list`), e.g. "ollama:llama3.1" or "ollama:qwen2.5-coder".
+OLLAMA = Provider(
+    name="ollama",
+    base_url=os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+    requires_api_key=False,
+)
+
+# GitHub Copilot's chat-completions backend isn't a plain static-key API:
+# what's cached at COPILOT_OAUTH_TOKEN_FILE (via copilot_login.py's device
+# flow - see that script) is a long-lived GitHub OAuth token, not the
+# bearer this endpoint actually wants. That OAuth token has to be
+# exchanged for a short-lived (~25min) Copilot session token via a
+# separate endpoint, and the request also needs a couple of
+# Copilot-specific headers beyond Authorization or the backend 401s -
+# this is all undocumented-but-widely-relied-on behavior (the same
+# approach copilot.vim/copilot.lua and various OSS Copilot proxies use),
+# not an official API contract, so treat it as more likely to break on
+# GitHub's end than the other providers here.
+# Copilot is billed as a flat-rate subscription with a per-model premium-
+# request multiplier (a request to an expensive model counts as more than
+# 1 against the monthly quota), not $/token - model-pricing.toml's schema
+# (input_per_1m/output_per_1m in USD) doesn't represent that at all.
+# Deliberately not adding copilot:* entries there: a fabricated $/token
+# number would be actively misleading, where "unpriced" (today's
+# UsageTracker behavior for any model with no pricing entry) is at least
+# honestly incomplete. Tracking premium-request *count* instead of $ cost
+# would need a different mechanism than UsageTracker, not a pricing entry
+# here - not implemented.
+COPILOT_OAUTH_TOKEN_FILE = Path.home() / ".secrets" / "github-copilot-token"
+COPILOT_OAUTH_TOKEN_ENV = "GITHUB_COPILOT_TOKEN"
+COPILOT_TOKEN_EXCHANGE_URL = "https://api.github.com/copilot_internal/v2/token"
+COPILOT_EDITOR_VERSION = "vscode/1.95.0"
+COPILOT_PLUGIN_VERSION = "copilot-chat/0.23.0"
+
+_copilot_session_token: str | None = None
+_copilot_session_expires_at: float = 0.0
+# A session token refresh mid-flight from two threads would just mean
+# one extra redundant exchange call, not corruption - a lock here would
+# be defense against a cost that doesn't exist, so this module-level
+# cache is left unsynchronized deliberately.
+
+
+def _load_copilot_oauth_token() -> str:
+    if COPILOT_OAUTH_TOKEN_FILE.exists():
+        return COPILOT_OAUTH_TOKEN_FILE.read_text().strip()
+    token = os.environ.get(COPILOT_OAUTH_TOKEN_ENV)
+    if token:
+        return token
+    raise AIError(
+        f"No GitHub Copilot OAuth token at {COPILOT_OAUTH_TOKEN_FILE} and "
+        f"${COPILOT_OAUTH_TOKEN_ENV} is not set. Run `python copilot_login.py` "
+        f"once to authorize via your browser and cache the token."
+    )
+
+
+def _copilot_auth_headers() -> dict:
+    global _copilot_session_token, _copilot_session_expires_at
+    # 60s margin so a token that's about to expire isn't handed to a
+    # request that then takes a few seconds to actually go out.
+    if _copilot_session_token is None or time.time() >= _copilot_session_expires_at - 60:
+        oauth_token = _load_copilot_oauth_token()
+        req = urllib.request.Request(
+            COPILOT_TOKEN_EXCHANGE_URL,
+            headers={
+                "Authorization": f"Bearer {oauth_token}",
+                "User-Agent": _USER_AGENT,
+            },
+        )
+        try:
+            with urllib.request.urlopen(req) as resp:
+                parsed = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode()
+            raise AIError(
+                f"Copilot session token exchange failed: HTTP {e.code}: {error_body} - "
+                f"the cached OAuth token may be expired or revoked; try "
+                f"`python copilot_login.py` again."
+            ) from e
+        except urllib.error.URLError as e:
+            raise AIError(f"Copilot session token exchange failed: {e.reason}") from e
+        _copilot_session_token = parsed["token"]
+        _copilot_session_expires_at = parsed.get("expires_at", time.time() + 1500)
+
+    return {
+        "Authorization": f"Bearer {_copilot_session_token}",
+        "Editor-Version": COPILOT_EDITOR_VERSION,
+        "Copilot-Integration-Id": "vscode-chat",
+        "Editor-Plugin-Version": COPILOT_PLUGIN_VERSION,
+    }
+
+
+# A model id appearing in GET https://api.githubcopilot.com/models isn't
+# a guarantee it works here - some (observed: gpt-5.4-mini) 400 with
+# "unsupported_api_for_model" against /chat/completions, apparently
+# routed through a different API shape (e.g. a Responses-style endpoint)
+# that this provider doesn't implement. claude-sonnet-4.6/claude-haiku-4.5
+# confirmed working as of 2026-06-25. Test a new model id directly before
+# relying on it.
+COPILOT = Provider(
+    name="copilot",
+    base_url="https://api.githubcopilot.com",
+    auth_headers=_copilot_auth_headers,
+)
+
+# Keyed by the "<key>:" prefix callers use in a model id. A bare model id
+# with no recognized prefix (every existing caller, today) always means
+# DEFAULT_PROVIDER - adding a new provider here is additive, never
+# changes what an existing unprefixed model id resolves to.
+PROVIDERS: dict[str, Provider] = {
+    "ollama": OLLAMA,
+    "copilot": COPILOT,
+}
+DEFAULT_PROVIDER = OPENCODE_ZEN
+DEFAULT_MODEL = "default"
+
+
+def resolve_provider(model: str) -> tuple[Provider, str]:
+    """
+    Splits a model id on its first ':' and checks the prefix against
+    PROVIDERS. Returns (provider, model_id_without_prefix) - the
+    provider never sees its own prefix, since that's purely this
+    module's routing convention, not something the backend knows about.
+    Unrecognized or absent prefixes fall through to DEFAULT_PROVIDER with
+    the model id unchanged, so a bare "gpt-5.4-mini" or a model id that
+    happens to contain ':' for some other reason both still work exactly
+    as before this function existed.
+    """
+    prefix, sep, rest = model.partition(":")
+    if sep and prefix in PROVIDERS:
+        return PROVIDERS[prefix], rest
+    return DEFAULT_PROVIDER, model
 
 
 def _post_chat_completion(payload: dict, label: str) -> dict:
-    api_key = _load_api_key()
+    original_model = payload["model"]
+    provider, bare_model = resolve_provider(original_model)
+    payload = {**payload, "model": bare_model}
     body = json.dumps(payload).encode()
 
     attempt = 0
     while True:
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": _USER_AGENT,
+            **provider.request_headers(),
+        }
         req = urllib.request.Request(
-            f"{BASE_URL}/chat/completions",
+            f"{provider.base_url}/chat/completions",
             data=body,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "User-Agent": _USER_AGENT,
-            },
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req) as resp:
@@ -223,7 +446,11 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
                 raise AIError(f"{label} request failed: HTTP {e.code}: {error_body}") from e
         except urllib.error.URLError as e:
             if attempt >= MAX_RETRIES:
-                raise AIError(f"{label} request failed: {e.reason}") from e
+                hint = (
+                    f" (is the {provider.name} server running at {provider.base_url}?)"
+                    if not provider.requires_api_key else ""
+                )
+                raise AIError(f"{label} request failed: {e.reason}{hint}") from e
 
         attempt += 1
         backoff_s = RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
@@ -236,13 +463,20 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
 
     response_usage = parsed.get("usage")
     if response_usage:
-        usage.add(payload["model"], response_usage)
+        # Tracked under the original (prefixed) model id, not the bare
+        # one sent over the wire - so usage/cost reporting and
+        # model-pricing.toml lookups stay keyed the same way callers
+        # passed the model in, and an "ollama:llama3.1" run reports as
+        # unpriced rather than colliding with an opencode model that
+        # happens to share the same bare name.
+        usage.add(original_model, response_usage)
     return parsed
 
 
 def run_prompt(prompt: str, label: str, model: str = DEFAULT_MODEL) -> AIResult:
-    """Send `prompt` to opencode zen using `model`. Raises AIError on failure."""
-    print(f"\n-- Running '{label}' via {BASE_URL} (model={model}) ...", flush=True)
+    """Send `prompt` to `model`'s provider (see resolve_provider). Raises AIError on failure."""
+    provider, _ = resolve_provider(model)
+    print(f"\n-- Running '{label}' via {provider.base_url} (model={model}) ...", flush=True)
     parsed = _post_chat_completion(
         {"model": model, "messages": [{"role": "user", "content": prompt}]}, label
     )
@@ -264,6 +498,7 @@ def run_with_tools(
     label: str,
     model: str = DEFAULT_MODEL,
     summarize_call: Callable[[str, dict], str] = _default_summarize_call,
+    max_turns: int = MAX_TURNS_PER_STEP,
 ) -> AIResult:
     """
     Send `prompt` to opencode zen with `tools` available. Whenever the
@@ -278,21 +513,43 @@ def run_with_tools(
     callers using tools.py should pass tools.summarize_tool_call so the
     log reads "Read foo.rs" instead of "read_file({'path': 'foo.rs'})".
 
-    No turn cap: this is turn-taking inherent to function-calling, not a
-    retry loop - each turn is the model reacting to real tool output, not
-    the same request repeated hoping for a different answer, so there's
-    no fixed budget that's "enough." If a model is well and truly stuck,
-    the ask_user_prompt/run_command pseudo-tools (see tools.py) are the
-    actual signal to watch for - they raise immediately rather than
-    relying on a turn count to eventually notice something's wrong.
+    Bounded by two independent ceilings, both raising StepBudgetExceeded
+    (a non-retryable AIError subclass - see pipeline_lib.run_ai_step_with_retry)
+    rather than looping forever:
+      - `max_turns`: the ask_user_prompt/run_command pseudo-tools (see
+        tools.py) catch a model that knows it's stuck, but a model that's
+        merely confused - never calling either, just looping
+        search_files/read_file with slightly different args - has no
+        other exit ramp. Each turn resends the *entire* message history,
+        so this also bounds runaway cost growth, not just runaway time.
+      - cumulative cost (see ai_client.usage / $PIPELINE_MAX_COST_USD):
+        opt-in, process-wide, checked after every response that carries
+        usage data.
     """
+    max_cost_usd = _load_max_cost_usd()
     messages = [{"role": "user", "content": prompt}]
 
-    print(f"\n-- Running '{label}' via {BASE_URL} (model={model}) ...", flush=True)
+    provider, _ = resolve_provider(model)
+    print(f"\n-- Running '{label}' via {provider.base_url} (model={model}) ...", flush=True)
+    turn = 0
     while True:
+        turn += 1
+        if turn > max_turns:
+            raise StepBudgetExceeded(
+                f"{label}: exceeded {max_turns} turns with no final answer - aborting."
+            )
         parsed = _post_chat_completion(
             {"model": model, "messages": messages, "tools": tools}, label
         )
+
+        if max_cost_usd is not None:
+            cost_so_far, _unpriced = usage.total_cost_usd()
+            if cost_so_far >= max_cost_usd:
+                raise StepBudgetExceeded(
+                    f"{label}: cumulative cost ~${cost_so_far:.4f} reached the "
+                    f"${max_cost_usd:.4f} ceiling (${MAX_COST_USD_ENV}) - aborting."
+                )
+
         try:
             message = parsed["choices"][0]["message"]
         except (KeyError, IndexError) as e:
