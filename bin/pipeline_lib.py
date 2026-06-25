@@ -42,6 +42,7 @@ import ai_client
 from ai_client import AIError, run_with_tools
 import fetch_ticket as ticket_source
 from render import render_markdown
+import repo_context
 import tools
 import toolchains
 
@@ -416,24 +417,25 @@ def fetch_ticket_text(ticket_id: str) -> str:
 
 def build_plan_prompt(ticket_content: str) -> str:
     """
-    Embeds the ticket content and a root directory listing directly,
-    rather than making the model spend tool-call turns fetching things
-    we already know with certainty it's going to want - the planner
-    always needs the ticket, and an initial orientation listing is cheap
-    to give upfront. Content embedded in the prompt is processed
-    identically to content returned from a tool call (it's all just
-    tokens in context), so this loses nothing - it just removes the
-    variance of whether/when the model gets around to asking for it.
+    Embeds the ticket content and a repo-context block directly, rather
+    than making the model spend tool-call turns fetching things we
+    already know with certainty it's going to want - the planner always
+    needs the ticket, and orientation (toolchain, layout, module
+    boundaries - see repo_context.py) is cheap to give upfront. Content
+    embedded in the prompt is processed identically to content returned
+    from a tool call (it's all just tokens in context), so this loses
+    nothing - it just removes the variance of whether/when the model
+    gets around to asking for it.
     """
     instructions = load_prompt_body(PLAN_PROMPT_FILE)
-    root_listing = tools.list_dir(".")
+    repo_context_block = repo_context.render_repo_context_block(repo_context.gather_repo_context())
     return (
         f"{instructions}\n\n---\n\n"
         f"{AUTO_PREAMBLE}"
         f"Here is the ticket ({TICKET_FILE}) - already complete and "
         f"current, no need to read_file it again:\n\n{ticket_content}\n\n"
-        f"Here is the project root directory listing - already current, "
-        f"no need to list_dir('.') again:\n{root_listing}\n\n"
+        f"Here is repo orientation context - already current, no need to "
+        f"list_dir('.') again for the top-level layout:\n{repo_context_block}\n\n"
         f"This is a clean run: {PLAN_FILE} and {UPDATED_PLAN_FILE} do not "
         f"exist yet - there is no prior plan or interrogation output to "
         f"check for, so don't spend a tool call confirming that.\n\n"
@@ -654,14 +656,22 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
 
 def build_plan_narrow_prompt(ticket_content: str) -> str:
     instructions = load_prompt_body(PLAN_NARROW_PROMPT_FILE)
-    root_listing = tools.list_dir(".")
+    repo_context_block = repo_context.render_repo_context_block(repo_context.gather_repo_context())
+    ticket_evidence_seed_block = repo_context.render_ticket_evidence_seed_block(
+        repo_context.gather_ticket_evidence_seed(ticket_content)
+    )
     return (
         f"{instructions}\n\n---\n\n"
         f"{AUTO_PREAMBLE}"
         f"Here is the ticket ({TICKET_FILE}) - already complete and "
         f"current, no need to read_file it again:\n\n{ticket_content}\n\n"
-        f"Here is the project root directory listing - already current, "
-        f"no need to list_dir('.') again:\n{root_listing}\n\n"
+        f"Here is repo orientation context - already current, no need to "
+        f"list_dir('.') again for the top-level layout:\n{repo_context_block}\n\n"
+        f"Here is a ticket-aware evidence seed - preliminary host-side "
+        f"search results for likely identifiers from the ticket. Use it "
+        f"to orient faster, but do not treat it as proof by itself; you "
+        f"still need to verify each criterion before marking it PASS:\n"
+        f"{ticket_evidence_seed_block}\n\n"
         f"This is a clean run: {GAP_PLAN_FILE} does not exist yet - there "
         f"is no prior gap plan to check for, so don't spend a tool call "
         f"confirming that.\n\n"

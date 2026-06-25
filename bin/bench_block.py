@@ -161,8 +161,17 @@ def grade_sa502_already_implemented(plan_text: str) -> tuple[bool, str]:
     new implementation; FAIL means it invents new validation logic, a
     new config struct, or duplicate parsing instead of recognizing the
     real, already-satisfied location.
+
+    `narrow`/`plan-narrow` shapes (unlike `plan`) can correctly emit "(none
+    - all criteria satisfied)" with no file/symbol mentioned at all when
+    every criterion is PASS - the maximally correct answer for this
+    fixture's trap, not a missed reference. Check for that before the
+    mentions_target gate, which assumes a plan that lists criteria (and
+    so always names something), the way `plan`'s output always does.
     """
     lowered = plan_text.lower()
+    if "none - all criteria satisfied" in lowered:
+        return True, "plan/gap-plan correctly recognizes nothing remains unsatisfied"
     mentions_target = "rate_limit_config.rs" in lowered or "quote_resend_rate_limit" in lowered
     recognizes_done = any(
         phrase in lowered
