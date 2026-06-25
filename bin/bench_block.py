@@ -127,6 +127,59 @@ def grade_sa500_standard(plan_text: str) -> tuple[bool, str]:
     return True, "plan correctly extends the existing RateLimitConfig in rate_limit_config.rs"
 
 
+def grade_sa501_debug_redaction_named(plan_text: str) -> tuple[bool, str]:
+    """
+    SA-501's trap: EmailConfig's Debug impl is hand-written (not
+    #[derive(Debug)]), so a plan that adds postmark_signing_secret
+    without explicitly naming the Debug impl update would leak the
+    secret in cleartext by default - there's no automatic redaction to
+    fall back on the way there would be with a derived impl. This is a
+    different failure shape than SA-452 (omission within one file's
+    existing-but-easy-to-miss manual code, not file fragmentation).
+    """
+    lowered = plan_text.lower()
+    mentions_target_file = "email_config.rs" in lowered
+    mentions_field = "postmark_signing_secret" in lowered
+    mentions_debug_update = (
+        "debug" in lowered and ("redact" in lowered or "[redacted]" in lowered)
+    )
+    if not mentions_target_file:
+        return False, "plan never references the existing email_config.rs"
+    if not mentions_field:
+        return False, "plan doesn't mention postmark_signing_secret/POSTMARK_SIGNING_SECRET at all"
+    if not mentions_debug_update:
+        return False, "plan adds the field but never names updating EmailConfig's Debug impl for redaction"
+    return True, "plan adds the field and explicitly calls out updating the hand-written Debug impl"
+
+
+def grade_sa502_already_implemented(plan_text: str) -> tuple[bool, str]:
+    """
+    SA-502's trap: the ticket describes validation behavior
+    (quote_resend_rate_limit's env var parsing) that's already fully
+    implemented via the shared parse_u32_or_default helper, with
+    existing tests. PASS means the plan recognizes this and proposes no
+    new implementation; FAIL means it invents new validation logic, a
+    new config struct, or duplicate parsing instead of recognizing the
+    real, already-satisfied location.
+    """
+    lowered = plan_text.lower()
+    mentions_target = "rate_limit_config.rs" in lowered or "quote_resend_rate_limit" in lowered
+    recognizes_done = any(
+        phrase in lowered
+        for phrase in ("already implement", "already satisf", "no new", "no production code", "no changes needed")
+    )
+    proposes_new_work = (
+        "new struct" in lowered or "new file" in lowered or "new validation" in lowered
+    )
+    if not mentions_target:
+        return False, "plan never references the existing rate_limit_config.rs/quote_resend_rate_limit"
+    if proposes_new_work:
+        return False, "plan proposes new validation logic/struct/file instead of recognizing existing behavior"
+    if not recognizes_done:
+        return False, "plan references the right field but never says this is already implemented"
+    return True, "plan correctly recognizes quote_resend_rate_limit's validation is already implemented"
+
+
 def grade_implement_compiles_and_green(qualified_test_name: str) -> tuple[bool, str]:
     """
     Real correctness check for implement-criterion: the implementation
@@ -155,6 +208,10 @@ GRADERS = {
     ("sa452", "narrow"): grade_sa452_no_file_split,
     ("sa500", "plan"): grade_sa500_standard,
     ("sa500", "narrow"): grade_sa500_standard,
+    ("sa501", "plan"): grade_sa501_debug_redaction_named,
+    ("sa501", "narrow"): grade_sa501_debug_redaction_named,
+    ("sa502", "plan"): grade_sa502_already_implemented,
+    ("sa502", "narrow"): grade_sa502_already_implemented,
 }
 
 

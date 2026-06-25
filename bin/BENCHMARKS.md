@@ -49,6 +49,24 @@ choice, so future work can extend rather than re-derive this.
   - No `test-debug-redaction.rs`/`.meta.json` equivalent yet - capture one
     the same way SA-452's was captured (see the implement-criterion bullet
     above) before benchmarking `implement-criterion` against this ticket.
+- [fixtures/sa501/](fixtures/sa501/) - **omission-within-one-file** trap:
+  add a new secret field (`postmark_signing_secret`) to `EmailConfig`
+  (`notifications/email_config.rs`), whose `Debug` impl is hand-written
+  (not `#[derive(Debug)]`). A plan that adds the field without explicitly
+  naming the existing Debug impl as needing an update would leak the
+  secret in cleartext by default - there's no automatic derive to fall
+  back on. Different failure shape than SA-452 (one file, an easy-to-miss
+  manual detail, not file fragmentation).
+  - `ticket.md`, `plan-good.md` - same shape as SA-500's (no plausible
+    plan-bad.md trap distinct from the plan grader itself).
+- [fixtures/sa502/](fixtures/sa502/) - **"this is already done"** trap:
+  the ticket asks for validation behavior
+  (`quote_resend_rate_limit`'s env var parsing/error handling) that's
+  already fully implemented via the shared `parse_u32_or_default` helper,
+  with existing tests covering every acceptance criterion. Tests whether
+  a plan recognizes "no new work needed" instead of inventing redundant
+  test coverage or new validation logic for something that already works.
+  - `ticket.md`, `plan-good.md` - same shape as above.
 
 `--fixtures-dir` defaults to `fixtures/<--ticket-name>/`, so
 `--ticket-name sa500` alone is enough to point everything at the right
@@ -181,8 +199,23 @@ Grader: `grade_sa452_no_file_split`.
 | kimi-k2.6 | 3 | 0/3 | $0.189 | 70s |
 | glm-5 | 3 | 0/3 | $0.063 | 30-120s (variable) |
 | deepseek-v4-flash | 3 | 0/3 | $0.008 | 39s |
-| gemini-3.5-flash | 0 | N/A - HTTP 401 "No provider available" (persistent, both attempts) | - | - |
-| gemini-3.1-pro | 0 | N/A - same | - | - |
+| copilot:gemini-3.1-pro-preview | 3 | 1/3 | unpriced (Copilot subscription, see below) | 114s |
+| copilot:gemini-2.5-pro | 3 | 0/3 | unpriced | 21s |
+| copilot:gemini-3-flash-preview | 3 | 0/3 | unpriced | 107s |
+| copilot:gemini-3.5-flash | 3 | 0/3 | unpriced | 136s |
+
+The original `gemini-3.5-flash`/`gemini-3.1-pro` rows (via opencode zen) were
+N/A - persistent HTTP 401 "No provider available" on every attempt. Once the
+Copilot provider (see `ai_client.py`'s `Provider`/`PROVIDERS`) was added,
+re-running the same scenario via `copilot:gemini-*` model ids worked
+mechanically (no provider/auth errors) but the models themselves hit
+SA-452's known file-split failure mode at a similar rate to the other
+budget-tier models above - getting unblocked from a provider error didn't
+turn out to mean these models are actually good at this block. Cost shows
+as unpriced because Copilot bills via a flat subscription + per-model
+premium-request multiplier, not $/token - `model-pricing.toml` intentionally
+has no `copilot:*` entries (see `ai_client.py`'s `COPILOT` comment); treat
+"unpriced" here as "billed differently," not "free."
 
 **Current default: `gpt-5.4-mini`** (set in `check-ticket.py` / `resolve-ticket.py`).
 
@@ -192,6 +225,60 @@ trusting them) - it measurably helped some failing cheap models
 (deepseek-v4-flash 0/3 -> 2/3, kimi-k2.6 0/3 -> 1/3) but didn't reach
 reliable for any of them, and didn't move glm-5 at all. Kept as a
 general-quality improvement; not a substitute for using a reliable model.
+
+#### `sa501` (omission-within-one-file: secret field needs a manual Debug update)
+
+Grader: `grade_sa501_debug_redaction_named`.
+
+| Model | Trials | Pass rate | Avg cost | Avg time |
+|---|---|---|---|---|
+| claude-haiku-4-5 | 3 | 3/3 | $0.041 | 20s |
+| deepseek-v4-pro | 3 | 3/3 | $0.105 | 67s |
+| glm-5.1 | 3 | 3/3 | $0.053 | 51s |
+| gpt-5.1 | 3 | 3/3 | $0.032 | 43s |
+| gpt-5.4-mini | 3 | 3/3 | $0.045 | 24s |
+| kimi-k2.6 | 3 | 3/3 | $0.115 | 91s |
+
+Every model went 18/18 - this trap is **not discriminating** at this trial
+count, the same way SA-500 wasn't. Worth keeping as another "is the model
+broken at everything" baseline check, but it doesn't currently separate
+model quality the way SA-452/SA-502 do. Possible follow-up: a harder variant
+where the hint to look at the Debug impl is less obvious from the ticket
+text alone.
+
+#### `sa502` ("this is already done" - recognizing already-satisfied work)
+
+Grader: `grade_sa502_already_implemented`.
+
+| Model | Trials | Pass rate | Avg cost | Avg time |
+|---|---|---|---|---|
+| **claude-haiku-4-5** | 3 | **2/3** | $0.050 | 25s |
+| **glm-5.1** | 3 | **2/3** | $0.097 | 98s |
+| deepseek-v4-pro | 3 | 1/3 | $0.149 | 147s |
+| gpt-5.1 | 3 | 0/3 | $0.148 | 160s |
+| gpt-5.4-mini | 3 | 0/3 | $0.060 | 41s |
+| kimi-k2.6 | 3 | 0/3 | $0.180 | 205s |
+
+The sharpest result yet: **`gpt-5.4-mini` - the model with a flawless 35/35
+on SA-452/plan and the current pipeline default - goes 0/3 here**, while
+the smaller/cheaper `claude-haiku-4-5` and `glm-5.1` do best. Dominant
+failure mode (`reason` text, verified by hand against one trial's full
+output): the model correctly finds `rate_limit_config.rs` and
+`quote_resend_rate_limit`, even correctly identifies the right helper
+function and existing test names, but still writes "add/adjust unit
+coverage" and proposes a brand-new integration test for a startup-panic
+path that doesn't exist anywhere else in the codebase - real scope creep
+on a ticket that needed zero new code, not a wording quirk the grader
+missed. This is a materially different failure mode than SA-452's file-
+split trap (over-eager invention of work vs. fragmenting an existing
+file) and the strongest evidence so far that per-scenario reliability,
+not just per-block reliability, has to be measured separately - a model
+winning SA-452 tells you nothing about SA-502.
+
+**No default change recommended off 3 trials** - but this result alone is
+reason to add more trials here before trusting `gpt-5.4-mini` as broadly
+reliable for `plan`, not just reliable on the one scenario it's been
+tested against the most.
 
 ### `narrow` (narrows plan -> only the unsatisfied criteria)
 
