@@ -33,9 +33,11 @@ criterion.
   UNKNOWN (see Step 2) is almost always the right move instead of
   asking - prefer it.
 - `run_command(command)` - **not supported.** Calling this aborts the
-  entire run. You cannot run builds, tests, or linters yourself; the
-  caller's task prompt will tell you what command output (if any) is
-  already available as evidence for tool-based criteria.
+  entire run. You cannot run builds, tests, or linters yourself - for a
+  criterion that names an exact command (e.g. "`cargo test` passes"),
+  there is no command output available to you; judge it the same way as
+  any other criterion, by reading code, and mark it UNKNOWN if reading
+  alone can't confirm it.
 
 You have no write capability. Everything you need, read with `read_file`
 and `list_dir`.
@@ -58,8 +60,8 @@ evidence-gathering in Step 2, against everything else in the codebase.
 
 State explicitly, in one line, what you actually read for this run
 (which files, via `read_file`/`list_dir`) versus what the caller's task
-prompt gave you directly (e.g. pre-run command output). Do not silently
-treat a partial read as the whole picture.
+prompt gave you directly. Do not silently treat a partial read as the
+whole picture.
 
 ## Step 2 - Map acceptance criteria to evidence
 
@@ -68,10 +70,11 @@ For each acceptance criterion:
   or production code that demonstrates it is met *in the current state*
   - not "was touched by the most recent change."
 - For criteria that name an exact command (e.g. "`cargo test` passes"),
-  use the command output provided in the task prompt, if any - you
-  cannot run commands yourself.
-- Mark it PASS or FAIL, citing the evidence (test name, code excerpt,
-  file/line, or command output).
+  you cannot run it yourself - judge from the test/code it's checking,
+  same as any other criterion, and mark UNKNOWN if that's not enough to
+  confirm either way.
+- Mark it PASS or FAIL, citing the evidence (test name, code excerpt, or
+  file/line).
 - If a criterion's relevant code/tests can't be found via your tools,
   mark it UNKNOWN - absence of evidence is not evidence of either PASS
   or FAIL, and must not be reported as PASS.

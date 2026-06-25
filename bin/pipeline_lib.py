@@ -79,6 +79,7 @@ RESETTABLE_FILES = (TICKET_FILE, PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
 
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
+PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
 TEST_PROMPT_FILE = PROMPTS_DIR / "test-singlepass.prompt.md"
 TEST_COVERAGE_PROMPT_FILE = PROMPTS_DIR / "validate-test-coverage.prompt.md"
 IMPLEMENT_PROMPT_FILE = PROMPTS_DIR / "implement-singlepass.prompt.md"
@@ -572,139 +573,6 @@ def gather_plan_file_context(plan_content: str) -> tuple[str, set[str]]:
     return "\n\n".join(blocks), read_paths
 
 
-# The plan's text traces back to ticket content fetched from Linear -
-# external, untrusted input. Never shell=True it: only allow
-# `<evidence_binary> <subcommand>` invocations through a strict
-# allowlist, executed as an argv list (no shell), so no amount of
-# `; rm -rf .`-style content smuggled into a ticket can do anything but
-# fail to match. This runs on the host, not as a model tool call -
-# run_command is refused as a tool (see tools.py) precisely because we
-# haven't designed a safe way to let the model choose arbitrary
-# commands; this allowlist is that design for the one case (toolchain
-# verification commands named in AC) we need today.
-#
-# Which binary and subcommands are trusted comes from the detected
-# toolchain (see toolchains.py) - e.g. cargo's evidence_subcommands is
-# only {"test"}, never build/check/fmt/clippy. build/check are subsumed
-# by test (compiling the test binary already compiles the lib/bin first,
-# so a passing test run is strictly stronger evidence than a passing
-# build/check) - running them separately as evidence would just be
-# redundant work for no extra signal. fmt/clippy (or each toolchain's
-# equivalent) are lint/style checks, not evidence of whether a feature is
-# implemented - they don't belong in acceptance-criteria evidence-
-# gathering at all; see run_lint_gate, which runs them once at the end of
-# the implementation pipeline instead, right before code review.
-
-
-def extract_plan_commands(plan_content: str) -> list[list[str]]:
-    """
-    Acceptance criteria sometimes name an exact command as the bar to
-    clear (e.g. '`cargo test -p foo` passes'). Run literally what's
-    named rather than guessing a toolchain invocation - file contents
-    alone can never answer "does the test suite pass." Only commands
-    that tokenize to `<evidence_binary> <allowed subcommand> ...` (per
-    the detected toolchain) with no shell metacharacters are accepted;
-    anything else is silently skipped.
-    """
-    toolchain = get_toolchain()
-    command_re = re.compile(rf"`({re.escape(toolchain.evidence_binary)}(?: [^`]+)?)`")
-    commands = []
-    seen = set()
-    for raw in command_re.findall(plan_content):
-        if raw in seen:
-            continue
-        seen.add(raw)
-        try:
-            tokens = shlex.split(raw)
-        except ValueError:
-            continue
-        if not tokens or tokens[0] != toolchain.evidence_binary:
-            continue
-        if toolchain.evidence_subcommands is not None:
-            if len(tokens) < 2 or tokens[1] not in toolchain.evidence_subcommands:
-                continue
-        if any(ch in raw for ch in ";|&$><\n"):
-            continue
-        commands.append(tokens)
-    return commands
-
-
-COMMAND_OUTPUT_MAX_LINES = 100
-
-
-def truncate_command_output(output: str, max_lines: int = COMMAND_OUTPUT_MAX_LINES) -> str:
-    """
-    Cap output to its last `max_lines` lines - a position-based fallback
-    for when no subcommand-specific pattern applies (see
-    summarize_command_output) or matched nothing. Used directly for a
-    clean pass with no signal lines to extract, where "no output of
-    note" is itself the evidence.
-    """
-    lines = output.splitlines()
-    if len(lines) <= max_lines:
-        return output
-    omitted = len(lines) - max_lines
-    return f"(omitted {omitted} earlier lines)\n" + "\n".join(lines[-max_lines:])
-
-
-# Pulls out the lines that actually carry evidence from the detected
-# toolchain's test-runner output (see toolchains.py's
-# test_output_signal_pattern) - the pass/fail summary and any failure
-# messages, not the per-test progress noise.
-def _test_signal_pattern() -> re.Pattern:
-    return re.compile(get_toolchain().test_output_signal_pattern)
-
-
-def summarize_command_output(subcommand: str | None, output: str) -> str:
-    """
-    Extract just the evidence-bearing lines for `subcommand`'s output
-    before it's embedded in the validator's prompt - a plain tail (see
-    truncate_command_output) would silently drop errors/diffs that occur
-    before the last COMMAND_OUTPUT_MAX_LINES lines, since not every
-    toolchain's test runner concentrates its signal at the very end of
-    the output.
-
-    Falls back to a tail truncation if this isn't a recognized test
-    subcommand, or the pattern matched nothing - either a clean pass
-    with no error/warning/diff lines to report (itself valid evidence),
-    or output that didn't look like what was expected, in which case the
-    raw tail is still better than nothing.
-    """
-    toolchain = get_toolchain()
-    is_test_subcommand = (
-        toolchain.evidence_subcommands is None or subcommand in toolchain.evidence_subcommands
-    )
-    if not is_test_subcommand:
-        return truncate_command_output(output)
-    matched = [line for line in output.splitlines() if _test_signal_pattern().search(line)]
-    if not matched:
-        return truncate_command_output(output)
-    return truncate_command_output("\n".join(matched))
-
-
-def gather_build_status(plan_content: str) -> str:
-    toolchain = get_toolchain()
-    commands = extract_plan_commands(plan_content)
-    if not commands:
-        return (
-            f"(no commands matching the {toolchain.evidence_binary} allowlist "
-            f"were named in the plan)"
-        )
-
-    blocks = []
-    for command_tokens in commands:
-        rendered = " ".join(command_tokens)
-        print(f"-- Running '{rendered}' for validation evidence ...", flush=True)
-        result = subprocess.run(command_tokens, capture_output=True, text=True, check=False)
-        output = (result.stdout + result.stderr).strip() or "(no output)"
-        subcommand = command_tokens[1] if len(command_tokens) > 1 else None
-        output = summarize_command_output(subcommand, output)
-        blocks.append(
-            f"### `{rendered}` (exit code {result.returncode})\n```\n{output}\n```"
-        )
-    return "\n\n".join(blocks)
-
-
 # ---------------------------------------------------------------------------
 # Narrow step (check-ticket.py and resolve-ticket.py) - same
 # evidence-gathering a coverage validator would need, but the output is
@@ -719,7 +587,7 @@ def gather_build_status(plan_content: str) -> str:
 
 
 def build_narrow_prompt(
-    ticket_content: str, plan_content: str, plan_file_context: str, build_status_content: str
+    ticket_content: str, plan_content: str, plan_file_context: str
 ) -> str:
     instructions = load_prompt_body(NARROW_PROMPT_FILE)
     return (
@@ -733,10 +601,6 @@ def build_narrow_prompt(
         f"Implementation Plan section names - already provided, no need "
         f"to read_file these again unless you need a file the plan didn't "
         f"name:\n\n{plan_file_context}\n\n"
-        f"Here is the output of running the exact commands the acceptance "
-        f"criteria name (e.g. `cargo test`), captured just now - you have "
-        f"no way to run these yourself, so this is the evidence for any "
-        f"command-based criteria:\n\n{build_status_content}\n\n"
         f"Use read_file/list_dir/search_files for anything else you need - "
         f"when hunting for evidence of a criterion across the codebase, "
         f"prefer one targeted search_files call over list_dir-then-read_file "
@@ -749,12 +613,11 @@ def build_narrow_prompt(
 
 def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
     plan_file_context, plan_file_paths = gather_plan_file_context(plan_content)
-    build_status_content = gather_build_status(plan_content)
     preloaded = {str(TICKET_FILE), str(PLAN_FILE)} | plan_file_paths
     try:
         result = run_ai_step_with_retry(
             lambda: run_with_tools(
-                build_narrow_prompt(ticket_content, plan_content, plan_file_context, build_status_content),
+                build_narrow_prompt(ticket_content, plan_content, plan_file_context),
                 tools.READ_ONLY_TOOLS,
                 tools.make_executor(allow_write=False, preloaded_paths=preloaded),
                 "narrow",
@@ -768,6 +631,76 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
     if "## Acceptance Criteria" not in result.text:
         render_markdown(result.text)
         die_with_log("narrow", "Narrower did not produce a valid gap plan (see output above).")
+    print("-- Gap plan generated, writing to disk ...", flush=True)
+    gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
+    render_markdown(gap_plan_content)
+    return gap_plan_content
+
+
+# ---------------------------------------------------------------------------
+# Plan-narrow step (merged) - experimental alternative to running plan and
+# narrow as two separate sessions. The model extracts acceptance criteria
+# and checks each one against the codebase's current state in one pass,
+# using live tools throughout instead of the host pre-reading plan-named
+# files and handing them back (see gather_plan_file_context) - that
+# handoff only existed to bridge two separate sessions with clean context
+# windows; one session needs no bridge. Produces a single artifact, the
+# gap plan - there's no separate full-plan output, since the only thing
+# that consumed the full plan (run_review_gate's "review against full
+# ticket scope") doesn't need criteria that are already satisfied and
+# untouched.
+# ---------------------------------------------------------------------------
+
+
+def build_plan_narrow_prompt(ticket_content: str) -> str:
+    instructions = load_prompt_body(PLAN_NARROW_PROMPT_FILE)
+    root_listing = tools.list_dir(".")
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"{AUTO_PREAMBLE}"
+        f"Here is the ticket ({TICKET_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{ticket_content}\n\n"
+        f"Here is the project root directory listing - already current, "
+        f"no need to list_dir('.') again:\n{root_listing}\n\n"
+        f"This is a clean run: {GAP_PLAN_FILE} does not exist yet - there "
+        f"is no prior gap plan to check for, so don't spend a tool call "
+        f"confirming that.\n\n"
+        f"Use read_file/list_dir/search_files for anything else you need - "
+        f"but only files you have a concrete reason to need, not "
+        f"speculative browsing; every tool call you make gets resent in "
+        f"full on every subsequent turn, so prefer one targeted "
+        f"search_files call over open-ended directory browsing when "
+        f"you're looking for something specific. Produce the gap plan in "
+        f"the exact format from Step 5 above. Your final response (no "
+        f"further tool calls) must be exactly that plan text - the caller "
+        f"writes it to {GAP_PLAN_FILE} itself, so do not call write_file "
+        f"and do not add any chat header or commentary around the plan."
+    )
+
+
+def run_plan_narrow_step(ticket_content: str, model: str) -> str:
+    """
+    Merged plan+narrow: one model session, one artifact (the gap plan).
+    See module-level comment above for why this doesn't also produce
+    PLAN_FILE/.tdd-plan.md the way the two-step path does.
+    """
+    try:
+        result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_plan_narrow_prompt(ticket_content),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False, preloaded_paths={str(TICKET_FILE)}),
+                "plan-narrow",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
+            "plan-narrow",
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        die_with_log("plan-narrow", str(e))
+    if "## Acceptance Criteria" not in result.text:
+        render_markdown(result.text)
+        die_with_log("plan-narrow", "Planner-Narrower did not produce a valid gap plan (see output above).")
     print("-- Gap plan generated, writing to disk ...", flush=True)
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
     render_markdown(gap_plan_content)

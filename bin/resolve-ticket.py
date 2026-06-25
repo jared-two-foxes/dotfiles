@@ -49,12 +49,16 @@ completion and its resume point):
       second implementation attempt if it doesn't.
 
 Once every criterion is implemented and passing: a lint gate (fmt
---check, clippy), then code review (read-only) over every file changed
-across every criterion, against the *original* plan (full ticket scope,
-not just the narrowed gap). Both single-shot, no retry. Lint/style
-checks run only here, never as acceptance-criteria evidence during
-narrowing - they're not evidence of whether a feature is implemented,
-just of code health once it is.
+--check, clippy), then a full test suite run (test_cmd), then code
+review (read-only) over every file changed across every criterion,
+against the *original* plan (full ticket scope, not just the narrowed
+gap). All single-shot, no retry. Lint/style checks run only here, never
+as acceptance-criteria evidence during narrowing - they're not evidence
+of whether a feature is implemented, just of code health once it is.
+The full-suite run exists because each criterion's own gate only proves
+*its* scoped test passes at the moment it's implemented - a later
+criterion's implementation can silently regress an earlier one's test,
+and nothing else in this loop re-checks that.
 
 Build/test commands come from a project-local TOML config (see
 --config), same as tdd-pipeline.py, plus a templated test_filter_cmd
@@ -208,9 +212,20 @@ def main() -> None:
                 criterion=criterion,
             )
 
-    # ── Lint gate + final code review, once everything is implemented ─────
+    # ── Lint gate + full-suite gate + final code review ────────────────────
     if changed_files:
         lib.run_lint_gate(commands)
+
+        result = lib.run_command(commands["test_cmd"], "full test suite gate")
+        if result.returncode != 0:
+            lib.die_with_log(
+                "test-suite",
+                f"Full test suite fails after all criteria implemented (exit "
+                f"{result.returncode}). A criterion's scoped test passing "
+                f"doesn't guarantee an earlier criterion's test still does - "
+                f"see output above.",
+            )
+
         lib.run_review_gate(changed_files, plan_text, model)
 
     print("\n-- Gap implemented, tests pass, review approved. Success.", flush=True)

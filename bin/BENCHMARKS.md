@@ -471,6 +471,80 @@ over. The real value of this fixture comes from running the models that
 stronger signal (it's bad in general, not just at reconciling a stale
 ticket path) than failing SA-452 alone suggested.
 
+### `plan-narrow` (merged plan+narrow, single model session, single artifact)
+
+Experimental alternative to running `plan` and `narrow` as two separate
+sessions (see `pipeline_lib.run_plan_narrow_step` /
+`prompts/plan-narrow.prompt.md`). Produces only `.gap-plan.md` - no
+separate `.tdd-plan.md` - since the only consumer of the full plan
+(`run_review_gate`'s "review against full ticket scope") doesn't need
+criteria that are already satisfied and untouched. Also drops narrow's
+host-run command-evidence gathering entirely (`extract_plan_commands`/
+`gather_build_status`, removed from `pipeline_lib.py`): that machinery
+never provided a durable guarantee anyway - a criterion it found
+"passing" had no protection against a *later* criterion's
+implementation regressing it. The real fix for that gap was adding a
+full-suite `test_cmd` gate to `resolve-ticket.py` before its review gate
+(unrelated to this experiment, but a prerequisite for trusting that
+dropping command-evidence here doesn't weaken anything).
+
+Graded with the same heuristics as `plan`/`narrow` (`GRADERS` keyed by
+`(ticket, "plan-narrow")`, pointing at the same grader functions).
+
+| Ticket | Model | Trials | Pass rate | Avg cost | Avg time |
+|---|---|---|---|---|---|
+| sa452 | gpt-5.4-mini | 3 | 3/3 | $0.060 | 41s |
+| sa452 | claude-haiku-4-5 | 3 | 3/3 | $0.243 | 68s |
+| sa500 | gpt-5.4-mini | 3 | 3/3 | $0.032 | 26s |
+| sa500 | claude-haiku-4-5 | 3 | 3/3 | $0.024 | 26s |
+| sa501 | gpt-5.4-mini | 3 | 3/3 | $0.066 | 49s |
+| sa501 | claude-haiku-4-5 | 3 | 3/3 | $0.064 | 38s |
+| sa502 | gpt-5.4-mini | 3 | **0/3** | $0.057 | 44s |
+| sa502 | claude-haiku-4-5 | 3 | **0/3** | $0.099 | 44s |
+
+**Cost/time vs. the two-step baseline**: on sa452, merged cost
+($0.060/41s for gpt-5.4-mini) lands close to `plan` alone's existing
+35-trial average ($0.057/32s) - i.e. narrowing is riding along nearly
+free instead of costing a second full session. sa500/sa501 show a
+similar pattern against their smoke-tested plan+narrow totals. This is
+the efficiency win the experiment was looking for, on every fixture
+where both steps agreed (sa452, sa500, sa501) - but see sa502 below for
+where the merge costs something other than money.
+
+**sa502 regression - the merge fails the "already implemented" trap
+that the two-step `plan` block didn't fail as hard.** `plan` alone
+scored `claude-haiku-4-5` 2/3 and `gpt-5.4-mini` 0/3 on this same trap
+(see the `plan`/sa502 table above); merged `plan-narrow` goes 0/3 for
+*both* models. Inspecting one trial's actual output (`gpt-5.4-mini`,
+read tools traced `rate_limit_config.rs`/`rate_limiter.rs`/the existing
+test file correctly): instead of recognizing every criterion is already
+satisfied and emitting `(none - all criteria satisfied)`, it retained a
+vague, ungrounded criterion ("`cargo test -p virtual_assistant_api`
+passes with tests covering the above") with an Implementation Plan entry
+about "resolving any package-test failures" - never naming
+`rate_limit_config.rs` or `quote_resend_rate_limit` in the surviving
+text at all, despite having read both correctly during evidence
+gathering. The narrowing judgment (this is already done) and the
+evidence-gathering (these are the right files) happened correctly in the
+trace, but didn't survive into Step 4 (build the plan from what's left)
+- doing "extract criteria" and "judge each one against the codebase" as
+one continuous pass seems to make it easier for the model to lose track
+of *why* it kept a criterion by the time it writes the final entry,
+something the two-step path's narrow-as-its-own-focused-pass apparently
+resists better. Not enough trials to call this conclusive (n=3), but
+it's a real, reproducible failure mode, not a grader artifact - inspected
+the raw `.gap-plan.md` directly, not just the heuristic's verdict.
+
+**No default change recommended.** The merge is a real cost/time win on
+every fixture except sa502, where it strictly underperforms the unmerged
+`plan` block at the same trial count. Before swapping `check-ticket.py`/
+`resolve-ticket.py` over: run more trials on sa502 specifically (n=3 is
+exactly the count this file's own guidance says not to trust), and try
+whether restructuring Step 4 of `plan-narrow.prompt.md` (e.g. requiring
+the file/symbol citation to be repeated in the retained criterion's "why"
+comment, not just during evidence-gathering) recovers the sa502 result
+without regressing the other three.
+
 ## How to extend this
 
 - **More trials on an existing model/block**: rerun with a higher `--trials`

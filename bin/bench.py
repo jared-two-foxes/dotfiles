@@ -90,7 +90,10 @@ CARGO_BLOCKS = {"test-criterion", "implement-criterion"}
 # plan/narrow trials are pure model calls (tens of seconds to a few
 # minutes); the cargo blocks additionally compile and run cargo, which
 # is much slower, especially before a lane's target dir is warm.
-TRIAL_TIMEOUT_S = {"plan": 900, "narrow": 900, "test-criterion": 2400, "implement-criterion": 2400}
+TRIAL_TIMEOUT_S = {
+    "plan": 900, "narrow": 900, "plan-narrow": 900,
+    "test-criterion": 2400, "implement-criterion": 2400,
+}
 
 # Blocks that need a fixed gap-plan fixture instead of plan/narrow's
 # own fixture handling - test-criterion has no "good/bad upstream plan"
@@ -303,6 +306,14 @@ def build_jobs(args) -> list[Job]:
                     ticket_file=ticket_file, plan_fixture=None, plan_file=None,
                     trial_index=trial,
                 ))
+    elif args.block == "plan-narrow":
+        for model in models:
+            for trial in range(args.trials):
+                jobs.append(Job(
+                    model=model, block="plan-narrow", ticket_name=args.ticket_name,
+                    ticket_file=ticket_file, plan_fixture=None, plan_file=None,
+                    trial_index=trial,
+                ))
     elif args.block == "narrow":
         variants = ["good", "bad"] if args.plan_fixture == "both" else [args.plan_fixture]
         for variant in variants:
@@ -387,7 +398,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--block", required=True,
-        choices=["plan", "narrow", "test-criterion", "implement-criterion"],
+        choices=["plan", "narrow", "plan-narrow", "test-criterion", "implement-criterion"],
     )
     parser.add_argument("--models", required=True, help="Comma-separated model IDs")
     parser.add_argument("--trials", type=int, default=3)

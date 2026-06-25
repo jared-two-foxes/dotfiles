@@ -206,12 +206,16 @@ def grade_implement_compiles_and_green(qualified_test_name: str) -> tuple[bool, 
 GRADERS = {
     ("sa452", "plan"): grade_sa452_no_file_split,
     ("sa452", "narrow"): grade_sa452_no_file_split,
+    ("sa452", "plan-narrow"): grade_sa452_no_file_split,
     ("sa500", "plan"): grade_sa500_standard,
     ("sa500", "narrow"): grade_sa500_standard,
+    ("sa500", "plan-narrow"): grade_sa500_standard,
     ("sa501", "plan"): grade_sa501_debug_redaction_named,
     ("sa501", "narrow"): grade_sa501_debug_redaction_named,
+    ("sa501", "plan-narrow"): grade_sa501_debug_redaction_named,
     ("sa502", "plan"): grade_sa502_already_implemented,
     ("sa502", "narrow"): grade_sa502_already_implemented,
+    ("sa502", "plan-narrow"): grade_sa502_already_implemented,
 }
 
 
@@ -219,7 +223,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--block", required=True,
-        choices=["plan", "narrow", "test-criterion", "implement-criterion"],
+        choices=["plan", "narrow", "plan-narrow", "test-criterion", "implement-criterion"],
     )
     parser.add_argument("--ticket-name", required=True, help="Grader key, e.g. sa452")
     parser.add_argument("--ticket-file", required=True, type=Path)
@@ -240,7 +244,7 @@ def main() -> None:
     parser.add_argument("--model", required=True)
     args = parser.parse_args()
 
-    if args.block in ("plan", "narrow"):
+    if args.block in ("plan", "narrow", "plan-narrow"):
         grader = GRADERS.get((args.ticket_name, args.block))
         if grader is None:
             print(json.dumps({"error": f"no grader for ({args.ticket_name}, {args.block})"}))
@@ -261,6 +265,9 @@ def main() -> None:
                 raise ValueError("--plan-file is required for --block narrow")
             plan_content = args.plan_file.read_text(encoding="utf-8")
             output_text = lib.run_narrow_step(ticket_content, plan_content, args.model)
+            success, reason = grader(output_text)
+        elif args.block == "plan-narrow":
+            output_text = lib.run_plan_narrow_step(ticket_content, args.model)
             success, reason = grader(output_text)
         elif args.block == "test-criterion":
             if not args.plan_file:
