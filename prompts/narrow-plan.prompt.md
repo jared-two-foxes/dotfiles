@@ -70,9 +70,20 @@ For each acceptance criterion:
   or production code that demonstrates it is met *in the current state*
   - not "was touched by the most recent change."
 - For criteria that name an exact command (e.g. "`cargo test` passes"),
-  you cannot run it yourself - judge from the test/code it's checking,
-  same as any other criterion, and mark UNKNOWN if that's not enough to
-  confirm either way.
+  you cannot run it yourself. Two different shapes of this come up:
+  - The command-criterion is the *only* evidence for a specific behavior
+    not covered by any other criterion - judge it from the test/code it's
+    checking, same as any other criterion, and mark UNKNOWN if that's
+    not enough to confirm either way.
+  - The command-criterion is a blanket restatement that the suite/tests
+    pass, layered on top of other criteria already covering the actual
+    behaviors (e.g. "`cargo test` passes with tests covering the
+    above," referring to criteria you've already judged separately) -
+    this is not new evidence to chase, it's a gate the pipeline already
+    enforces downstream (a full-suite test run and lint check run after
+    implementation, regardless of what this document says). Mark it
+    PASS once every criterion it references is itself PASS; don't
+    retain it just because you personally can't execute it.
 - Mark it PASS or FAIL, citing the evidence (test name, code excerpt, or
   file/line).
 - If a criterion's relevant code/tests can't be found via your tools,

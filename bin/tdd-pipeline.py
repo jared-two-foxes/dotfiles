@@ -58,6 +58,9 @@ import ai_client  # noqa: E402
 from ai_client import DEFAULT_MODEL  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import tools  # noqa: E402
+import verbosity  # noqa: E402
+
+log = verbosity.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Main
@@ -82,7 +85,17 @@ def main() -> None:
         default=str(lib.PIPELINE_CONFIG_FILE),
         help=f"Path to the build/test command config (default: {lib.PIPELINE_CONFIG_FILE}).",
     )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=list(verbosity.LEVELS),
+        help="Console verbosity (default: info). 'debug' shows per-tool-call "
+             "activity and command output even on success; 'trace' adds raw "
+             "request/response payloads; 'warning'/'error'/'critical' show "
+             "progressively less.",
+    )
     args = parser.parse_args()
+    verbosity.setup_logging(args.log_level)
     model = args.model
 
     commands = lib.load_pipeline_config(Path(args.config))
@@ -108,8 +121,8 @@ def main() -> None:
     # ── Step 6: Run tests - green means done ───────────────────────────────
     result = lib.run_command(commands["test_cmd"], "initial test run")
     if result.returncode == 0:
-        print("\n-- Tests already pass against existing code. Success.", flush=True)
-        print(f"-- Token usage: {ai_client.usage}", flush=True)
+        log.info("\n-- Tests already pass against existing code. Success.")
+        log.info("-- Token usage: %s", ai_client.usage)
         return
 
     # ── Step 7: Implement (test files write-protected) ────────────────────
@@ -132,8 +145,8 @@ def main() -> None:
     lib.run_review_gate(changed_files, plan_text, model)
 
     # ── Step 11: Success ─────────────────────────────────────────────────────
-    print("\n-- Implementation complete, tests pass, review approved. Success.", flush=True)
-    print(f"-- Token usage: {ai_client.usage}", flush=True)
+    log.info("\n-- Implementation complete, tests pass, review approved. Success.")
+    log.info("-- Token usage: %s", ai_client.usage)
 
 
 if __name__ == "__main__":

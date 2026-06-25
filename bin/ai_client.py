@@ -48,6 +48,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+import verbosity
+
+log = verbosity.get_logger(__name__)
+
 
 class AIError(RuntimeError):
     """Raised for any invocation failure. Let it propagate to die()."""
@@ -423,6 +427,7 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
     provider, bare_model = resolve_provider(original_model)
     payload = {**payload, "model": bare_model}
     body = json.dumps(payload).encode()
+    log.trace("%s request: %s", label, payload)
 
     attempt = 0
     while True:
@@ -439,6 +444,7 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
         try:
             with urllib.request.urlopen(req) as resp:
                 parsed = json.loads(resp.read())
+            log.trace("%s response: %s", label, parsed)
             break
         except urllib.error.HTTPError as e:
             error_body = e.read().decode()
@@ -454,10 +460,9 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
 
         attempt += 1
         backoff_s = RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
-        print(
-            f"   {label}: transient error, retrying in {backoff_s:.0f}s "
-            f"(attempt {attempt}/{MAX_RETRIES}) ...",
-            flush=True,
+        log.warning(
+            "   %s: transient error, retrying in %.0fs (attempt %d/%d) ...",
+            label, backoff_s, attempt, MAX_RETRIES,
         )
         time.sleep(backoff_s)
 
@@ -476,7 +481,7 @@ def _post_chat_completion(payload: dict, label: str) -> dict:
 def run_prompt(prompt: str, label: str, model: str = DEFAULT_MODEL) -> AIResult:
     """Send `prompt` to `model`'s provider (see resolve_provider). Raises AIError on failure."""
     provider, _ = resolve_provider(model)
-    print(f"\n-- Running '{label}' via {provider.base_url} (model={model}) ...", flush=True)
+    log.info("\n-- Running '%s' via %s (model=%s) ...", label, provider.base_url, model)
     parsed = _post_chat_completion(
         {"model": model, "messages": [{"role": "user", "content": prompt}]}, label
     )
@@ -530,14 +535,14 @@ def run_with_tools(
     messages = [{"role": "user", "content": prompt}]
 
     provider, _ = resolve_provider(model)
-    print(f"\n-- Running '{label}' via {provider.base_url} (model={model}) ...", flush=True)
+    log.info("\n-- Running '%s' via %s (model=%s) ...", label, provider.base_url, model)
     turn = 0
     while True:
         turn += 1
         if turn > max_turns:
-            raise StepBudgetExceeded(
-                f"{label}: exceeded {max_turns} turns with no final answer - aborting."
-            )
+            msg = f"{label}: exceeded {max_turns} turns with no final answer - aborting."
+            log.critical(msg)
+            raise StepBudgetExceeded(msg)
         parsed = _post_chat_completion(
             {"model": model, "messages": messages, "tools": tools}, label
         )
@@ -545,10 +550,12 @@ def run_with_tools(
         if max_cost_usd is not None:
             cost_so_far, _unpriced = usage.total_cost_usd()
             if cost_so_far >= max_cost_usd:
-                raise StepBudgetExceeded(
+                msg = (
                     f"{label}: cumulative cost ~${cost_so_far:.4f} reached the "
                     f"${max_cost_usd:.4f} ceiling (${MAX_COST_USD_ENV}) - aborting."
                 )
+                log.critical(msg)
+                raise StepBudgetExceeded(msg)
 
         try:
             message = parsed["choices"][0]["message"]
@@ -567,7 +574,7 @@ def run_with_tools(
                 args = json.loads(function.get("arguments") or "{}")
             except json.JSONDecodeError:
                 args = {}
-            print(f"   {summarize_call(name, args)}", flush=True)
+            log.debug("   %s", summarize_call(name, args))
             result_text = executor(name, args)
             messages.append({
                 "role": "tool",

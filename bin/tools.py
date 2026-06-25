@@ -13,6 +13,10 @@ import re
 from pathlib import Path
 from typing import Callable
 
+import verbosity
+
+log = verbosity.get_logger(__name__)
+
 
 class ToolError(RuntimeError):
     """Raised for any tool-execution failure. Callers turn this into a
@@ -202,7 +206,7 @@ def write_file_block(path: str) -> Callable[[str], str]:
     a tool call inside an agentic step.
     """
     def block(content: str) -> str:
-        print(f"   {write_file(path, content)}", flush=True)
+        log.info("   %s", write_file(path, content))
         return content
     return block
 

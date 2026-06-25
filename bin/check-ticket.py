@@ -55,6 +55,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import tools  # noqa: E402
+import verbosity  # noqa: E402
+
+log = verbosity.get_logger(__name__)
 
 DEFAULT_MODEL = "gpt-5.4-mini"
 
@@ -71,7 +74,17 @@ def main() -> None:
         default=DEFAULT_MODEL,
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
     )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=list(verbosity.LEVELS),
+        help="Console verbosity (default: info). 'debug' shows per-tool-call "
+             "activity and command output even on success; 'trace' adds raw "
+             "request/response payloads; 'warning'/'error'/'critical' show "
+             "progressively less.",
+    )
     args = parser.parse_args()
+    verbosity.setup_logging(args.log_level)
     model = args.model
 
     # ── Step 0: Clean slate ─────────────────────────────────────────────────
@@ -89,14 +102,14 @@ def main() -> None:
 
     remaining = lib.extract_acceptance_criteria(gap_plan_content)
     if remaining:
-        print(
-            f"\n-- {len(remaining)} acceptance criterion(criteria) still unsatisfied. "
-            f"Run 'resolve-ticket {args.ticket_id}' to implement them.",
-            flush=True,
+        log.info(
+            "\n-- %d acceptance criterion(criteria) still unsatisfied. "
+            "Run 'resolve-ticket %s' to implement them.",
+            len(remaining), args.ticket_id,
         )
     else:
-        print("\n-- All acceptance criteria satisfied. Ticket is complete.", flush=True)
-    print(f"-- Token usage: {ai_client.usage}", flush=True)
+        log.info("\n-- All acceptance criteria satisfied. Ticket is complete.")
+    log.info("-- Token usage: %s", ai_client.usage)
 
 
 if __name__ == "__main__":

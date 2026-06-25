@@ -83,7 +83,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
-import tools  # noqa: E402
+import verbosity  # noqa: E402
+
+log = verbosity.get_logger(__name__)
 
 DEFAULT_MODEL = "gpt-5.4-mini"
 
@@ -114,7 +116,17 @@ def main() -> None:
              "and start over. Never touches test or implementation source "
              "files already written.",
     )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=list(verbosity.LEVELS),
+        help="Console verbosity (default: info). 'debug' shows per-tool-call "
+             "activity and command output even on success; 'trace' adds raw "
+             "request/response payloads; 'warning'/'error'/'critical' show "
+             "progressively less.",
+    )
     args = parser.parse_args()
+    verbosity.setup_logging(args.log_level)
     model = args.model
 
     if args.reset:
@@ -125,36 +137,15 @@ def main() -> None:
     ticket_id = args.ticket_id
 
     # ── Planning pipeline (re-entrant: each block skipped if already done) ──
-    blocks = [
-        lib.Block(
-            name="fetch_ticket",
-            check=lambda: lib.TICKET_FILE.is_file() and bool(lib.TICKET_FILE.read_text(encoding="utf-8").strip()),
-            run=lambda: tools.write_file_block(str(lib.TICKET_FILE))(lib.fetch_ticket_text(ticket_id)),
-        ),
-        lib.Block(
-            name="planner",
-            check=lambda: lib.PLAN_FILE.is_file() and "## Acceptance Criteria" in lib.PLAN_FILE.read_text(encoding="utf-8"),
-            run=lambda: lib.run_plan_step(lib.TICKET_FILE.read_text(encoding="utf-8"), model),
-        ),
-        lib.Block(
-            name="narrower",
-            check=lambda: lib.GAP_PLAN_FILE.is_file() and "## Acceptance Criteria" in lib.GAP_PLAN_FILE.read_text(encoding="utf-8"),
-            run=lambda: lib.run_narrow_step(
-                lib.TICKET_FILE.read_text(encoding="utf-8"),
-                lib.PLAN_FILE.read_text(encoding="utf-8"),
-                model,
-            ),
-        ),
-    ]
-    lib.walk(blocks)
+    lib.walk(lib.build_planning_blocks(ticket_id, model))
 
     plan_text = lib.PLAN_FILE.read_text(encoding="utf-8")
     gap_plan_text = lib.GAP_PLAN_FILE.read_text(encoding="utf-8")
 
     criteria = lib.extract_acceptance_criteria(gap_plan_text)
     if not criteria:
-        print("\n-- No gap found. Success.", flush=True)
-        print(f"-- Token usage: {ai_client.usage}", flush=True)
+        log.info("\n-- No gap found. Success.")
+        log.info("-- Token usage: %s", ai_client.usage)
         return
 
     commands = lib.load_pipeline_config(Path(args.config))
@@ -162,14 +153,14 @@ def main() -> None:
     # ── Implementation pipeline: one acceptance criterion at a time ───────
     changed_files: list[str] = []
     for criterion in criteria:
-        print(f"\n-- Criterion: {criterion}", flush=True)
+        log.info("\n-- Criterion: %s", criterion)
         existing = lib.find_criterion_test(gap_plan_text, criterion)
 
         if existing and lib.criterion_test_exists(*existing):
             file_path, test_name = existing
             result = lib.run_scoped_test(test_name, commands, "resume check")
             if result.returncode == 0:
-                print("-- Already satisfied (resumed). Skipping.", flush=True)
+                log.info("-- Already satisfied (resumed). Skipping.")
                 continue
         else:
             file_path, test_name = lib.run_test_for_criterion(criterion, gap_plan_text, model)
@@ -184,10 +175,9 @@ def main() -> None:
 
         result = lib.run_scoped_test(test_name, commands, "red check")
         if result.returncode == 0:
-            print(
+            log.info(
                 "-- Test passed without implementation - this criterion's "
-                "gap didn't reproduce. Skipping implement.",
-                flush=True,
+                "gap didn't reproduce. Skipping implement."
             )
             continue
 
@@ -228,8 +218,8 @@ def main() -> None:
 
         lib.run_review_gate(changed_files, plan_text, model)
 
-    print("\n-- Gap implemented, tests pass, review approved. Success.", flush=True)
-    print(f"-- Token usage: {ai_client.usage}", flush=True)
+    log.info("\n-- Gap implemented, tests pass, review approved. Success.")
+    log.info("-- Token usage: %s", ai_client.usage)
 
 
 if __name__ == "__main__":

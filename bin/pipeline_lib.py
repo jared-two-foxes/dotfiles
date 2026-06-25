@@ -45,6 +45,9 @@ from render import render_markdown
 import repo_context
 import tools
 import toolchains
+import verbosity
+
+log = verbosity.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -146,8 +149,8 @@ def get_toolchain() -> toolchains.Toolchain:
 
 
 def die(msg: str) -> None:
-    print(f"error: {msg}", file=sys.stderr)
-    print(f"-- Token usage so far: {ai_client.usage}", file=sys.stderr)
+    log.error("error: %s", msg)
+    log.error("-- Token usage so far: %s", ai_client.usage)
     sys.exit(1)
 
 
@@ -181,7 +184,7 @@ def clean_stale_state() -> None:
     for path in STALE_FILES:
         if path.exists():
             path.unlink()
-            print(f"-- Removed stale {path} from a previous run", flush=True)
+            log.info("-- Removed stale %s from a previous run", path)
 
 
 def reset_pipeline_state() -> None:
@@ -192,7 +195,7 @@ def reset_pipeline_state() -> None:
     for path in RESETTABLE_FILES:
         if path.exists():
             path.unlink()
-            print(f"-- Reset: removed {path}", flush=True)
+            log.info("-- Reset: removed %s", path)
 
 
 # ---------------------------------------------------------------------------
@@ -272,10 +275,9 @@ def run_ai_step_with_retry(
                 raise
             log_event(label, "retry", error=str(e), criterion=criterion)
             backoff_s = AI_STEP_RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
-            print(
-                f"-- {label}: attempt {attempt}/{max_attempts} failed ({e}), "
-                f"retrying in {backoff_s:.0f}s ...",
-                flush=True,
+            log.warning(
+                "-- %s: attempt %d/%d failed (%s), retrying in %.0fs ...",
+                label, attempt, max_attempts, e, backoff_s,
             )
             time.sleep(backoff_s)
 
@@ -300,7 +302,7 @@ def show_last_failure() -> None:
     where = last.get("block", "?")
     if last.get("criterion"):
         where += f" (criterion: {last['criterion']})"
-    print(f"-- Note: last attempt failed at {where}: {last.get('error')}", flush=True)
+    log.warning("-- Note: last attempt failed at %s: %s", where, last.get("error"))
 
 
 # ---------------------------------------------------------------------------
@@ -324,12 +326,45 @@ class Block:
 def walk(blocks: list[Block]) -> None:
     for block in blocks:
         if block.check():
-            print(f"-- {block.name}: already satisfied, skipping", flush=True)
+            log.info("-- %s: already satisfied, skipping", block.name)
             continue
-        print(f"-- {block.name}: running ...", flush=True)
+        log.info("-- %s: running ...", block.name)
         block.run()
         if not block.check():
             die_with_log(block.name, f"{block.name} ran but its postcondition still isn't satisfied.")
+
+
+def build_planning_blocks(ticket_id: str, model: str) -> list[Block]:
+    """
+    The fetch -> plan -> narrow Block list shared by resolve-ticket.py
+    (which continues into its own per-criterion implementation loop
+    afterward) and write-tests.py (which continues into a test-only
+    loop instead, no implementer). Re-entrant: each block is skipped if
+    its file already exists and passes its validity check, so calling
+    this against a ticket that already has a valid .gap-plan.md from an
+    earlier check-ticket.py run does nothing here.
+    """
+    return [
+        Block(
+            name="fetch_ticket",
+            check=lambda: TICKET_FILE.is_file() and bool(TICKET_FILE.read_text(encoding="utf-8").strip()),
+            run=lambda: tools.write_file_block(str(TICKET_FILE))(fetch_ticket_text(ticket_id)),
+        ),
+        Block(
+            name="planner",
+            check=lambda: PLAN_FILE.is_file() and "## Acceptance Criteria" in PLAN_FILE.read_text(encoding="utf-8"),
+            run=lambda: run_plan_step(TICKET_FILE.read_text(encoding="utf-8"), model),
+        ),
+        Block(
+            name="narrower",
+            check=lambda: GAP_PLAN_FILE.is_file() and "## Acceptance Criteria" in GAP_PLAN_FILE.read_text(encoding="utf-8"),
+            run=lambda: run_narrow_step(
+                TICKET_FILE.read_text(encoding="utf-8"),
+                PLAN_FILE.read_text(encoding="utf-8"),
+                model,
+            ),
+        ),
+    ]
 
 
 def find_verdict(text: str, tokens_by_priority: list[str]) -> str | None:
@@ -348,14 +383,13 @@ def load_pipeline_config(config_path: Path) -> dict:
     toolchain = get_toolchain()
     commands = dict(toolchain.commands)
     if not config_path.exists():
-        print(
-            f"-- Detected toolchain: {toolchain.name}. "
-            f"No {config_path} found, using its defaults: {commands}",
-            flush=True,
+        log.info(
+            "-- Detected toolchain: %s. No %s found, using its defaults: %s",
+            toolchain.name, config_path, commands,
         )
         return commands
 
-    print(f"-- Detected toolchain: {toolchain.name}. Loading overrides from {config_path} ...", flush=True)
+    log.info("-- Detected toolchain: %s. Loading overrides from %s ...", toolchain.name, config_path)
     with config_path.open("rb") as f:
         data = tomllib.load(f)
 
@@ -378,14 +412,22 @@ def run_command(command_str: str, label: str) -> subprocess.CompletedProcess:
     user-authored and trusted (unlike ticket-derived text) - shlex-split
     and run as an argv list, never shell=True, simply because there's no
     reason to invoke a shell for a fixed toolchain command.
+
+    Output logs at DEBUG on success and ERROR on failure - a passing
+    `cargo test`/`clippy` run can be hundreds of lines that add nothing
+    once the gate it's feeding into already passed; a failing one is
+    exactly the output whoever's watching needs to diagnose it. Visible
+    at the default `info` level only on failure, same as before; `debug`
+    and below also show it on success.
     """
     command_tokens = shlex.split(command_str)
-    print(f"-- Running '{command_str}' ({label}) ...", flush=True)
+    log.info("-- Running '%s' (%s) ...", command_str, label)
     result = subprocess.run(command_tokens, capture_output=True, text=True, check=False)
+    log_fn = log.error if result.returncode != 0 else log.debug
     if result.stdout:
-        print(result.stdout, end="")
+        log_fn(result.stdout)
     if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+        log_fn(result.stderr)
     return result
 
 
@@ -402,7 +444,7 @@ def fetch_ticket_text(ticket_id: str) -> str:
     passes the same in-memory string straight into the prompt builders
     instead of re-reading it off disk.
     """
-    print(f"-- Fetching ticket {ticket_id} ...", flush=True)
+    log.info("-- Fetching ticket %s ...", ticket_id)
     try:
         data = ticket_source.fetch_ticket(ticket_id)
     except urllib.error.HTTPError as e:
@@ -476,7 +518,7 @@ def run_plan_step(ticket_content: str, model: str) -> str:
     if "## Acceptance Criteria" not in result.text:
         render_markdown(result.text)
         die("Planner did not produce a valid plan (see output above).")
-    print("-- Plan generated, writing to disk ...", flush=True)
+    log.info("-- Plan generated, writing to disk ...")
     plan_content = tools.write_file_block(str(PLAN_FILE))(result.text)
     render_markdown(plan_content)
     return plan_content
@@ -633,7 +675,7 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
     if "## Acceptance Criteria" not in result.text:
         render_markdown(result.text)
         die_with_log("narrow", "Narrower did not produce a valid gap plan (see output above).")
-    print("-- Gap plan generated, writing to disk ...", flush=True)
+    log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
     render_markdown(gap_plan_content)
     return gap_plan_content
@@ -711,7 +753,7 @@ def run_plan_narrow_step(ticket_content: str, model: str) -> str:
     if "## Acceptance Criteria" not in result.text:
         render_markdown(result.text)
         die_with_log("plan-narrow", "Planner-Narrower did not produce a valid gap plan (see output above).")
-    print("-- Gap plan generated, writing to disk ...", flush=True)
+    log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
     render_markdown(gap_plan_content)
     return gap_plan_content
@@ -787,7 +829,7 @@ def annotate_criterion_test(plan_path: Path, criterion: str, file_path: str, tes
         die_with_log("annotate", f"Could not find criterion in {plan_path} to annotate: {criterion!r}")
     updated = "\n".join(lines) + ("\n" if content.endswith("\n") else "")
     plan_path.write_text(updated, encoding="utf-8")
-    print(f"   annotated {plan_path} with test pointer for criterion", flush=True)
+    log.info("   annotated %s with test pointer for criterion", plan_path)
     return updated
 
 
@@ -852,7 +894,86 @@ def run_lint_gate(commands: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-criterion test/implement steps (resolve-ticket.py only)
+# validate-and-review.py support - this script has no automated agent
+# tracking written_paths the way every other run_review_gate caller
+# does (the implementation here is manual, not tool calls), and may want
+# an optional smoke-test gate no toolchain default should have to define.
+# ---------------------------------------------------------------------------
+
+
+# This pipeline's own scaffolding (ticket/plan/gap-plan/log) ends up as
+# real filesystem changes too (write_file_block writes them like any
+# other file) but is never itself "the implementation" - excluded from
+# git_changed_files so validate-and-review.py's review gate judges the
+# human's actual work, not the artifacts this pipeline wrote along the way.
+_SCAFFOLDING_PATHS = frozenset(
+    str(p) for p in (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
+)
+
+
+def git_changed_files() -> list[str]:
+    """
+    The only source of truth for "what did the human touch" when there's
+    no automated agent tracking writes: tracked changes against HEAD
+    (staged or not) plus new untracked files, deduped, minus this
+    pipeline's own scaffolding files (see _SCAFFOLDING_PATHS). Trusted
+    host tooling, not ticket-derived input - run as an argv list same as
+    run_command, no shell.
+    """
+    tracked = subprocess.run(
+        ["git", "diff", "--name-only", "HEAD"], capture_output=True, text=True, check=False
+    )
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"], capture_output=True, text=True, check=False
+    )
+    files = tracked.stdout.splitlines() + untracked.stdout.splitlines()
+    seen: set[str] = set()
+    deduped = []
+    for f in files:
+        f = f.strip()
+        if f and f not in seen and f not in _SCAFFOLDING_PATHS:
+            seen.add(f)
+            deduped.append(f)
+    return deduped
+
+
+def load_smoke_cmd(config_path: Path) -> str | None:
+    """
+    Peeks for an optional 'smoke_cmd' key in the project-local pipeline
+    config, outside load_pipeline_config's strict per-toolchain schema -
+    no toolchain defines a smoke command (see toolchains.py), and none
+    should have to just to support an optional gate. Returns None if the
+    config file doesn't exist or doesn't set this key.
+    """
+    if not config_path.exists():
+        return None
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    value = data.get("smoke_cmd")
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def run_smoke_gate(smoke_cmd: str | None) -> None:
+    """
+    Stub: no real process-lifecycle smoke testing yet (starting a
+    server, probing a health endpoint, tearing it down is qualitatively
+    different work than a single command's exit code). Skips cleanly if
+    unset; if a project does set smoke_cmd, runs and gates on it the
+    same shape as every other gate in this module.
+    """
+    if smoke_cmd is None:
+        log.info("-- Smoke test: skipped (no smoke_cmd configured)")
+        return
+    result = run_command(smoke_cmd, "smoke test")
+    if result.returncode != 0:
+        die_with_log("smoke", f"Smoke test failed (exit {result.returncode}). See output above.")
+
+
+# ---------------------------------------------------------------------------
+# Per-criterion test/implement steps. run_test_for_criterion is shared by
+# resolve-ticket.py (continues into implement) and write-tests.py (test
+# only, no implementer - manual implementation follows); the implement
+# half (run_implement_for_criterion) is resolve-ticket.py only.
 # ---------------------------------------------------------------------------
 
 TEST_WITNESS_RE = re.compile(r"TEST_WITNESS:\s*(.+?)\s*::\s*(.+)$", re.MULTILINE)
