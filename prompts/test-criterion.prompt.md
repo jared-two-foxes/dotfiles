@@ -84,6 +84,54 @@ ticket prompted it.
   the complete file back with the test appended - never write a partial
   file.
 
+### If the criterion needs an API surface that doesn't exist yet
+
+Some criteria (e.g. "new field X is parsed into struct Y") name a
+field, accessor, or function that has no declaration anywhere yet - not
+missing *behaviour*, but missing from the type/API entirely. A test
+that references it as written would fail to *compile*, which is not the
+same as a correct, meaningfully-red test: a compile error proves nothing
+about the behaviour under test, and the caller's compile gate cannot
+tell "real implementation bug" apart from "this name doesn't exist."
+
+When this happens, add **only an accessor/constructor function** -
+never a struct field, struct literal change, or any other edit to an
+existing type's declaration. A new free function or method is the
+right shape here precisely because it's additive and can't break
+anything that already compiles: nothing else in the codebase calls it
+yet, so nothing else can be broken by it existing. A new or changed
+*field*, by contrast, can silently break every other struct-literal
+construction site of that type elsewhere in the codebase (any that
+don't use `..Default::default()`) - call sites you have no reliable
+way to find completely by reading alone, and no way to verify by
+compiling. Do not add one, even as a "minimal" placeholder, and even if
+the criterion's natural end state is plainly a struct field - that's
+the implementer's job once this test exists to drive it.
+
+Concretely: write a function (e.g. a free `parse_webhook_retry_rate_limit()`,
+or a method on the relevant type) that is the natural way code would
+obtain this value, with a real signature and a minimal body that
+compiles but is wrong (e.g. `todo!()`, `unimplemented!()`, or a
+hardcoded incorrect default) - just enough that the test calls real
+code and gets a wrong answer, not a `cannot find function`/`no field`
+compile error. This scaffolding is a structural placeholder, not the
+implementation - it must not contain the actual behaviour the criterion
+is testing for (no real parsing logic, no real defaulting, no real
+validation), and the test must still genuinely fail against it. Use
+`write_file` for the file you add it to (a new file, or an existing one
+if that's the idiomatic location), exactly as for the test file itself
+- full content, never a partial file - and call out what you added and
+why in your final answer (see below). Keep this to the minimum needed
+to compile; do not use this allowance to write more of the feature than
+the one named criterion strictly requires to be testable.
+
+If you genuinely cannot express the criterion via any new function or
+method - the criterion is unavoidably about a field's existence on a
+type with no sensible accessor to add (rare) - do not improvise a field
+change. Instead, say so explicitly in your final answer and explain why
+no accessor shape was viable, so the caller can route this case
+differently rather than risk a silent break elsewhere in the codebase.
+
 ## Final answer
 
 After the `write_file` call is done, give a final text answer (no more
@@ -95,6 +143,9 @@ Then report:
 - Whether existing conventions were found or inferred (Step 2)
 - A one-line description of what the test checks and why it currently
   fails
+- If you added scaffolding (Step 3's API-surface exception): which
+  file(s) and exactly what accessor function you added - this is
+  implementation-shaped work, so it must not pass silently
 
 Then, on its own line, exactly:
 
@@ -110,7 +161,11 @@ exactly right; the caller will use it verbatim to re-run just this test.
 
 - Never modify implementation/production source files - tests only,
   unless the test convention requires appending a test module to the
-  same file the production code lives in (Step 3).
+  same file the production code lives in (Step 3), or the test needs an
+  API surface that doesn't exist yet (Step 3's exception). In the latter
+  case, add only a new accessor/constructor function - never a struct
+  field or any other change to an existing type's declaration - and
+  never the actual behaviour the criterion is testing for.
 - Do not weaken, skip, or write a trivially-passing test.
 - Never name the test file or test function after the acceptance
   criterion - name it after the subject/behavior under test (Step 2).

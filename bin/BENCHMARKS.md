@@ -198,6 +198,41 @@ going 0/3 while the cheaper `gpt-5.4-mini` and same-family `claude-opus-4-8`
 both go 3/3 is the sharpest example yet that price tier doesn't predict
 per-block reliability.
 
+#### Sub-finding: the compile-red gate has a structural blind spot
+
+`test-criterion`'s grader requires the test to *compile* and then fail
+red. That's correct when the criterion is about wrong/missing
+*behaviour* on an existing API (SA-452's case: `Debug` exists, the
+redaction doesn't). It breaks down when the criterion names a field/
+function that has no declaration anywhere yet (SA-500's case: testing
+`RateLimitConfig.webhook_retry_rate_limit`, where the field itself
+doesn't exist) - a test that references it as written can't compile at
+all, and a compile error proves nothing about the behaviour under test.
+Running the 4 leading models from the table above against SA-500
+confirmed this: all 4 failed with `no field webhook_retry_rate_limit`
+compile errors (`gpt-5.4`/`gpt-5.4-mini` 1/3, `claude-opus-4-8`/
+`glm-5.1` 0/3) - a fixture/grader gap, not a model-quality signal.
+
+Fix: `prompts/test-criterion.prompt.md` Step 3 now lets Tester add a
+**new accessor/constructor function** as scaffolding when this happens
+(e.g. `parse_webhook_retry_rate_limit()` with a `todo!()`/wrong-default
+body) - real signature, deliberately wrong behaviour, just enough to
+turn a compile error into a real red. Explicitly forbids adding the
+field itself: an accessor is purely additive (nothing else in the
+codebase calls it yet, so nothing can break), but a new/changed *field*
+can silently break every other struct-literal construction site of that
+type that doesn't use `..Default::default()` - confirmed by an earlier
+version of this fix that allowed the field fallback and made things
+*worse* (1/12 pass across the same 4 models, with the new failure mode
+being unrelated files failing to compile via `E0063: missing field` at
+other construction sites Tester had no way to find by reading alone).
+Re-running accessor-only: `gpt-5.4-mini` 3/3 (was 1/3), confirming the
+fix. `gpt-5.4`/`claude-opus-4-8`/`glm-5.1` had mixed/failed results in
+the same batch but on isolated retry (`claude-opus-4-8`, 1 trial)
+passed cleanly - the batch failures were a transient API outage
+(uniform ~14s/$0 aborts across all of that batch's trials for those
+two models), not the prompt change.
+
 **No default changed yet for this block** - `gpt-5.4-mini` looks like the
 front-runner (ties the two priciest models at a fraction of the cost) but
 has only 3 trials here, not the ~10-25 that gave `plan`'s number real
