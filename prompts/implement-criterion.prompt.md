@@ -18,6 +18,7 @@ correct course.
 
 - `read_file(path)` - read a file's current full content.
 - `list_dir(path)` - list a directory's entries.
+- `search_files(query)` - search file contents across the project.
 - `write_file(path, content)` - write a file's complete content,
   overwriting it. Always pass the full file content, never a diff.
 - `ask_user_prompt(question)` - last resort only. This pipeline is
@@ -75,6 +76,23 @@ target.
 - Use `write_file` for every file you change or create, with its
   complete resulting content - never a partial file or diff.
 
+### If you add or change a field on an existing type
+
+Adding a field to a struct/type that's already constructed elsewhere in
+the codebase can silently break every other construction site that
+builds it via a literal without `..Default::default()` (or your
+language's equivalent) - those sites won't show up by reading just the
+test or the plan's named files, and you cannot compile to catch this
+yourself. Before finishing, `search_files` for the type's name (e.g.
+`RateLimitConfig {` or just `RateLimitConfig`) across the whole project,
+not only the files the plan or test mentions, and fix every other
+construction site you find so it still compiles with the new field
+(matching how the existing fields there are already populated - a
+literal value, a call to the same default the type's own `Default` impl
+uses, etc.). This applies to any type you add a field to, not just the
+one the named criterion is about - if satisfying the criterion requires
+changing a shared type, the search covers that whole type's usages.
+
 ## Final answer
 
 After all `write_file` calls are done, give a final text answer (no more
@@ -87,6 +105,10 @@ Then report:
 - Summary of what was implemented for this criterion
 - Any deviation from the plan's named files/approach (Step 2) - flag it
   explicitly, don't let it pass silently
+- If you added/changed a field on an existing type (Step 3's exception):
+  the `search_files` query you ran and every other construction site you
+  found and fixed - or, if the search found none, say so explicitly
+  rather than letting it pass silently
 
 ## Rules
 

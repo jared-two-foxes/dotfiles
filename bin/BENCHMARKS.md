@@ -248,14 +248,39 @@ the full `accounting_webhooks.rs` with the failing test already appended,
 copied into the worktree before the implementer runs so it starts in the
 state `test-criterion` would have left it in).
 
-| Model | Trials | Pass rate | Avg cost | Avg time |
-|---|---|---|---|---|
-| gpt-5.4-mini | 1 (smoke test) | 1/1 | $0.065 | 410s |
+| Model | Ticket | Trials | Pass rate | Avg cost | Avg time |
+|---|---|---|---|---|---|
+| gpt-5.4-mini | sa452 | 1 (smoke test) | 1/1 | $0.065 | 410s |
+| gpt-5.4-mini | sa500 | 1 (smoke test) | 1/1 | $0.690 | 457s |
 
-Only smoke-tested so far (confirms the wiring works end to end - implements
-the Debug redaction, compiles, scoped test goes green). Needs a real trial
-batch (5-10+ per model, several models) before drawing any conclusion about
-which model to default to here.
+Only smoke-tested so far (confirms the wiring works end to end). Needs a
+real trial batch (5-10+ per model, several models) before drawing any
+conclusion about which model to default to here.
+
+A second sa500 fixture (`fixtures/sa500/test-webhook-retry-rate-limit.rs`/
+`.meta.json`) was added alongside sa452's, captured the same way - the
+seeded test exercises a *new* accessor method (`webhook_retry_rate_limit()`,
+added by `test-criterion`'s scaffolding allowance, see above) rather than
+sa452's existing-field case, so it stresses a different implementer path:
+"add the real field this accessor was standing in for" instead of "fix
+existing buggy behaviour."
+
+The first sa500 smoke test (pre-fix) failed: `gpt-5.4-mini` added
+`webhook_retry_rate_limit` as a real struct field on `RateLimitConfig` but
+didn't find/fix the other struct-literal construction site at
+`rate_limiter.rs:442` that builds it without `..Default::default()` -
+`E0063: missing field`. Same root cause as `test-criterion`'s field-fallback
+regression above, surfacing one step later: nothing in
+`implement-criterion.prompt.md` told Implementor to look beyond the plan's
+named files for other places that construct a type it's adding a field to.
+
+Fix: added a step requiring `search_files` for the type's name across the
+whole project (not just plan-named files) before finishing, fixing every
+other construction site found, with that search called out explicitly in
+the final report. Re-ran: 1/1 pass, compiles and goes green - cost/time
+roughly doubled ($0.39->$0.69, 279s->457s) versus the failed attempt,
+consistent with the added reconciliation work, and worth it since the
+alternative was a build that doesn't compile at all.
 
 ### `sa500` - the "standard"/easy baseline ticket
 

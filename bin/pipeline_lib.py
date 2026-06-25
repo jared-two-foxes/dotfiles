@@ -30,6 +30,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.error
 from dataclasses import dataclass
@@ -225,6 +226,56 @@ def die_with_log(block: str, msg: str, criterion: str | None = None) -> None:
     die(msg)
 
 
+AI_STEP_MAX_ATTEMPTS = 3
+AI_STEP_RETRY_BACKOFF_BASE_S = 5.0
+
+
+def run_ai_step_with_retry(
+    step_fn: Callable[[], object],
+    label: str,
+    criterion: str | None = None,
+    max_attempts: int = AI_STEP_MAX_ATTEMPTS,
+) -> object:
+    """
+    Calls step_fn() - a zero-arg closure performing one run_with_tools
+    round trip and returning its parsed result - retrying only on
+    AIError. tools.PipelineAbort (ask_user_prompt/run_command) propagates
+    immediately, unretried: those are deliberate model signals, not
+    transient infra failures, and retrying changes nothing about a
+    model's decision to ask for clarification or reach for a shell.
+
+    Each retry calls step_fn() completely fresh (new message history
+    inside run_with_tools); any written_paths/changed_files accumulator
+    a caller threads into its closure must be cleared by step_fn itself
+    at the top of each call, since a failed attempt's partial writes
+    must not carry over into the next attempt's result.
+
+    Logs every failed attempt via log_event(status="retry") before
+    sleeping with exponential backoff (matches ai_client's own
+    transient-HTTP-retry backoff shape), so a human reading
+    .pipeline-log.jsonl later can see "it flaked twice then succeeded"
+    instead of nothing. After max_attempts is exhausted, re-raises the
+    last AIError untouched - this helper never itself decides to die,
+    that's still each call site's existing except/die_with_log handling.
+    """
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return step_fn()
+        except AIError as e:
+            if attempt >= max_attempts:
+                raise
+            log_event(label, "retry", error=str(e), criterion=criterion)
+            backoff_s = AI_STEP_RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
+            print(
+                f"-- {label}: attempt {attempt}/{max_attempts} failed ({e}), "
+                f"retrying in {backoff_s:.0f}s ...",
+                flush=True,
+            )
+            time.sleep(backoff_s)
+
+
 def show_last_failure() -> None:
     """
     Prints the most recent log entry if it was a failure, so a re-entrant
@@ -404,13 +455,16 @@ def run_plan_step(ticket_content: str, model: str) -> str:
     thread into whichever step comes next.
     """
     try:
-        result = run_with_tools(
-            build_plan_prompt(ticket_content),
-            tools.READ_ONLY_TOOLS,
-            tools.make_executor(allow_write=False, preloaded_paths={str(TICKET_FILE)}),
+        result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_plan_prompt(ticket_content),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False, preloaded_paths={str(TICKET_FILE)}),
+                "plan",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
             "plan",
-            model=model,
-            summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
@@ -696,13 +750,16 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
     build_status_content = gather_build_status(plan_content)
     preloaded = {str(TICKET_FILE), str(PLAN_FILE)} | plan_file_paths
     try:
-        result = run_with_tools(
-            build_narrow_prompt(ticket_content, plan_content, plan_file_context, build_status_content),
-            tools.READ_ONLY_TOOLS,
-            tools.make_executor(allow_write=False, preloaded_paths=preloaded),
+        result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_narrow_prompt(ticket_content, plan_content, plan_file_context, build_status_content),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False, preloaded_paths=preloaded),
+                "narrow",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
             "narrow",
-            model=model,
-            summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("narrow", str(e))
@@ -869,8 +926,10 @@ def build_test_criterion_prompt(criterion: str, plan_text: str) -> str:
 
 def run_test_for_criterion(criterion: str, plan_text: str, model: str) -> tuple[str, str]:
     test_files: list[str] = []
-    try:
-        result = run_with_tools(
+
+    def attempt():
+        test_files.clear()
+        return run_with_tools(
             build_test_criterion_prompt(criterion, plan_text),
             tools.READ_WRITE_TOOLS,
             tools.make_executor(written_paths=test_files),
@@ -878,6 +937,9 @@ def run_test_for_criterion(criterion: str, plan_text: str, model: str) -> tuple[
             model=model,
             summarize_call=tools.summarize_tool_call,
         )
+
+    try:
+        result = run_ai_step_with_retry(attempt, "test-criterion", criterion=criterion)
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("test-criterion", str(e), criterion=criterion)
     if not test_files:
@@ -912,8 +974,10 @@ def run_implement_for_criterion(
     criterion: str, plan_text: str, model: str, test_file: str
 ) -> list[str]:
     changed_files: list[str] = []
-    try:
-        result = run_with_tools(
+
+    def attempt():
+        changed_files.clear()
+        return run_with_tools(
             build_implement_criterion_prompt(criterion, plan_text, test_file),
             tools.READ_WRITE_TOOLS,
             tools.make_executor(written_paths=changed_files, protected_paths={test_file}),
@@ -921,6 +985,9 @@ def run_implement_for_criterion(
             model=model,
             summarize_call=tools.summarize_tool_call,
         )
+
+    try:
+        result = run_ai_step_with_retry(attempt, "implement-criterion", criterion=criterion)
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("implement-criterion", str(e), criterion=criterion)
     if not changed_files:
