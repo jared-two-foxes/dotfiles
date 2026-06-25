@@ -3,10 +3,13 @@ ai_client - shared AI invocation library for scripted (non-chat) prompts.
 
 Talks to opencode zen's OpenAI-compatible chat-completions endpoint by
 default, or another registered provider (see PROVIDERS) by prefixing
-the model id with "<provider>:" (e.g. "ollama:llama3.1"). A bare model
-id with no recognized prefix always means opencode zen - every existing
+the model id with "<provider>:" (e.g. "ollama:llama3.1",
+"copilot:claude-sonnet-4.6", "opencode:gpt-5.4-mini"). A bare model id
+with no recognized prefix always means opencode zen - every existing
 caller that passes a plain model string ("gpt-5.4-mini", "default", ...)
-keeps working unchanged.
+keeps working unchanged; the "opencode:" prefix is available for
+callers that want to name it explicitly the same way every other
+provider is named, not a requirement.
 
 Two invocation modes:
   run_prompt()      - single request, plain text response. No tools.
@@ -130,7 +133,14 @@ class UsageTracker:
         total = 0.0
         unpriced: list[str] = []
         for model, model_usage in self.by_model.items():
-            rate = pricing.get(model)
+            # model-pricing.toml is only ever populated from opencode
+            # zen's own pricing table (see file header) - bare model
+            # names, no provider prefix - so strip a leading "opencode:"
+            # before lookup. Other providers' prefixes (ollama:, copilot:)
+            # are deliberately left alone: stripping those could collide
+            # an unpriced model with an opencode entry that happens to
+            # share the same bare name (see usage.add's own comment).
+            rate = pricing.get(model.removeprefix("opencode:"))
             if rate is None:
                 unpriced.append(model)
                 continue
@@ -393,16 +403,21 @@ COPILOT = Provider(
     auth_headers=_copilot_auth_headers,
 )
 
-# Keyed by the "<key>:" prefix callers use in a model id. A bare model id
-# with no recognized prefix (every existing caller, today) always means
-# DEFAULT_PROVIDER - adding a new provider here is additive, never
-# changes what an existing unprefixed model id resolves to.
+# Keyed by the "<key>:" prefix callers use in a model id. "opencode:" is
+# listed explicitly here (not just left as the implicit fallback) so it
+# can be named the same way every other provider is - "opencode:gpt-5.4-mini"
+# reads the same as "ollama:llama3.1" or "copilot:claude-sonnet-4.6". A
+# bare model id with no recognized prefix (every existing caller, today)
+# still falls through to DEFAULT_PROVIDER unchanged - adding "opencode:"
+# here is additive, never changes what an existing unprefixed model id
+# resolves to.
 PROVIDERS: dict[str, Provider] = {
+    "opencode": OPENCODE_ZEN,
     "ollama": OLLAMA,
     "copilot": COPILOT,
 }
 DEFAULT_PROVIDER = OPENCODE_ZEN
-DEFAULT_MODEL = "default"
+DEFAULT_MODEL = "opencode:default"
 
 
 def resolve_provider(model: str) -> tuple[Provider, str]:

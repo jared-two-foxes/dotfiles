@@ -26,6 +26,7 @@ site is the step name and the variables it threads to the next step.
 """
 
 import json
+import logging
 import re
 import shlex
 import subprocess
@@ -406,6 +407,19 @@ def load_pipeline_config(config_path: Path) -> dict:
     return commands
 
 
+def render_step_output(text: str, level: int = logging.DEBUG) -> None:
+    """
+    Renders a model step's raw markdown output (a plan, gap plan, or
+    review verdict), gated by the current log level instead of always
+    printing. This is the model's intermediate working output, not a
+    script's actual result - the CLI scripts now report that separately
+    via render.print_line, unconditionally - so it's hidden by default
+    and only shown when --log-level asks for debug or below.
+    """
+    if log.isEnabledFor(level):
+        render_markdown(text)
+
+
 def run_command(command_str: str, label: str) -> subprocess.CompletedProcess:
     """
     Commands come from the project-local pipeline config, which is
@@ -516,11 +530,11 @@ def run_plan_step(ticket_content: str, model: str) -> str:
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
     if "## Acceptance Criteria" not in result.text:
-        render_markdown(result.text)
+        render_step_output(result.text)
         die("Planner did not produce a valid plan (see output above).")
     log.info("-- Plan generated, writing to disk ...")
     plan_content = tools.write_file_block(str(PLAN_FILE))(result.text)
-    render_markdown(plan_content)
+    render_step_output(plan_content)
     return plan_content
 
 
@@ -673,11 +687,11 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("narrow", str(e))
     if "## Acceptance Criteria" not in result.text:
-        render_markdown(result.text)
+        render_step_output(result.text)
         die_with_log("narrow", "Narrower did not produce a valid gap plan (see output above).")
     log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
-    render_markdown(gap_plan_content)
+    render_step_output(gap_plan_content)
     return gap_plan_content
 
 
@@ -751,11 +765,11 @@ def run_plan_narrow_step(ticket_content: str, model: str) -> str:
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("plan-narrow", str(e))
     if "## Acceptance Criteria" not in result.text:
-        render_markdown(result.text)
+        render_step_output(result.text)
         die_with_log("plan-narrow", "Planner-Narrower did not produce a valid gap plan (see output above).")
     log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
-    render_markdown(gap_plan_content)
+    render_step_output(gap_plan_content)
     return gap_plan_content
 
 
@@ -1012,7 +1026,7 @@ def run_test_for_criterion(criterion: str, plan_text: str, model: str) -> tuple[
         die_with_log(
             "test-criterion", "Tester finished without writing any test files.", criterion=criterion
         )
-    render_markdown(result.text)
+    render_step_output(result.text)
     witness = TEST_WITNESS_RE.search(result.text)
     if not witness:
         die_with_log(
@@ -1127,7 +1141,7 @@ def run_implement_for_criterion(
                 criterion=criterion,
             )
 
-    render_markdown(result.text)
+    render_step_output(result.text)
     return changed_files
 
 
@@ -1222,7 +1236,7 @@ def run_test_step(plan_text: str, model: str, scope_note: str | None = None) -> 
         die(str(e))
     if not test_files:
         die("Tester finished without writing any test files.")
-    render_markdown(result.text)
+    render_step_output(result.text)
     return test_files
 
 
@@ -1240,7 +1254,7 @@ def run_test_coverage_gate(
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
-    render_markdown(coverage_result.text)
+    render_step_output(coverage_result.text)
     verdict = find_verdict(
         coverage_result.text, ["INCOMPLETE REVIEW", "INADEQUATE", "ADEQUATE"]
     )
@@ -1263,7 +1277,7 @@ def run_implement_step(test_files: list[str], plan_text: str, model: str) -> lis
         die(str(e))
     if not changed_files:
         die("Implementor finished without writing any files.")
-    render_markdown(result.text)
+    render_step_output(result.text)
     return changed_files
 
 
@@ -1279,7 +1293,7 @@ def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> Non
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
-    render_markdown(review_result.text)
+    render_step_output(review_result.text)
     verdict = find_verdict(review_result.text, ["CHANGES REQUESTED", "APPROVED"])
     if verdict != "APPROVED":
         die(f"Code review gate did not pass (verdict: {verdict or 'unknown'}).")

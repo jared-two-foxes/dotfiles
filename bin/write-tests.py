@@ -27,11 +27,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
 import verbosity  # noqa: E402
 
 log = verbosity.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 
 
 def main() -> None:
@@ -73,11 +74,20 @@ def main() -> None:
     gap_plan_text = lib.GAP_PLAN_FILE.read_text(encoding="utf-8")
     criteria = lib.extract_acceptance_criteria(gap_plan_text)
     if not criteria:
-        log.info("\n-- No gap found. Nothing to test.")
-        log.info("-- Token usage: %s", ai_client.usage)
+        render.print_line()
+        render.print_line("-- No gap found. Nothing to test.")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
         return
 
     commands = lib.load_pipeline_config(Path(args.config))
+
+    outcomes: list[str] = []
+
+    def log_summary() -> None:
+        render.print_line()
+        render.print_line("-- Summary:")
+        for line in outcomes:
+            render.print_line(f"   {line}")
 
     written = 0
     skipped = 0
@@ -91,25 +101,29 @@ def main() -> None:
             if result.returncode == 0:
                 log.info("-- Already covered by a passing test. Skipping.")
                 skipped += 1
+                outcomes.append(f"[already covered] {criterion} -> {file_path} :: {test_name}")
                 continue
 
         file_path, test_name = lib.run_test_for_criterion(criterion, gap_plan_text, model)
         gap_plan_text = lib.annotate_criterion_test(lib.GAP_PLAN_FILE, criterion, file_path, test_name)
         written += 1
+        outcomes.append(f"[written] {criterion} -> {file_path} :: {test_name}")
 
         result = lib.run_command(commands["test_compile_cmd"], "test compile gate")
         if result.returncode != 0:
+            log_summary()
             lib.die_with_log(
                 "compile", f"Tests do not compile (exit {result.returncode}). See output above.",
                 criterion=criterion,
             )
 
-    log.info(
-        "\n-- %d test(s) written, %d criterion(criteria) already covered. "
-        "Implement against %s, then run 'validate-and-review %s'.",
-        written, skipped, lib.GAP_PLAN_FILE, args.ticket_id,
+    log_summary()
+    render.print_line(
+        f"-- {written} test(s) written, {skipped} criterion(criteria) already "
+        f"covered. Implement against {lib.GAP_PLAN_FILE}, then run "
+        f"'validate-and-review {args.ticket_id}'."
     )
-    log.info("-- Token usage: %s", ai_client.usage)
+    render.print_line(f"-- Token usage: {ai_client.usage}")
 
 
 if __name__ == "__main__":

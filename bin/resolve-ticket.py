@@ -83,11 +83,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
 import verbosity  # noqa: E402
 
 log = verbosity.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 
 
 def main() -> None:
@@ -144,11 +145,20 @@ def main() -> None:
 
     criteria = lib.extract_acceptance_criteria(gap_plan_text)
     if not criteria:
-        log.info("\n-- No gap found. Success.")
-        log.info("-- Token usage: %s", ai_client.usage)
+        render.print_line()
+        render.print_line("-- No gap found. Success.")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
         return
 
     commands = lib.load_pipeline_config(Path(args.config))
+
+    outcomes: list[str] = []
+
+    def log_summary() -> None:
+        render.print_line()
+        render.print_line("-- Summary:")
+        for line in outcomes:
+            render.print_line(f"   {line}")
 
     # ── Implementation pipeline: one acceptance criterion at a time ───────
     changed_files: list[str] = []
@@ -161,6 +171,7 @@ def main() -> None:
             result = lib.run_scoped_test(test_name, commands, "resume check")
             if result.returncode == 0:
                 log.info("-- Already satisfied (resumed). Skipping.")
+                outcomes.append(f"[already satisfied] {criterion}")
                 continue
         else:
             file_path, test_name = lib.run_test_for_criterion(criterion, gap_plan_text, model)
@@ -168,6 +179,8 @@ def main() -> None:
 
         result = lib.run_command(commands["test_compile_cmd"], "test compile gate")
         if result.returncode != 0:
+            outcomes.append(f"[failed: tests do not compile] {criterion} -> {file_path} :: {test_name}")
+            log_summary()
             lib.die_with_log(
                 "compile", f"Tests do not compile (exit {result.returncode}). See output above.",
                 criterion=criterion,
@@ -179,6 +192,7 @@ def main() -> None:
                 "-- Test passed without implementation - this criterion's "
                 "gap didn't reproduce. Skipping implement."
             )
+            outcomes.append(f"[gap did not reproduce, skipped] {criterion}")
             continue
 
         new_changed = lib.run_implement_for_criterion(
@@ -188,6 +202,10 @@ def main() -> None:
 
         result = lib.run_command(commands["build_cmd"], "build gate")
         if result.returncode != 0:
+            outcomes.append(
+                f"[failed: code does not compile] {criterion} -> tried changing {', '.join(new_changed)}"
+            )
+            log_summary()
             lib.die_with_log(
                 "build", f"Code does not compile (exit {result.returncode}). See output above.",
                 criterion=criterion,
@@ -195,6 +213,11 @@ def main() -> None:
 
         result = lib.run_scoped_test(test_name, commands, "green check")
         if result.returncode != 0:
+            outcomes.append(
+                f"[failed: test still red after implementation] {criterion} -> "
+                f"tried changing {', '.join(new_changed)}"
+            )
+            log_summary()
             lib.die_with_log(
                 "test-green",
                 f"Test still fails after implementation (exit {result.returncode}). "
@@ -202,12 +225,18 @@ def main() -> None:
                 criterion=criterion,
             )
 
+        outcomes.append(
+            f"[implemented] {criterion} -> {file_path} :: {test_name} "
+            f"(changed: {', '.join(new_changed)})"
+        )
+
     # ── Lint gate + full-suite gate + final code review ────────────────────
     if changed_files:
         lib.run_lint_gate(commands)
 
         result = lib.run_command(commands["test_cmd"], "full test suite gate")
         if result.returncode != 0:
+            log_summary()
             lib.die_with_log(
                 "test-suite",
                 f"Full test suite fails after all criteria implemented (exit "
@@ -218,8 +247,10 @@ def main() -> None:
 
         lib.run_review_gate(changed_files, plan_text, model)
 
-    log.info("\n-- Gap implemented, tests pass, review approved. Success.")
-    log.info("-- Token usage: %s", ai_client.usage)
+    log_summary()
+    render.print_line()
+    render.print_line("-- Gap implemented, tests pass, review approved. Success.")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
 
 
 if __name__ == "__main__":

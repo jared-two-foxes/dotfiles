@@ -31,3 +31,13 @@ def render_markdown(text: str) -> None:
         _console.print(Markdown(text))
     except Exception:
         print(text)
+
+
+def print_line(text: str = "") -> None:
+    """
+    Unconditional stdout output, independent of --log-level. Used for a
+    script's actual result (final summary, success/failure line, token
+    usage) - the thing the script exists to report, not a progress or
+    diagnostic message that's fine to filter out at a quieter level.
+    """
+    print(text, flush=True)

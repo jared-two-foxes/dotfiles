@@ -57,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 from ai_client import DEFAULT_MODEL  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
 import tools  # noqa: E402
 import verbosity  # noqa: E402
 
@@ -110,6 +111,16 @@ def main() -> None:
     # ── Step 3: Tests (model reads plan, writes test files, via tools) ────
     test_files = lib.run_test_step(plan_text, model)
 
+    def log_summary(implemented: bool, changed: list[str] | None = None) -> None:
+        render.print_line()
+        render.print_line("-- Summary:")
+        render.print_line(f"   Tests written ({len(test_files)}): {', '.join(test_files)}")
+        if implemented:
+            changed = changed or []
+            render.print_line(f"   Files changed ({len(changed)}): {', '.join(changed)}")
+        else:
+            render.print_line("   Implementation: not needed (tests already passed)")
+
     # ── Step 4: Gate - tests compile ───────────────────────────────────────
     result = lib.run_command(commands["test_compile_cmd"], "test compile gate")
     if result.returncode != 0:
@@ -121,8 +132,10 @@ def main() -> None:
     # ── Step 6: Run tests - green means done ───────────────────────────────
     result = lib.run_command(commands["test_cmd"], "initial test run")
     if result.returncode == 0:
-        log.info("\n-- Tests already pass against existing code. Success.")
-        log.info("-- Token usage: %s", ai_client.usage)
+        log_summary(implemented=False)
+        render.print_line()
+        render.print_line("-- Tests already pass against existing code. Success.")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
         return
 
     # ── Step 7: Implement (test files write-protected) ────────────────────
@@ -131,11 +144,13 @@ def main() -> None:
     # ── Step 8: Gate - code compiles ────────────────────────────────────────
     result = lib.run_command(commands["build_cmd"], "build gate")
     if result.returncode != 0:
+        log_summary(implemented=True, changed=changed_files)
         lib.die(f"Code does not compile (exit {result.returncode}). See output above.")
 
     # ── Step 9: Gate - tests pass (no second implementation attempt) ──────
     result = lib.run_command(commands["test_cmd"], "post-implementation test run")
     if result.returncode != 0:
+        log_summary(implemented=True, changed=changed_files)
         lib.die(
             f"Tests still fail after implementation (exit {result.returncode}). "
             f"This is a single-shot pipeline - no second attempt. See output above."
@@ -145,8 +160,10 @@ def main() -> None:
     lib.run_review_gate(changed_files, plan_text, model)
 
     # ── Step 11: Success ─────────────────────────────────────────────────────
-    log.info("\n-- Implementation complete, tests pass, review approved. Success.")
-    log.info("-- Token usage: %s", ai_client.usage)
+    log_summary(implemented=True, changed=changed_files)
+    render.print_line()
+    render.print_line("-- Implementation complete, tests pass, review approved. Success.")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
 
 
 if __name__ == "__main__":

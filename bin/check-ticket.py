@@ -54,12 +54,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
 import tools  # noqa: E402
 import verbosity  # noqa: E402
 
 log = verbosity.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 
 
 def main() -> None:
@@ -101,15 +102,15 @@ def main() -> None:
     gap_plan_content = lib.run_narrow_step(ticket_content, plan_content, model)
 
     remaining = lib.extract_acceptance_criteria(gap_plan_content)
+    render.print_line()
     if remaining:
-        log.info(
-            "\n-- %d acceptance criterion(criteria) still unsatisfied. "
-            "Run 'resolve-ticket %s' to implement them.",
-            len(remaining), args.ticket_id,
-        )
+        render.print_line(f"-- {len(remaining)} acceptance criterion(criteria) still unsatisfied:")
+        for criterion in remaining:
+            render.print_line(f"   {criterion}")
+        render.print_line(f"-- Run 'resolve-ticket {args.ticket_id}' to implement them.")
     else:
-        log.info("\n-- All acceptance criteria satisfied. Ticket is complete.")
-    log.info("-- Token usage: %s", ai_client.usage)
+        render.print_line("-- No additional work required. All acceptance criteria satisfied.")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
 
 
 if __name__ == "__main__":

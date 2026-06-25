@@ -39,12 +39,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
 import tools  # noqa: E402
 import verbosity  # noqa: E402
 
 log = verbosity.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 
 
 def main() -> None:
@@ -118,7 +119,8 @@ def main() -> None:
         )
 
     # ── Step 6: Smoke test (stub - skips unless smoke_cmd is configured) ──
-    lib.run_smoke_gate(lib.load_smoke_cmd(Path(args.config)))
+    smoke_cmd = lib.load_smoke_cmd(Path(args.config))
+    lib.run_smoke_gate(smoke_cmd)
 
     # ── Step 7: Discover what was actually changed ──────────────────────────
     changed_files = lib.git_changed_files()
@@ -128,8 +130,17 @@ def main() -> None:
     # ── Step 8: Code review against the original plan's full scope ────────
     lib.run_review_gate(changed_files, plan_text, model)
 
-    log.info("\n-- All acceptance criteria satisfied, lint clean, tests pass, review approved. Success.")
-    log.info("-- Token usage: %s", ai_client.usage)
+    render.print_line()
+    render.print_line("-- Summary:")
+    render.print_line("   Acceptance criteria: all satisfied")
+    render.print_line("   Lint: clean")
+    render.print_line("   Test suite: passed")
+    render.print_line(f"   Smoke test: {'passed' if smoke_cmd else 'skipped (not configured)'}")
+    render.print_line(f"   Files reviewed ({len(changed_files)}): {', '.join(changed_files)}")
+    render.print_line("   Code review: APPROVED")
+    render.print_line()
+    render.print_line("-- All acceptance criteria satisfied, lint clean, tests pass, review approved. Success.")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
 
 
 if __name__ == "__main__":
