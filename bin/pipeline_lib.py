@@ -42,6 +42,7 @@ from ai_client import AIError, run_with_tools
 import fetch_ticket as ticket_source
 from render import render_markdown
 import tools
+import toolchains
 
 # ---------------------------------------------------------------------------
 # Config
@@ -93,7 +94,14 @@ AUTO_PREAMBLE = (
     "best inference from the ticket context. Then produce the full TDD plan.\n\n"
 )
 
-# Rust defaults, used only if no project-local config file is present.
+# Per-toolchain defaults (rust/cargo, bazel, cmake/ctest, sveltekit/npm,
+# generic typescript/npm), used only if no project-local config file is
+# present - see toolchains.py. Detected lazily (see get_toolchain) rather
+# than at import time, and cached, since detection reads the project
+# root's marker files (Cargo.toml, WORKSPACE, CMakeLists.txt,
+# svelte.config.*, package.json) relative to cwd - the same cwd
+# convention every other relative path in this module already relies on.
+#
 # test_filter_cmd is used only by resolve-ticket.py's per-criterion loop
 # (run_scoped_test) - {filter} is substituted with the qualified test
 # name recorded for that criterion. Compiling can't be scoped to one
@@ -104,19 +112,30 @@ AUTO_PREAMBLE = (
 # fmt_fix_cmd/clippy_fix_cmd/fmt_check_cmd/clippy_cmd are used only by
 # resolve-ticket.py's run_lint_gate - lint/style checks run once, after
 # every criterion is implemented and passing, right before code review -
-# not as acceptance-criteria evidence (see ALLOWED_CARGO_SUBCOMMANDS).
-# The *_fix_cmd entries attempt the mechanical, no-judgment-call fix
-# before the *_check_cmd/clippy_cmd gate gets to fail anything.
-DEFAULT_COMMANDS = {
-    "build_cmd": "cargo build",
-    "test_compile_cmd": "cargo test --no-run",
-    "test_cmd": "cargo test",
-    "test_filter_cmd": "cargo test {filter}",
-    "fmt_fix_cmd": "cargo fmt",
-    "clippy_fix_cmd": "cargo clippy --fix --allow-dirty --allow-staged --allow-no-vcs",
-    "fmt_check_cmd": "cargo fmt -- --check",
-    "clippy_cmd": "cargo clippy -- -D warnings",
-}
+# not as acceptance-criteria evidence (see extract_plan_commands). Names
+# are inherited from the original Rust-only defaults (fmt/clippy) but are
+# generic format-fix/lint-fix/format-check/lint-check slots regardless of
+# toolchain - not worth a breaking key rename across every existing
+# .dev-pipeline.toml for what's just a label. The *_fix_cmd entries
+# attempt the mechanical, no-judgment-call fix before the
+# *_check_cmd/clippy_cmd gate gets to fail anything.
+_toolchain_cache: toolchains.Toolchain | None = None
+_toolchain_detected = False
+
+
+def get_toolchain() -> toolchains.Toolchain:
+    """
+    Detects the project's toolchain once (by marker file at cwd) and
+    caches it for the rest of the process. Falls back to the Rust/cargo
+    defaults if nothing is detected, preserving this module's original
+    behavior for projects with no recognized marker file and no
+    .dev-pipeline.toml override.
+    """
+    global _toolchain_cache, _toolchain_detected
+    if not _toolchain_detected:
+        _toolchain_cache = toolchains.detect_toolchain()
+        _toolchain_detected = True
+    return _toolchain_cache or toolchains.RUST
 
 # ---------------------------------------------------------------------------
 # Generic helpers
@@ -271,22 +290,25 @@ def find_verdict(text: str, tokens_by_priority: list[str]) -> str | None:
 
 
 def load_pipeline_config(config_path: Path) -> dict:
-    commands = dict(DEFAULT_COMMANDS)
+    toolchain = get_toolchain()
+    commands = dict(toolchain.commands)
     if not config_path.exists():
         print(
-            f"-- No {config_path} found, using Rust defaults: {commands}",
+            f"-- Detected toolchain: {toolchain.name}. "
+            f"No {config_path} found, using its defaults: {commands}",
             flush=True,
         )
         return commands
 
+    print(f"-- Detected toolchain: {toolchain.name}. Loading overrides from {config_path} ...", flush=True)
     with config_path.open("rb") as f:
         data = tomllib.load(f)
 
-    unknown = set(data) - set(DEFAULT_COMMANDS)
+    unknown = set(data) - set(toolchain.commands)
     if unknown:
         die(
             f"{config_path}: unknown key(s) {sorted(unknown)}. "
-            f"Allowed: {sorted(DEFAULT_COMMANDS)}"
+            f"Allowed: {sorted(toolchain.commands)}"
         )
     for key, value in data.items():
         if not isinstance(value, str) or not value.strip():
@@ -494,28 +516,28 @@ def gather_plan_file_context(plan_content: str) -> tuple[str, set[str]]:
     return "\n\n".join(blocks), read_paths
 
 
-CARGO_COMMAND_RE = re.compile(r"`(cargo [^`]+)`")
-
 # The plan's text traces back to ticket content fetched from Linear -
-# external, untrusted input. Never shell=True it: only allow `cargo
-# <subcommand>` invocations through a strict allowlist, executed as an
-# argv list (no shell), so no amount of `; rm -rf .`-style content
-# smuggled into a ticket can do anything but fail to match. This runs on
-# the host, not as a model tool call - run_command is refused as a tool
-# (see tools.py) precisely because we haven't designed a safe way to let
-# the model choose arbitrary commands; this allowlist is that design for
-# the one case (cargo verification commands named in AC) we need today.
+# external, untrusted input. Never shell=True it: only allow
+# `<evidence_binary> <subcommand>` invocations through a strict
+# allowlist, executed as an argv list (no shell), so no amount of
+# `; rm -rf .`-style content smuggled into a ticket can do anything but
+# fail to match. This runs on the host, not as a model tool call -
+# run_command is refused as a tool (see tools.py) precisely because we
+# haven't designed a safe way to let the model choose arbitrary
+# commands; this allowlist is that design for the one case (toolchain
+# verification commands named in AC) we need today.
 #
-# Only `test` - not `build`/`check`/`fmt`/`clippy`. `build`/`check` are
-# subsumed by `test` (compiling the test binary already compiles the
-# lib/bin first, so a passing test run is strictly stronger evidence
-# than a passing build/check) - running them separately as evidence
-# would just be redundant work for no extra signal. `fmt`/`clippy` are
-# lint/style checks, not evidence of whether a feature is implemented -
-# they don't belong in acceptance-criteria evidence-gathering at all;
-# see run_lint_gate, which runs them once at the end of the
-# implementation pipeline instead, right before code review.
-ALLOWED_CARGO_SUBCOMMANDS = {"test"}
+# Which binary and subcommands are trusted comes from the detected
+# toolchain (see toolchains.py) - e.g. cargo's evidence_subcommands is
+# only {"test"}, never build/check/fmt/clippy. build/check are subsumed
+# by test (compiling the test binary already compiles the lib/bin first,
+# so a passing test run is strictly stronger evidence than a passing
+# build/check) - running them separately as evidence would just be
+# redundant work for no extra signal. fmt/clippy (or each toolchain's
+# equivalent) are lint/style checks, not evidence of whether a feature is
+# implemented - they don't belong in acceptance-criteria evidence-
+# gathering at all; see run_lint_gate, which runs them once at the end of
+# the implementation pipeline instead, right before code review.
 
 
 def extract_plan_commands(plan_content: str) -> list[list[str]]:
@@ -524,12 +546,15 @@ def extract_plan_commands(plan_content: str) -> list[list[str]]:
     clear (e.g. '`cargo test -p foo` passes'). Run literally what's
     named rather than guessing a toolchain invocation - file contents
     alone can never answer "does the test suite pass." Only commands
-    that tokenize to `cargo <allowed subcommand> ...` with no shell
-    metacharacters are accepted; anything else is silently skipped.
+    that tokenize to `<evidence_binary> <allowed subcommand> ...` (per
+    the detected toolchain) with no shell metacharacters are accepted;
+    anything else is silently skipped.
     """
+    toolchain = get_toolchain()
+    command_re = re.compile(rf"`({re.escape(toolchain.evidence_binary)}(?: [^`]+)?)`")
     commands = []
     seen = set()
-    for raw in CARGO_COMMAND_RE.findall(plan_content):
+    for raw in command_re.findall(plan_content):
         if raw in seen:
             continue
         seen.add(raw)
@@ -537,10 +562,11 @@ def extract_plan_commands(plan_content: str) -> list[list[str]]:
             tokens = shlex.split(raw)
         except ValueError:
             continue
-        if len(tokens) < 2 or tokens[0] != "cargo":
+        if not tokens or tokens[0] != toolchain.evidence_binary:
             continue
-        if tokens[1] not in ALLOWED_CARGO_SUBCOMMANDS:
-            continue
+        if toolchain.evidence_subcommands is not None:
+            if len(tokens) < 2 or tokens[1] not in toolchain.evidence_subcommands:
+                continue
         if any(ch in raw for ch in ";|&$><\n"):
             continue
         commands.append(tokens)
@@ -565,47 +591,49 @@ def truncate_command_output(output: str, max_lines: int = COMMAND_OUTPUT_MAX_LIN
     return f"(omitted {omitted} earlier lines)\n" + "\n".join(lines[-max_lines:])
 
 
-# Pulls out the lines that actually carry evidence from `cargo test`'s
-# output - the pass/fail summary and any failure messages, not the
-# per-test progress noise. ALLOWED_CARGO_SUBCOMMANDS only ever gathers
-# `test` output now, so this is the only pattern needed; kept as a dict
-# (rather than a single regex) so a future evidence-relevant subcommand
-# can be added without changing summarize_command_output's shape.
-_TEST_SIGNAL_RE = re.compile(r"FAILED|^test result:|panicked at|^---- ")
-
-COMMAND_SIGNAL_PATTERNS = {
-    "test": _TEST_SIGNAL_RE,
-}
+# Pulls out the lines that actually carry evidence from the detected
+# toolchain's test-runner output (see toolchains.py's
+# test_output_signal_pattern) - the pass/fail summary and any failure
+# messages, not the per-test progress noise.
+def _test_signal_pattern() -> re.Pattern:
+    return re.compile(get_toolchain().test_output_signal_pattern)
 
 
-def summarize_command_output(subcommand: str, output: str) -> str:
+def summarize_command_output(subcommand: str | None, output: str) -> str:
     """
     Extract just the evidence-bearing lines for `subcommand`'s output
     before it's embedded in the validator's prompt - a plain tail (see
-    truncate_command_output) would silently drop clippy/build/check
-    errors and fmt's per-file diffs that occur before the last
-    COMMAND_OUTPUT_MAX_LINES lines, since those subcommands don't
-    concentrate their signal at the end the way `cargo test` does.
+    truncate_command_output) would silently drop errors/diffs that occur
+    before the last COMMAND_OUTPUT_MAX_LINES lines, since not every
+    toolchain's test runner concentrates its signal at the very end of
+    the output.
 
-    Falls back to a tail truncation if there's no pattern for this
+    Falls back to a tail truncation if this isn't a recognized test
     subcommand, or the pattern matched nothing - either a clean pass
     with no error/warning/diff lines to report (itself valid evidence),
     or output that didn't look like what was expected, in which case the
     raw tail is still better than nothing.
     """
-    pattern = COMMAND_SIGNAL_PATTERNS.get(subcommand)
-    if pattern is None:
+    toolchain = get_toolchain()
+    is_test_subcommand = (
+        toolchain.evidence_subcommands is None or subcommand in toolchain.evidence_subcommands
+    )
+    if not is_test_subcommand:
         return truncate_command_output(output)
-    matched = [line for line in output.splitlines() if pattern.search(line)]
+    matched = [line for line in output.splitlines() if _test_signal_pattern().search(line)]
     if not matched:
         return truncate_command_output(output)
     return truncate_command_output("\n".join(matched))
 
 
 def gather_build_status(plan_content: str) -> str:
+    toolchain = get_toolchain()
     commands = extract_plan_commands(plan_content)
     if not commands:
-        return "(no commands matching the cargo allowlist were named in the plan)"
+        return (
+            f"(no commands matching the {toolchain.evidence_binary} allowlist "
+            f"were named in the plan)"
+        )
 
     blocks = []
     for command_tokens in commands:
@@ -613,7 +641,8 @@ def gather_build_status(plan_content: str) -> str:
         print(f"-- Running '{rendered}' for validation evidence ...", flush=True)
         result = subprocess.run(command_tokens, capture_output=True, text=True, check=False)
         output = (result.stdout + result.stderr).strip() or "(no output)"
-        output = summarize_command_output(command_tokens[1], output)
+        subcommand = command_tokens[1] if len(command_tokens) > 1 else None
+        output = summarize_command_output(subcommand, output)
         blocks.append(
             f"### `{rendered}` (exit code {result.returncode})\n```\n{output}\n```"
         )
@@ -784,7 +813,7 @@ def run_lint_gate(commands: dict) -> None:
     """
     Runs lint/style checks once, after every criterion is implemented
     and passing - not as acceptance-criteria evidence (see
-    ALLOWED_CARGO_SUBCOMMANDS, which deliberately excludes these; lint
+    the toolchain's evidence_subcommands, which deliberately excludes these; lint
     is a code-quality signal, not a behavioral one).
 
     Attempts the mechanical fix first: clippy --fix for whatever it can
