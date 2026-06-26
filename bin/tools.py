@@ -43,15 +43,6 @@ class ClarificationNeeded(PipelineAbort):
     """
 
 
-class CommandExecutionRefused(PipelineAbort):
-    """
-    Raised when the model calls the run_command pseudo-tool. Running
-    arbitrary model-chosen commands is a real capability we haven't
-    decided how to bound yet (which commands, what cwd, what counts as
-    safe) - until that's designed, any attempt is refused outright, with
-    the attempted command as the failure reason rather than silently
-    ignored or executed unsupervised.
-    """
 
 
 def _safe_path(path_str: str) -> Path:
@@ -73,22 +64,26 @@ def _safe_path(path_str: str) -> Path:
 
 def read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> str:
     """
-    Read a file's content. With no range, returns the raw full text
-    (unchanged behaviour). With start_line/end_line (1-indexed,
-    inclusive; either may be omitted to mean "to the start"/"to the
-    end"), returns just that slice with line numbers prefixed, so a
-    model can page through a large file without spending its whole
-    context budget on one read_file call. A negative start_line means
-    "N lines from the end" (tail-style) - e.g. start_line=-20 returns the
-    last 20 lines; end_line is ignored in that mode, since "last N to
-    line X" isn't a request that comes up in practice.
+    Read a file's content. With no range, returns the raw full text plus
+    a trailing line-count note (e.g. so a model sizing up a file before
+    deciding how to read/edit it - the most common reason one would
+    otherwise reach for `wc -l` - gets the count for free, no extra tool
+    call needed). With start_line/end_line (1-indexed, inclusive; either
+    may be omitted to mean "to the start"/"to the end"), returns just
+    that slice with line numbers prefixed, so a model can page through a
+    large file without spending its whole context budget on one
+    read_file call. A negative start_line means "N lines from the end"
+    (tail-style) - e.g. start_line=-20 returns the last 20 lines;
+    end_line is ignored in that mode, since "last N to line X" isn't a
+    request that comes up in practice.
     """
     resolved = _safe_path(path)
     if not resolved.is_file():
         raise ToolError(f"not found: {path}")
     text = resolved.read_text(encoding="utf-8", errors="replace")
     if start_line is None and end_line is None:
-        return text
+        total = len(text.splitlines())
+        return f"{text}\n\n({total} line{'s' if total != 1 else ''} total)"
 
     lines = text.splitlines()
     total = len(lines)
@@ -212,13 +207,32 @@ def write_file_block(path: str) -> Callable[[str], str]:
 
 
 def list_dir(path: str = ".") -> str:
+    """
+    Lists immediate children of `path`. Directories are listed bare
+    (name/), same as before; files get a trailing line-count annotation
+    (or a byte-size one for files that aren't valid UTF-8 text, e.g.
+    binaries) - so a model deciding what's worth a read_file call can see
+    roughly how big each candidate is first, without a separate tool call
+    or reaching for `wc`/`ls -la`.
+    """
     resolved = _safe_path(path)
     if not resolved.is_dir():
         raise ToolError(f"not a directory: {path}")
-    entries = sorted(
-        p.name + ("/" if p.is_dir() else "") for p in resolved.iterdir()
-    )
-    return "\n".join(entries) if entries else "(empty)"
+
+    def describe(entry: Path) -> str:
+        if entry.is_dir():
+            return f"{entry.name}/"
+        try:
+            text = entry.read_text(encoding="utf-8", errors="strict")
+        except (UnicodeDecodeError, OSError):
+            size = entry.stat().st_size
+            return f"{entry.name}  ({size} bytes, binary)"
+        lines = len(text.splitlines())
+        return f"{entry.name}  ({lines} line{'s' if lines != 1 else ''})"
+
+    entries = sorted(resolved.iterdir(), key=lambda p: p.name)
+    described = [describe(entry) for entry in entries]
+    return "\n".join(described) if described else "(empty)"
 
 
 def summarize_tool_call(name: str, args: dict) -> str:
@@ -294,7 +308,13 @@ LIST_DIR_SCHEMA = {
     "type": "function",
     "function": {
         "name": "list_dir",
-        "description": "List entries in a directory, path relative to the project root. Defaults to the project root.",
+        "description": (
+            "List entries in a directory, path relative to the project root. "
+            "Defaults to the project root. Directories are listed bare "
+            "(name/); files are annotated with a line count (or byte size "
+            "for non-text/binary files), so you can size up candidates "
+            "before deciding what's worth a read_file call."
+        ),
         "parameters": {
             "type": "object",
             "properties": {"path": {"type": "string"}},
@@ -398,16 +418,15 @@ RUN_COMMAND_SCHEMA = {
     "function": {
         "name": RUN_COMMAND_TOOL_NAME,
         "description": (
-            "Run a command-line command. NOT SUPPORTED: calling this tool "
-            "immediately aborts the entire run with the attempted command "
-            "as the failure reason - there is no shell behind this, ever. "
-            "Build and test verification is handled by the caller between "
-            "steps, not by you. For the common reasons models reach for a "
-            "shell: use search_files instead of grep/find, use read_file's "
-            "start_line/end_line (including a negative start_line for "
-            "tail-style reads) instead of head/tail, and use list_dir "
-            "instead of ls - none of these need cd first, every tool here "
-            "takes an explicit path."
+            "Run a command-line command. NOT SUPPORTED: there is no shell "
+            "behind this tool, ever - calling it returns an error instead of "
+            "running anything, every time. Build and test verification is "
+            "handled by the caller between steps, not by you. For the common "
+            "reasons models reach for a shell: use search_files instead of "
+            "grep/find, use read_file's start_line/end_line (including a "
+            "negative start_line for tail-style reads) instead of head/tail/ "
+            "wc, and use list_dir instead of ls - none of these need cd "
+            "first, every tool here takes an explicit path."
         ),
         "parameters": {
             "type": "object",
@@ -423,10 +442,14 @@ RUN_COMMAND_SCHEMA = {
 }
 
 # Every step gets these alongside its other tools - ask_user_prompt gives
-# the model an explicit way to signal "I'm stuck" instead of guessing,
-# and run_command is offered but always refused (see CommandExecutionRefused)
-# so a model that reaches for it gets a clear, structured failure instead
-# of either silent unsupported-tool noise or actually executing something.
+# the model an explicit way to signal "I'm stuck" instead of guessing
+# (a real abort - see ClarificationNeeded), and run_command is offered
+# but always refused with a recoverable error message pointing at the
+# real alternative (read_file/list_dir/search_files) - a model reaching
+# for a shell isn't a deliberate "I need help" signal the way
+# ask_user_prompt is, just a model not knowing what's available, so one
+# bad attempt shouldn't abort the whole run the way ClarificationNeeded
+# does.
 READ_ONLY_TOOLS = [
     READ_FILE_SCHEMA,
     LIST_DIR_SCHEMA,
@@ -497,9 +520,14 @@ def make_executor(
             )
         if name == RUN_COMMAND_TOOL_NAME:
             command = args.get("command", "(no command provided)")
-            raise CommandExecutionRefused(
-                f"model attempted to run a command, which isn't supported "
-                f"yet: {command}"
+            log.warning("-- Refused run_command(%r) - recoverable, not aborting.", command)
+            return (
+                "ERROR: run_command is not supported - there is no shell behind this tool, "
+                "ever, calling it again will not work either. Use search_files instead of "
+                "grep/find, use read_file's start_line/end_line (including a negative "
+                "start_line for tail-style reads) instead of head/tail/wc, and use list_dir "
+                "instead of ls - none of these need cd first, every tool here takes an "
+                "explicit path."
             )
         try:
             if name == "read_file":

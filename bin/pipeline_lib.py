@@ -245,10 +245,12 @@ def run_ai_step_with_retry(
     """
     Calls step_fn() - a zero-arg closure performing one run_with_tools
     round trip and returning its parsed result - retrying only on
-    AIError. tools.PipelineAbort (ask_user_prompt/run_command) propagates
-    immediately, unretried: those are deliberate model signals, not
-    transient infra failures, and retrying changes nothing about a
-    model's decision to ask for clarification or reach for a shell.
+    AIError. tools.PipelineAbort (ask_user_prompt) propagates immediately,
+    unretried: that's a deliberate model signal ("I need a human"), not a
+    transient infra failure, and retrying changes nothing about a
+    model's decision to ask for clarification. run_command is not a
+    PipelineAbort - calling it returns a recoverable tool error to the
+    model instead (see tools.py), so it never reaches this layer at all.
 
     Each retry calls step_fn() completely fresh (new message history
     inside run_with_tools); any written_paths/changed_files accumulator
