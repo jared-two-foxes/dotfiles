@@ -13,8 +13,9 @@ this again after some criteria already have tests (e.g. from manual
 work since the last run) only writes tests for what's still missing.
 
 Workflow this is part of: check-ticket.py (confirm work is needed) ->
-write-tests.py (this script, optional) -> manual implementation ->
-validate-and-review.py (gate the result).
+write-tests.py (this script, optional) -> implement-tests.py (implement
+against the tests this script wrote, optional) or manual implementation
+-> validate-and-review.py (gate the result).
 
 Usage:
     write-tests <ticket-id> [--model <model-id>] [--config <path>]
@@ -129,8 +130,8 @@ def main() -> None:
     log_summary()
     render.print_line(
         f"-- {written} test(s) written, {skipped} criterion(criteria) already "
-        f"covered. Implement against {lib.GAP_PLAN_FILE}, then run "
-        f"'validate-and-review {args.ticket_id}'."
+        f"covered. Run 'implement-tests {args.ticket_id}' (or implement against "
+        f"{lib.GAP_PLAN_FILE} by hand), then 'validate-and-review {args.ticket_id}'."
     )
     render.print_line(f"-- Token usage: {ai_client.usage}")
 

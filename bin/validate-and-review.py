@@ -25,11 +25,12 @@ work is needed and just want the end-state gate, with no prior
 check-ticket.py/write-tests.py call.
 
 Workflow this is part of: check-ticket.py (confirm work is needed,
-optional) -> write-tests.py (optional) -> manual implementation -> this
-script.
+optional) -> write-tests.py (optional) -> implement-tests.py or manual
+implementation -> this script.
 
 Usage:
     validate-and-review <ticket-id> [--model <model-id>] [--config <path>]
+                         [--ticket-file-in <path>]
 """
 
 import argparse
@@ -67,6 +68,15 @@ def main() -> None:
         help=f"Path to the build/test command config (default: {lib.PIPELINE_CONFIG_FILE}).",
     )
     parser.add_argument(
+        "--ticket-file-in",
+        type=Path,
+        default=None,
+        help="Read the ticket from this local file instead of fetching from "
+             "Linear - e.g. a not-yet-pushed revision from propose-ticket-edit.py. "
+             "Re-read every run, same as the Linear fetch it replaces (this "
+             "script always re-fetches fresh, never reuses a stale .ticket.md).",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -80,7 +90,13 @@ def main() -> None:
     model = args.model
 
     # ── Step 1: Re-fetch ticket fresh ───────────────────────────────────────
-    ticket_content = lib.fetch_ticket_text(args.ticket_id)
+    if args.ticket_file_in is not None:
+        if not args.ticket_file_in.is_file():
+            lib.die(f"--ticket-file-in {args.ticket_file_in} not found.")
+        render.print_line(f"-- Using local ticket file {args.ticket_file_in} instead of fetching {args.ticket_id} from Linear.")
+        ticket_content = args.ticket_file_in.read_text(encoding="utf-8")
+    else:
+        ticket_content = lib.fetch_ticket_text(args.ticket_id)
     tools.write_file_block(str(lib.TICKET_FILE))(ticket_content)
 
     # ── Step 2: Plan - reused if it already exists, generated if not ──────

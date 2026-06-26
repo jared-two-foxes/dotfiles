@@ -21,9 +21,8 @@ import sys
 from rich.console import Console
 from rich.markdown import Markdown
 
-_console = Console(
-    file=io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-)
+_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+_console = Console(file=_stdout)
 
 
 def render_markdown(text: str) -> None:
@@ -39,5 +38,20 @@ def print_line(text: str = "") -> None:
     script's actual result (final summary, success/failure line, token
     usage) - the thing the script exists to report, not a progress or
     diagnostic message that's fine to filter out at a quieter level.
+
+    Writes through the same UTF-8 TextIOWrapper render_markdown uses
+    (not a bare print(), which encodes through sys.stdout's default
+    encoding - often cp1252 on Windows, not UTF-8) - model output
+    routinely contains characters (em dashes, arrows like the U+2192 in
+    a propose-ticket-edit.py diff line, emoji) that cp1252 can't encode
+    at all, which previously crashed the whole script with
+    UnicodeEncodeError on the very last line of otherwise-successful
+    output. errors="replace" means a genuinely unmappable character
+    degrades to a substitution glyph instead of crashing.
     """
-    print(text, flush=True)
+    try:
+        _stdout.write(text)
+        _stdout.write("\n")
+        _stdout.flush()
+    except Exception:
+        print(text, flush=True)
