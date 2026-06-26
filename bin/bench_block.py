@@ -216,12 +216,20 @@ GRADERS = {
     ("sa452", "plan"): grade_sa452_no_file_split,
     ("sa452", "narrow"): grade_sa452_no_file_split,
     ("sa452", "plan-narrow"): grade_sa452_no_file_split,
+    # sa452-proposed: same codebase claim (accounting_webhooks.rs, not a
+    # split-file layout), just a ticket revised by review-ticket.py/
+    # propose-ticket-edit.py to remove the stale file-list trap - same
+    # grader applies unchanged.
+    ("sa452-proposed", "plan"): grade_sa452_no_file_split,
+    ("sa452-proposed", "narrow"): grade_sa452_no_file_split,
     ("sa500", "plan"): grade_sa500_standard,
     ("sa500", "narrow"): grade_sa500_standard,
     ("sa500", "plan-narrow"): grade_sa500_standard,
     ("sa501", "plan"): grade_sa501_debug_redaction_named,
     ("sa501", "narrow"): grade_sa501_debug_redaction_named,
     ("sa501", "plan-narrow"): grade_sa501_debug_redaction_named,
+    ("sa501-proposed", "plan"): grade_sa501_debug_redaction_named,
+    ("sa501-proposed", "narrow"): grade_sa501_debug_redaction_named,
     ("sa502", "plan"): grade_sa502_already_implemented,
     ("sa502", "narrow"): grade_sa502_already_implemented,
     ("sa502", "plan-narrow"): grade_sa502_already_implemented,

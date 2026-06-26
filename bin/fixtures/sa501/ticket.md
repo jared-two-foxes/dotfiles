@@ -16,8 +16,6 @@ verify the signature before processing the payload.
       `postmark_webhook_token`.
 - [ ] A missing or empty `POSTMARK_SIGNING_SECRET` results in `None`,
       same as the other optional Postmark fields.
-- [ ] The new field's value never appears in plaintext anywhere it could
-      end up in logs (Debug output, error messages, etc.).
 - [ ] `cargo test -p virtual_assistant_api` passes with new tests
       covering the above.
 

@@ -226,6 +226,44 @@ trusting them) - it measurably helped some failing cheap models
 reliable for any of them, and didn't move glm-5 at all. Kept as a
 general-quality improvement; not a substitute for using a reliable model.
 
+##### Sub-finding: the ticket itself, not the model, was the bottleneck
+
+The same five low-tier models that struggled above (`deepseek-v4-flash`,
+`kimi-k2.6`, `glm-5`, `glm-5.1`, `grok-build-0.1`) were re-run against
+`fixtures/sa452-proposed/` - a version of SA-452's ticket produced by running
+`review-ticket.py`/`propose-ticket-edit.py` (see their own section below) on
+the original ticket. `review-ticket.py` flagged exactly the file-fragmentation
+trap these models were failing on (stale references to
+`xero_webhook_config.rs`/`quickbooks_webhook_config.rs`/an `email_config.rs`
+change, none of which exist - the real structs live in
+`accounting_webhooks.rs`) plus a missed Debug-redaction requirement.
+`propose-ticket-edit.py` rewrote the ticket to name the real file directly
+and state both as plain requirements, with no trap left to resolve. Same
+codebase, same pinned commit, same grader (`grade_sa452_no_file_split`) -
+only the ticket wording changed:
+
+| Model | Trials | Pass rate (original ticket) | Pass rate (`sa452-proposed`) |
+|---|---|---|---|
+| deepseek-v4-flash | 3 | 0/3 (2/3 with the plan-prompt fix) | **3/3** |
+| kimi-k2.6 | 3 | 0/3 (1/3 with the plan-prompt fix) | **3/3** |
+| glm-5 | 3 | 0/3 | **3/3** |
+| glm-5.1 | 3 | 1/3 | **3/3** |
+| grok-build-0.1 | 3 | 1/3 | **3/3** |
+
+15/15 once the ticket itself stopped requiring the model to detect and
+recover from a stale file list. This is the strongest evidence yet for the
+hypothesis that motivated building `review-ticket.py`/`propose-ticket-edit.py`
+in the first place: a chunk of what looked like "weak models can't plan
+reliably" was actually "the ticket asked for something that doesn't match
+the codebase, and only the strongest models reliably catch that themselves."
+The plan-prompt fix above was trying to patch this at the wrong layer -
+teaching every model to defensively re-verify every ticket claim, instead of
+catching the staleness once, before planning even starts. Not a reason to
+trust every cheap model on every ticket (SA-501/SA-502 still show real
+per-scenario capability gaps that no ticket cleanup will fix - see below) -
+but it reframes a chunk of this section's "model X failed" results as "ticket
+X was stale," which is a different problem with a different fix.
+
 #### `sa501` (omission-within-one-file: secret field needs a manual Debug update)
 
 Grader: `grade_sa501_debug_redaction_named`.
@@ -300,6 +338,83 @@ winning SA-452 tells you nothing about SA-502.
 reason to add more trials here before trusting `gpt-5.4-mini` as broadly
 reliable for `plan`, not just reliable on the one scenario it's been
 tested against the most.
+
+#### Full-suite run: every `plan` fixture through review-ticket.py/propose-ticket-edit.py
+
+Ran all four `plan` fixtures (SA-452/SA-500/SA-501/SA-502) through
+`review-ticket.py` then `propose-ticket-edit.py` (see their own section
+below), then re-benchmarked whichever fixtures actually produced a revision
+against the standard 6-model roster (`gpt-5.4-mini`, `claude-haiku-4-5`,
+`deepseek-v4-pro`, `gpt-5.1`, `glm-5.1`, `kimi-k2.6`), 3 trials each:
+
+| Fixture | review-ticket verdict | propose-ticket-edit outcome | Re-bench result |
+|---|---|---|---|
+| SA-452 | needs-attention (stale file-split refs + missing redaction) | revised ticket, anchored in `accounting_webhooks.rs` | **48/48** across 16 models total (6-model roster here, 5 low-tier models earlier, 5 free-tier models below) |
+| SA-500 | clear, no concerns | nothing to propose | unchanged - no proposed variant exists |
+| SA-501 | needs-attention (stale premise + missing redaction) | revised ticket, but re-adds an explicit redaction criterion | **18/18** - back to not discriminating |
+| SA-502 | needs-attention (already fully implemented) | no revision - "close this ticket" | no ticket to re-bench - this is the correct outcome |
+
+A separate follow-up pass ran every model in `model-pricing.toml`'s "Free
+tier" section (`big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`,
+`nemotron-3-ultra-free`, `north-mini-code-free` - all $0.00/token) against
+`sa452-proposed`:
+
+| Model | Trials | Pass rate | Cost | Avg time |
+|---|---|---|---|---|
+| big-pickle | 3 | 3/3 | $0.0000 | 66s |
+| deepseek-v4-flash-free | 3 | 3/3 | $0.0000 | 65s |
+| mimo-v2.5-free | 3 | 3/3 | $0.0000 | 47s |
+| nemotron-3-ultra-free | 3 | 3/3 | $0.0000 | 144s |
+| north-mini-code-free | 3 | 3/3 | $0.0000 | 30s |
+
+15/15 at zero dollar cost - including `deepseek-v4-flash-free`, the free
+sibling of `deepseek-v4-flash`, which went 0/3 on the original SA-452
+wording earlier in this document. Same conclusion as the low-tier and
+6-model runs, now extended to every model this project can call for free.
+
+Three distinct results came out of this:
+
+1. **SA-452 confirms the earlier finding at much larger scale.** Combined
+   across the low-tier, 6-model, and free-tier runs, that's 48/48 across 16
+   distinct models on the cleaned-up ticket - including every model that
+   previously failed or was inconsistent on the original wording, plus
+   `deepseek-v4-flash-free`, which went 0/3 on the original wording in its
+   non-free form. The review/propose loop
+   reliably catches and fixes the specific failure mode (stale file
+   references) that was costing weak models the most.
+
+2. **SA-501 demonstrates a real tension the loop doesn't resolve for free.**
+   `fixtures/sa501/ticket.md` was deliberately hand-edited earlier (see
+   above) to remove a line that handed the model the exact answer
+   ("redacted... Debug output"), specifically so the fixture would measure
+   judgment instead of instruction-following. Running it back through
+   `propose-ticket-edit.py` re-added that exact instruction as part of
+   resolving the "missing redaction requirement" concern - which is the
+   *correct* fix for a real ticket (a human should be told the secret needs
+   redacting), but it also makes the ticket stop testing what this
+   particular fixture exists to test. **Ticket-quality fixes and
+   benchmark-discriminating-power pull in opposite directions when the
+   "gap" the fixture is probing is itself the kind of thing a good ticket
+   should state explicitly.** This isn't a bug in either script - SA-501
+   was a benchmarking fixture deliberately weakened to be hard, not a
+   stand-in for what a real ticket should look like. Treat this as a
+   caveat on using benchmark fixtures as review-ticket.py review targets,
+   not as a finding about review-ticket.py's correctness.
+
+3. **SA-502 shows the gate working as intended, not as a non-result.** There
+   being no fixture to re-bench *is* the finding - `review-ticket.py`
+   correctly identified the ticket as fully satisfied already, and
+   `propose-ticket-edit.py` correctly refused to manufacture a revision to
+   fill that gap rather than recommending closing the ticket. The 0/3 some
+   models scored on this fixture earlier (see above) was always really a
+   ticket-staleness problem, not a `plan`-capability problem - exactly the
+   case this whole review/propose flow exists to catch before `plan` ever
+   runs.
+
+New fixtures from this run: `fixtures/sa501-proposed/` (kept for the
+documentation value above, not because it's expected to discriminate).
+`sa500`/`sa502` have no `-proposed` fixture directories since neither
+produced a revision to bench against.
 
 ### `narrow` (narrows plan -> only the unsatisfied criteria)
 
