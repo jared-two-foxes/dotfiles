@@ -239,12 +239,33 @@ Grader: `grade_sa501_debug_redaction_named`.
 | gpt-5.4-mini | 3 | 3/3 | $0.045 | 24s |
 | kimi-k2.6 | 3 | 3/3 | $0.115 | 91s |
 
-Every model went 18/18 - this trap is **not discriminating** at this trial
-count, the same way SA-500 wasn't. Worth keeping as another "is the model
-broken at everything" baseline check, but it doesn't currently separate
-model quality the way SA-452/SA-502 do. Possible follow-up: a harder variant
-where the hint to look at the Debug impl is less obvious from the ticket
-text alone.
+Every model went 18/18 at first - but this turned out to be a **fixture
+problem, not a model-capability finding**. The original `ticket.md` named
+the trap directly in its own acceptance criteria: *"The new field's value
+never appears in plaintext anywhere it could end up in logs (**Debug
+output**, error messages, etc.)"* - so passing only required following an
+explicit instruction, not noticing the hand-written `Debug` impl
+unprompted. That line was removed (2026-06-26) and the fixture re-run
+against the same 6 models:
+
+| Model | Trials | Pass rate |
+|---|---|---|
+| claude-haiku-4-5 | 3 | 3/3 |
+| deepseek-v4-pro | 3 | 3/3 |
+| glm-5.1 | 3 | 3/3 |
+| gpt-5.1 | 3 | 3/3 |
+| gpt-5.4-mini | 3 | 2/3 |
+| kimi-k2.6 | 3 | 3/3 |
+
+17/18 instead of 18/18 - a much weaker signal than SA-502, but no longer a
+pure no-op, and `gpt-5.4-mini` is again the one that slips.
+
+**General lesson for writing these fixtures**: a trap only measures
+judgment if the acceptance criteria don't pre-state the answer. Before
+trusting a "not discriminating" result as a real finding about model
+capability, re-read the ticket text itself for any phrase that hands the
+model the exact thing the grader checks for - that's a leaky fixture, not
+a strong model.
 
 #### `sa502` ("this is already done" - recognizing already-satisfied work)
 

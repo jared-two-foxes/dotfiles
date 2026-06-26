@@ -54,6 +54,15 @@ def main() -> None:
         help=f"Path to the build/test command config (default: {lib.PIPELINE_CONFIG_FILE}).",
     )
     parser.add_argument(
+        "--ticket-file-in",
+        type=Path,
+        default=None,
+        help="Read the ticket from this local file instead of fetching from "
+             "Linear - e.g. a not-yet-pushed revision from propose-ticket-edit.py. "
+             "Only used the first time fetch_ticket runs (ignored on a re-entrant "
+             "run where .ticket.md already exists).",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -69,7 +78,7 @@ def main() -> None:
     lib.show_last_failure()
 
     # ── Planning pipeline (re-entrant: shared with resolve-ticket.py) ──────
-    lib.walk(lib.build_planning_blocks(args.ticket_id, model))
+    lib.walk(lib.build_planning_blocks(args.ticket_id, model, ticket_file_in=args.ticket_file_in))
 
     gap_plan_text = lib.GAP_PLAN_FILE.read_text(encoding="utf-8")
     criteria = lib.extract_acceptance_criteria(gap_plan_text)

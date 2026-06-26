@@ -76,6 +76,14 @@ def main() -> None:
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
+        "--ticket-file-in",
+        type=Path,
+        default=None,
+        help="Read the ticket from this local file instead of fetching from "
+             "Linear - e.g. a not-yet-pushed revision from propose-ticket-edit.py. "
+             "Still written through to .ticket.md as usual.",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -92,7 +100,13 @@ def main() -> None:
     lib.clean_stale_state()
 
     # ── Step 1: Fetch ticket ────────────────────────────────────────────────
-    ticket_content = lib.fetch_ticket_text(args.ticket_id)
+    if args.ticket_file_in is not None:
+        if not args.ticket_file_in.is_file():
+            lib.die(f"--ticket-file-in {args.ticket_file_in} not found.")
+        render.print_line(f"-- Using local ticket file {args.ticket_file_in} instead of fetching {args.ticket_id} from Linear.")
+        ticket_content = args.ticket_file_in.read_text(encoding="utf-8")
+    else:
+        ticket_content = lib.fetch_ticket_text(args.ticket_id)
     tools.write_file_block(str(lib.TICKET_FILE))(ticket_content)
 
     # ── Step 2: Plan (ticket embedded in prompt; plan text returned) ──────

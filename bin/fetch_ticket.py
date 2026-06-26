@@ -55,6 +55,44 @@ def fetch_ticket(identifier: str) -> dict:
         return json.loads(resp.read())
 
 
+def update_ticket(issue_id: str, title: str | None = None, description: str | None = None) -> dict:
+    """
+    Mutates the title/description of an existing Linear issue. issue_id
+    is the issue's internal UUID (the "id" field fetch_ticket() returns,
+    not its human-readable identifier like "SA-42" - Linear's
+    issueUpdate mutation takes the former). Only used by update-ticket.py
+    - this is the one write path against Linear in this whole set of
+    scripts, deliberately not called from anywhere else.
+    """
+    api_key = load_api_key()
+    mutation = """
+    mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) {
+        success
+        issue { id identifier title updatedAt }
+      }
+    }
+    """
+    input_fields = {}
+    if title is not None:
+        input_fields["title"] = title
+    if description is not None:
+        input_fields["description"] = description
+    payload = json.dumps(
+        {"query": mutation, "variables": {"id": issue_id, "input": input_fields}}
+    ).encode()
+    req = urllib.request.Request(
+        "https://api.linear.app/graphql",
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": api_key,
+        },
+    )
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read())
+
+
 PRIORITY_LABELS = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
 
 

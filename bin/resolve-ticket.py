@@ -118,6 +118,15 @@ def main() -> None:
              "files already written.",
     )
     parser.add_argument(
+        "--ticket-file-in",
+        type=Path,
+        default=None,
+        help="Read the ticket from this local file instead of fetching from "
+             "Linear - e.g. a not-yet-pushed revision from propose-ticket-edit.py. "
+             "Only used the first time fetch_ticket runs (ignored on a re-entrant "
+             "run where .ticket.md already exists).",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -138,7 +147,7 @@ def main() -> None:
     ticket_id = args.ticket_id
 
     # ── Planning pipeline (re-entrant: each block skipped if already done) ──
-    lib.walk(lib.build_planning_blocks(ticket_id, model))
+    lib.walk(lib.build_planning_blocks(ticket_id, model, ticket_file_in=args.ticket_file_in))
 
     plan_text = lib.PLAN_FILE.read_text(encoding="utf-8")
     gap_plan_text = lib.GAP_PLAN_FILE.read_text(encoding="utf-8")

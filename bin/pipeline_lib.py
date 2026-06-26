@@ -335,7 +335,7 @@ def walk(blocks: list[Block]) -> None:
             die_with_log(block.name, f"{block.name} ran but its postcondition still isn't satisfied.")
 
 
-def build_planning_blocks(ticket_id: str, model: str) -> list[Block]:
+def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | None = None) -> list[Block]:
     """
     The fetch -> plan -> narrow Block list shared by resolve-ticket.py
     (which continues into its own per-criterion implementation loop
@@ -344,12 +344,26 @@ def build_planning_blocks(ticket_id: str, model: str) -> list[Block]:
     its file already exists and passes its validity check, so calling
     this against a ticket that already has a valid .gap-plan.md from an
     earlier check-ticket.py run does nothing here.
+
+    ticket_file_in: if given, the fetch_ticket block reads this local
+    file instead of calling Linear - e.g. a proposed revision from
+    propose-ticket-edit.py that hasn't been pushed to Linear yet. Either
+    way the content still gets written to TICKET_FILE (.ticket.md) -
+    that's still this pipeline's one canonical ticket-state file; this
+    only changes where its content originally comes from.
     """
+    def fetch_ticket_content() -> str:
+        if ticket_file_in is not None:
+            if not ticket_file_in.is_file():
+                die(f"--ticket-file-in {ticket_file_in} not found.")
+            return ticket_file_in.read_text(encoding="utf-8")
+        return fetch_ticket_text(ticket_id)
+
     return [
         Block(
             name="fetch_ticket",
             check=lambda: TICKET_FILE.is_file() and bool(TICKET_FILE.read_text(encoding="utf-8").strip()),
-            run=lambda: tools.write_file_block(str(TICKET_FILE))(fetch_ticket_text(ticket_id)),
+            run=lambda: tools.write_file_block(str(TICKET_FILE))(fetch_ticket_content()),
         ),
         Block(
             name="planner",
