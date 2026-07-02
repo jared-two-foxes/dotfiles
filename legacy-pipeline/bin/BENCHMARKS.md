@@ -217,7 +217,7 @@ premium-request multiplier, not $/token - `model-pricing.toml` intentionally
 has no `copilot:*` entries (see `ai_client.py`'s `COPILOT` comment); treat
 "unpriced" here as "billed differently," not "free."
 
-**Current default: `gpt-5.4-mini`** (set in `push_ticket.py` / `next_step.py`).
+**Current default: `gpt-5.4-mini`** (set in `check-ticket.py` / `resolve-ticket.py`).
 
 A prompt fix was added to `prompts/plan.prompt.md` Step 3 (explicitly telling
 the planner to verify ticket-named files against the actual codebase before
@@ -504,17 +504,7 @@ front-runner (ties the two priciest models at a fraction of the cost) but
 has only 3 trials here, not the ~10-25 that gave `plan`'s number real
 confidence. Treat this table as a first pass, not a settled choice.
 
-### `implement-criterion` (implements one criterion against its failing test) - RETIRED
-
-**This block no longer exists in `bench_block.py`/`bench.py`.** The
-criteria-stack rewrite (see `../criteria-stack-plan.md`) retired
-AI-driven per-criterion implementation entirely - `next_step.py` always
-pauses for a human to implement, so there's nothing left to benchmark
-here. The trial history below (including `run_implement_for_criterion`
-and `implement-criterion.prompt.md`, both now only in
-`../legacy-pipeline/`) is kept for reference - the bugs it found
-(protected-file-blocks-inline-tests, missing-cross-file-reconciliation)
-are real lessons even though the code that had them is gone.
+### `implement-criterion` (implements one criterion against its failing test)
 
 Grader: real check, mirror of `test-criterion`'s - `cargo build` must
 succeed, then the seeded test must pass when run scoped (green). Fixture:
@@ -835,10 +825,13 @@ batch next before swapping `check-ticket.py`/`resolve-ticket.py` over
   assuming it'll clear up.
 - **A new block** (e.g. `review`): add a grader to `bench_block.py`'s
   dispatch (text heuristic if cheap/fast is enough, real compile/run check
-  if not - see `test-criterion`'s compile+red check for the pattern to
-  follow), wire the new `--block` choice through `bench.py`'s
+  if not - see `implement-criterion`'s compile+green check for the pattern
+  to follow), wire the new `--block` choice through `bench.py`'s
   `build_jobs`/argparse/`CARGO_BLOCKS` (if it touches cargo), and add
   whatever fixture that block needs under `fixtures/<ticket>/`.
+- **`implement-criterion` is wired but unbenchmarked** - it exists (see
+  table above) but only has a 1-trial smoke test. Next step here is a real
+  trial batch, same as was done for `plan`/`narrow`/`test-criterion`.
 - **A new ticket scenario** (beyond SA-452): add a `fixtures/<ticket-name>/`
   directory with the same fixture shape (`ticket.md`, `plan-good.md` /
   `plan-bad.md` for narrow, `gapplan-good.md` for test-criterion), and a

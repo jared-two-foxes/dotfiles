@@ -105,5 +105,7 @@
   },
   "gitlens.ai.model": "vscode",
   "gitlens.ai.vscode.model": "claude-code:claude-sonnet-4.6",
+  "vsicons.dontShowNewVersionMessage": true,
   "chat.viewSessions.orientation": "stacked",
+  "cSpell.enabled": false,
 }

@@ -85,17 +85,14 @@ def _ensure_cargo_lane_pool(n: int) -> None:
 # Blocks that actually invoke cargo (compile + scoped run), as opposed
 # to plan/narrow which are pure model calls - these need a cargo lane,
 # a private database.db copy, and the concurrency safety cap below.
-# implement-criterion used to be in this set too, before the
-# criteria-stack rewrite retired AI-driven per-criterion implementation
-# (see bench_block.py's module docstring) - next_step.py always pauses
-# for a human to implement, so there's no implement block left to bench.
-CARGO_BLOCKS = {"test-criterion"}
+CARGO_BLOCKS = {"test-criterion", "implement-criterion"}
 
 # plan/narrow trials are pure model calls (tens of seconds to a few
 # minutes); the cargo blocks additionally compile and run cargo, which
 # is much slower, especially before a lane's target dir is warm.
 TRIAL_TIMEOUT_S = {
-    "plan": 900, "narrow": 900, "plan-narrow": 900, "test-criterion": 2400,
+    "plan": 900, "narrow": 900, "plan-narrow": 900,
+    "test-criterion": 2400, "implement-criterion": 2400,
 }
 
 # Blocks that need a fixed gap-plan fixture instead of plan/narrow's
@@ -117,6 +114,13 @@ class Job:
     plan_file: Path | None
     trial_index: int
     criterion: str | None = None
+    # implement-criterion only: seed_file is copied to test_file inside the
+    # worktree before the model runs, so it starts in the same state
+    # test-criterion would have left it in; qualified_test_name is the
+    # green-check target.
+    seed_file: Path | None = None
+    test_file: str | None = None
+    qualified_test_name: str | None = None
 
 
 @dataclass
@@ -223,6 +227,18 @@ def run_trial(job: Job, repo: Path, base_ref: str) -> TrialResult:
             cmd += ["--plan-file", str(job.plan_file)]
         if job.criterion:
             cmd += ["--criterion", job.criterion]
+        if job.test_file:
+            cmd += ["--test-file", job.test_file]
+        if job.qualified_test_name:
+            cmd += ["--qualified-test-name", job.qualified_test_name]
+
+        if job.block == "implement-criterion":
+            # Seed the worktree with the known-good failing test (a
+            # fixture captured from a real test-criterion trial) so the
+            # implementer starts from the same state test-criterion would
+            # have left it in, instead of needing a live test-writer run
+            # first.
+            shutil.copyfile(job.seed_file, wt_path / job.test_file)
 
         env = os.environ.copy()
         cargo_lane = None
@@ -311,7 +327,7 @@ def build_jobs(args) -> list[Job]:
                         ticket_file=ticket_file, plan_fixture=variant, plan_file=plan_file,
                         trial_index=trial,
                     ))
-    else:  # test-criterion
+    elif args.block == "test-criterion":
         gap_plan_file = fixtures_dir / "gapplan-good.md"
         if not gap_plan_file.is_file():
             raise SystemExit(f"missing gap-plan fixture: {gap_plan_file}")
@@ -326,6 +342,29 @@ def build_jobs(args) -> list[Job]:
                     model=model, block="test-criterion", ticket_name=args.ticket_name,
                     ticket_file=ticket_file, plan_fixture=None, plan_file=gap_plan_file,
                     trial_index=trial, criterion=criterion,
+                ))
+    else:  # implement-criterion
+        gap_plan_file = fixtures_dir / "gapplan-good.md"
+        if not gap_plan_file.is_file():
+            raise SystemExit(f"missing gap-plan fixture: {gap_plan_file}")
+        meta_files = sorted(fixtures_dir.glob("*.meta.json"))
+        if not meta_files:
+            raise SystemExit(
+                f"missing implement-criterion fixture: no *.meta.json found in {fixtures_dir} "
+                f"(see BENCHMARKS.md - capture one from a passing test-criterion trial first)"
+            )
+        meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
+        seed_file = fixtures_dir / meta_files[0].name.replace(".meta.json", ".rs")
+        if not seed_file.is_file():
+            raise SystemExit(f"missing seed test file for {meta_files[0]}: {seed_file}")
+        criterion = args.criterion or meta["criterion"]
+        for model in models:
+            for trial in range(args.trials):
+                jobs.append(Job(
+                    model=model, block="implement-criterion", ticket_name=args.ticket_name,
+                    ticket_file=ticket_file, plan_fixture=None, plan_file=gap_plan_file,
+                    trial_index=trial, criterion=criterion, seed_file=seed_file,
+                    test_file=meta["target_file"], qualified_test_name=meta["qualified_test_name"],
                 ))
     return jobs
 
@@ -359,7 +398,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--block", required=True,
-        choices=["plan", "narrow", "plan-narrow", "test-criterion"],
+        choices=["plan", "narrow", "plan-narrow", "test-criterion", "implement-criterion"],
     )
     parser.add_argument("--models", required=True, help="Comma-separated model IDs")
     parser.add_argument("--trials", type=int, default=3)
@@ -381,12 +420,12 @@ def main() -> None:
     parser.add_argument("--plan-fixture", default="both", choices=["good", "bad", "both"],
                          help="Only used for --block narrow")
     parser.add_argument("--criterion", default=None,
-                         help="Only used for --block test-criterion "
+                         help="Only used for --block test-criterion/implement-criterion "
                               "(default: DEFAULT_CRITERIA[ticket-name] or the fixture's own criterion)")
     parser.add_argument("--out", default=None, help="Path to write results.jsonl (default: bench-<block>-<timestamp>.jsonl)")
     parser.add_argument(
         "--allow-concurrent-cargo", action="store_true",
-        help="Allow --concurrency > 1 for the test-criterion cargo block. "
+        help="Allow --concurrency > 1 for cargo blocks (test-criterion, implement-criterion). "
              "Off by default: running multiple full `cargo test --no-run`/`cargo build` workspace "
              "compiles at once exhausted this machine's pagefile and produced corrupted builds "
              "(linker STATUS_STACK_BUFFER_OVERRUN, bogus 'crate required in rlib format' errors) - "

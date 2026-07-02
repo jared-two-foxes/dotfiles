@@ -1,17 +1,21 @@
 """
-pipeline_lib - shared step library for push_ticket.py and next_step.py
-(the criteria-stack pipeline), plus the bench.py/bench_block.py
-benchmark harness.
+pipeline_lib - shared step library for check-ticket.py, tdd-pipeline.py,
+and resolve-ticket.py.
 
-push_ticket.py seeds a `.criteria-stack.json` work-queue (fetch -> plan
--> narrow -> one CriterionFrame per remaining acceptance criterion).
-next_step.py reads that stack and advances it one step at a time -
-writing a test, pausing for a human to implement, detecting green
-mechanically, or running the full ticket-validation gate (narrow again,
-lint, full test suite, review) once a ticket's frames are exhausted.
-Both scripts keep their own argparse setup and main() control flow;
-everything else - prompt builders, the run_with_tools call shapes, the
-stack's own I/O, the build/test command plumbing - lives here.
+check-ticket.py (fetch -> plan -> validate coverage, report-only) and
+tdd-pipeline.py (fetch -> plan -> test -> implement -> review, with hard
+gates) used to duplicate the fetch/plan logic independently, with small
+divergences between the two copies. resolve-ticket.py composes both
+flows (run check-ticket's validate step, then continue straight into
+tdd-pipeline's test/implement/review steps if it found gaps, without
+re-fetching the ticket or re-running the plan step). That composition is
+only possible cleanly if the step logic lives in one importable module
+instead of two hyphenated, non-importable CLI scripts - hence this file.
+
+Each CLI script keeps its own argparse setup and main() control flow (so
+each script's console narrative stays its own); everything else - prompt
+builders, the run_with_tools call shapes, the validator's evidence
+gathering, the build/test command plumbing - lives here.
 
 Functions named build_*_prompt() are pure string builders. Functions
 named run_*_step()/run_*_gate() wrap a build_*_prompt() call with its
@@ -19,17 +23,6 @@ run_with_tools call, error handling (die() on AIError/PipelineAbort),
 result validation, and console rendering - the same block every caller
 of that step needs, so the only thing left at each CLI script's call
 site is the step name and the variables it threads to the next step.
-
-This module previously backed a wider set of scripts (check-ticket.py,
-write-tests.py, resolve-ticket.py, implement-tests.py,
-validate-and-review.py, tdd-pipeline.py) that implemented pieces of the
-same fetch-plan-test-implement-review flow the criteria stack now owns
-directly. Those scripts, and the functions that existed only to serve
-them (the markdown "Test:" annotation mechanism, AI-driven
-per-criterion implementation, the whole-plan non-per-criterion test/
-implement/coverage steps, and the STALE_FILES/RESETTABLE_FILES generic
-cleanup lists), are retired. A frozen copy of the old scripts and
-prompts lives in ../legacy-pipeline/ for reference.
 """
 
 import json
@@ -42,7 +35,7 @@ import sys
 import time
 import tomllib
 import urllib.error
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -69,29 +62,36 @@ PLAN_FILE = Path(".tdd-plan.md")
 UPDATED_PLAN_FILE = Path(".updated-plan.md")
 PIPELINE_CONFIG_FILE = Path(".dev-pipeline.toml")
 
-# Transient scratch artifacts, not cross-invocation state: push_ticket
-# writes these once to seed the stack, and next_step's TICKET_VALIDATE
-# phase rewrites them fresh at validation time. .criteria-stack.json
-# (CRITERIA_STACK_FILE, below) is the only file either script trusts
-# across invocations - nothing here is read back by a later run the way
-# the old STALE_FILES/RESETTABLE_FILES scripts relied on. Cleanup of
-# these is push_ticket.py's own explicit responsibility (see its guard-
-# then-cleanup ordering), not a shared generic list - a shared list
-# serving callers with different lifecycles is exactly what caused a
-# real ordering bug in an earlier draft of this pipeline (a cleanup step
-# deleting the stack file before a re-entrancy guard could check it).
+# Used only by resolve-ticket.py's re-entrant flow.
 GAP_PLAN_FILE = Path(".gap-plan.md")
 PIPELINE_LOG_FILE = Path(".pipeline-log.jsonl")
 
-# The pipeline's canonical work-queue and sole cross-invocation source
-# of truth - see CriterionFrame/load_stack/save_stack below.
-CRITERIA_STACK_FILE = Path(".criteria-stack.json")
+# Cleared at the start of every run so this is always a clean single-shot
+# attempt - no leftover state from a prior run for the model to stumble
+# on, find ambiguous, or waste a tool-call turn checking for. Used only
+# by check-ticket.py - resolve-ticket.py is re-entrant by design and
+# persists state across invocations instead (see reset_pipeline_state
+# for its explicit --reset opt-out). Includes GAP_PLAN_FILE since
+# check-ticket.py now runs the narrow step too (same .gap-plan.md
+# resolve-ticket.py reads on startup) - a stale gap plan from an earlier
+# ticket would otherwise look like a valid, already-narrowed result.
+STALE_FILES = (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE)
+
+# Used only by resolve-ticket.py's --reset flag. Deliberately excludes
+# any test/implementation source file the pipeline wrote - those are
+# real work product, not pipeline scaffolding; reverting them is the
+# user's own job via git.
+RESETTABLE_FILES = (TICKET_FILE, PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
 
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
+TEST_PROMPT_FILE = PROMPTS_DIR / "test-singlepass.prompt.md"
+TEST_COVERAGE_PROMPT_FILE = PROMPTS_DIR / "validate-test-coverage.prompt.md"
+IMPLEMENT_PROMPT_FILE = PROMPTS_DIR / "implement-singlepass.prompt.md"
 REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-singlepass.prompt.md"
 TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
+IMPLEMENT_CRITERION_PROMPT_FILE = PROMPTS_DIR / "implement-criterion.prompt.md"
 
 # Always injected. Instructs the planner to self-clarify before planning,
 # since none of these scripts have a path for a human to answer follow-up
@@ -110,18 +110,17 @@ AUTO_PREAMBLE = (
 # svelte.config.*, package.json) relative to cwd - the same cwd
 # convention every other relative path in this module already relies on.
 #
-# test_filter_cmd is used by next_step.py's per-criterion phases
+# test_filter_cmd is used only by resolve-ticket.py's per-criterion loop
 # (run_scoped_test) - {filter} is substituted with the qualified test
-# name recorded for that criterion's frame. Compiling can't be scoped to
-# one test (a test binary compiles everything in it regardless of which
+# name recorded for that criterion. Compiling can't be scoped to one
+# test (a test binary compiles everything in it regardless of which
 # test you'll filter at runtime), so there's no filtered equivalent of
 # test_compile_cmd - only the run is ever scoped.
 #
 # fmt_fix_cmd/clippy_fix_cmd/fmt_check_cmd/clippy_cmd are used only by
-# next_step.py's TICKET_VALIDATE phase (run_lint_gate) - lint/style
-# checks run once, after every criterion in a ticket is implemented and
-# passing, right before code review - not as acceptance-criteria
-# evidence (see extract_plan_commands). Names
+# resolve-ticket.py's run_lint_gate - lint/style checks run once, after
+# every criterion is implemented and passing, right before code review -
+# not as acceptance-criteria evidence (see extract_plan_commands). Names
 # are inherited from the original Rust-only defaults (fmt/clippy) but are
 # generic format-fix/lint-fix/format-check/lint-check slots regardless of
 # toolchain - not worth a breaking key rename across every existing
@@ -183,27 +182,31 @@ def load_prompt_body(prompt_file: Path) -> str:
     return body
 
 
-def remove_scratch_files(paths: tuple[Path, ...]) -> None:
-    """
-    push_ticket.py's own explicit cleanup step, called only after its
-    re-entrancy/--force guard has already passed - see its module
-    docstring for why this isn't a shared generic list run ahead of that
-    guard the way the old STALE_FILES mechanism was.
-    """
-    for path in paths:
+def clean_stale_state() -> None:
+    for path in STALE_FILES:
         if path.exists():
             path.unlink()
-            log.info("-- Removed %s from a previous run", path)
+            log.info("-- Removed stale %s from a previous run", path)
+
+
+def reset_pipeline_state() -> None:
+    """
+    Used only by resolve-ticket.py's --reset flag. See RESETTABLE_FILES
+    for what's cleared and why source files are deliberately excluded.
+    """
+    for path in RESETTABLE_FILES:
+        if path.exists():
+            path.unlink()
+            log.info("-- Reset: removed %s", path)
 
 
 # ---------------------------------------------------------------------------
-# Diagnostic log - next_step.py only. Purely informational: "why did
+# Diagnostic log - resolve-ticket.py only. Purely informational: "why did
 # this fail last time" for a human reading the next invocation's output.
-# Resumption decisions never consult this - phase detection always
-# re-inspects real output state (the stack file, a scoped test run) for
-# that, so a stale or missing log entry can't mislead the pipeline into
-# the wrong resume point, only a human glancing at the wrong "last
-# failure" note.
+# Resumption decisions never consult this - check() always re-inspects
+# real output state for that, so a stale or missing log entry can't
+# mislead the pipeline into the wrong resume point, only a human glancing
+# at the wrong "last failure" note.
 # ---------------------------------------------------------------------------
 
 
@@ -222,7 +225,9 @@ def log_event(block: str, status: str, error: str | None = None, criterion: str 
 def die_with_log(block: str, msg: str, criterion: str | None = None) -> None:
     """
     Like die(), but also records the failure to the diagnostic log first
-    - used by every push_ticket.py/next_step.py failure path.
+    - used by every resolve-ticket.py-specific failure path. die() itself
+    is untouched so check-ticket.py/tdd-pipeline.py keep their existing
+    behavior exactly (they never write to PIPELINE_LOG_FILE).
     """
     log_event(block, "failed", error=msg, criterion=criterion)
     die(msg)
@@ -335,12 +340,13 @@ def walk(blocks: list[Block]) -> None:
 
 def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | None = None) -> list[Block]:
     """
-    The fetch -> plan -> narrow Block list used by push_ticket.py to seed
-    the stack, and by next_step.py's TICKET_VALIDATE phase to re-fetch
-    and re-plan before its safety-net re-narrow. Re-entrant: each block
-    is skipped if its file already exists and passes its validity check,
-    so calling this against a ticket that already has a valid
-    .gap-plan.md from an earlier run does nothing here.
+    The fetch -> plan -> narrow Block list shared by resolve-ticket.py
+    (which continues into its own per-criterion implementation loop
+    afterward) and write-tests.py (which continues into a test-only
+    loop instead, no implementer). Re-entrant: each block is skipped if
+    its file already exists and passes its validity check, so calling
+    this against a ticket that already has a valid .gap-plan.md from an
+    earlier check-ticket.py run does nothing here.
 
     ticket_file_in: if given, the fetch_ticket block reads this local
     file instead of calling Linear - e.g. a proposed revision from
@@ -755,14 +761,15 @@ def gather_plan_file_context(plan_content: str) -> tuple[str, set[str]]:
 
 
 # ---------------------------------------------------------------------------
-# Narrow step - same evidence-gathering a coverage validator would need,
-# but the output is plan-shaped (like the plan step's own output)
-# instead of a prose verdict. push_ticket.py counts the remaining
-# '## Acceptance Criteria' bullets to build the initial stack;
-# next_step.py's TICKET_VALIDATE phase re-runs this fresh as a safety
-# net after a ticket's frames are exhausted. Always writes to
-# GAP_PLAN_FILE - transient scratch, not cross-invocation state (see the
-# module-level comment above GAP_PLAN_FILE's definition).
+# Narrow step (check-ticket.py and resolve-ticket.py) - same
+# evidence-gathering a coverage validator would need, but the output is
+# plan-shaped (like the plan step's own output) instead of a prose
+# verdict: check-ticket.py reports completion by counting the remaining
+# '## Acceptance Criteria' bullets, and resolve-ticket.py's check() is
+# "file exists, well-formed" rather than a re-judgment of freshness on
+# every resume. Both write to the same GAP_PLAN_FILE, so a remaining-gap
+# report from check-ticket.py is exactly what resolve-ticket.py needs to
+# re-enter straight into its per-criterion implementation loop.
 # ---------------------------------------------------------------------------
 
 
@@ -896,13 +903,7 @@ def run_plan_narrow_step(ticket_content: str, model: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-criterion parsing (push_ticket.py) and scoped test execution
-# (next_step.py). The old markdown "Test: <file> :: <name>" annotation
-# mechanism that used to record a criterion's test pointer directly on
-# .gap-plan.md is retired - CriterionFrame.test_file/test_name (see the
-# stack section below) is the same information, stored as real
-# structured state on the stack instead of a text annotation on a
-# scratch file.
+# Per-criterion parsing/annotation (resolve-ticket.py only)
 # ---------------------------------------------------------------------------
 
 
@@ -911,9 +912,9 @@ def extract_acceptance_criteria(plan_content: str) -> list[str]:
     Pull each '- [ ] ...' line directly under '## Acceptance Criteria' -
     same list-tolerant parsing style as extract_plan_files, applied to
     the criteria section instead of the implementation section. Returns
-    the exact bullet line text (including any trailing HTML comment) -
-    push_ticket.py uses this verbatim text as a new CriterionFrame's
-    `criterion` field.
+    the exact bullet line text (including any trailing HTML comment),
+    since that's the key used to find/insert this criterion's Test:
+    annotation in find_criterion_test/annotate_criterion_test.
     """
     match = re.search(
         r"^## Acceptance Criteria\s*\n(.*?)(?:\n## |\Z)",
@@ -929,169 +930,65 @@ def extract_acceptance_criteria(plan_content: str) -> list[str]:
     ]
 
 
-# ---------------------------------------------------------------------------
-# Criteria stack - .criteria-stack.json is the pipeline's canonical
-# work-queue and the only file either push_ticket.py or next_step.py
-# trusts across invocations. See the module docstring for how this
-# replaces the old per-script state files.
-# ---------------------------------------------------------------------------
+TEST_ANNOTATION_RE = re.compile(r"^\s*Test:\s*(.+?)\s*::\s*(.+?)\s*$")
 
 
-@dataclass
-class CriterionFrame:
-    ticket: str           # e.g. "SA-42"
-    criterion: str         # verbatim bullet from the gap plan, e.g. "- [ ] ..."
-    plan_context: str      # Implementation Plan lines relevant to this
-                            # criterion, extracted at push time (see
-                            # extract_plan_context_for_criterion)
-    test_file: str | None       # set once the test-writer runs
-    test_name: str | None       # fully-qualified, for run_scoped_test
-    status: str            # "pending" | "test-written" | "done"
-    origin: str             # "ticket" | "review" | "validate-missed" -
-                            # recorded but not yet acted on differently;
-                            # all origins go through the identical
-                            # test-write -> implement -> gate cycle.
-
-
-def load_stack() -> list[CriterionFrame]:
+def find_criterion_test(plan_content: str, criterion: str) -> tuple[str, str] | None:
     """
-    Read .criteria-stack.json. Returns [] if the file does not exist or
-    is empty. A corrupt or schema-mismatched file is a hard stop
-    (die_with_log), not something to silently reset - the stack is the
-    pipeline's only cross-invocation state, so guessing at a recovery
-    would risk silently discarding in-progress work.
+    Looks for a 'Test:' sub-line immediately following `criterion`'s
+    bullet line. Returns (file_path, qualified_test_name) if found.
     """
-    if not CRITERIA_STACK_FILE.is_file():
-        return []
-    text = CRITERIA_STACK_FILE.read_text(encoding="utf-8").strip()
-    if not text:
-        return []
-    try:
-        raw = json.loads(text)
-    except json.JSONDecodeError as e:
-        die_with_log("stack", f"{CRITERIA_STACK_FILE} is not valid JSON: {e}")
-    try:
-        return [CriterionFrame(**entry) for entry in raw]
-    except TypeError as e:
-        die_with_log("stack", f"{CRITERIA_STACK_FILE} does not match the expected frame schema: {e}")
+    lines = plan_content.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == criterion.strip():
+            if i + 1 < len(lines):
+                match = TEST_ANNOTATION_RE.match(lines[i + 1])
+                if match:
+                    return match.group(1).strip(), match.group(2).strip()
+            return None
+    return None
 
 
-def save_stack(frames: list[CriterionFrame]) -> None:
+def annotate_criterion_test(plan_path: Path, criterion: str, file_path: str, test_name: str) -> str:
     """
-    Serialise and write atomically: write to a temp file in the same
-    directory, then os.replace. Prevents a partial write from
-    corrupting the stack if the process is interrupted mid-write.
+    Read-modify-write: insert (or replace) a 'Test: <file> :: <name>'
+    sub-line directly under `criterion`'s bullet in `plan_path`, so the
+    pointer the test-writer reports survives as part of the same
+    artifact rather than a separate mapping file. Returns the updated
+    content (callers should use this return value instead of re-reading
+    the file, same convention as write_file_block).
     """
-    tmp_path = CRITERIA_STACK_FILE.with_name(CRITERIA_STACK_FILE.name + ".tmp")
-    tmp_path.write_text(
-        json.dumps([asdict(frame) for frame in frames], indent=2) + "\n", encoding="utf-8"
-    )
-    os.replace(tmp_path, CRITERIA_STACK_FILE)
+    content = plan_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    annotation = f"  Test: {file_path} :: {test_name}"
+    for i, line in enumerate(lines):
+        if line.strip() == criterion.strip():
+            if i + 1 < len(lines) and TEST_ANNOTATION_RE.match(lines[i + 1]):
+                lines[i + 1] = annotation
+            else:
+                lines.insert(i + 1, annotation)
+            break
+    else:
+        die_with_log("annotate", f"Could not find criterion in {plan_path} to annotate: {criterion!r}")
+    updated = "\n".join(lines) + ("\n" if content.endswith("\n") else "")
+    plan_path.write_text(updated, encoding="utf-8")
+    log.info("   annotated %s with test pointer for criterion", plan_path)
+    return updated
 
 
-def push_frames(frames: list[CriterionFrame]) -> None:
+def criterion_test_exists(file_path: str, qualified_test_name: str) -> bool:
     """
-    Prepend frames to the front of the existing stack and save. Used
-    only by next_step.py, for review findings and validate-missed
-    criteria - both prepend onto a stack that may already have content
-    (the ticket's remaining frames, or none). push_ticket.py does NOT
-    use this - it owns full-stack replacement directly via save_stack,
-    since it only ever runs once its own guard confirms there's nothing
-    worth preserving (see push_ticket.py's module docstring).
+    Cheap sanity check, not full correctness verification: the recorded
+    file exists and the test name appears in it. Whether the gap is
+    actually closed is determined by running the scoped test (see
+    run_scoped_test), not by this check.
     """
-    save_stack(frames + load_stack())
-
-
-def pop_frame() -> CriterionFrame | None:
-    """Remove and return frame 0, saving the updated stack to disk
-    first. Returns None if the stack is empty."""
-    stack = load_stack()
-    if not stack:
-        return None
-    frame = stack.pop(0)
-    save_stack(stack)
-    return frame
-
-
-def peek_frame() -> CriterionFrame | None:
-    """Return frame 0 without modifying the stack. None if empty."""
-    stack = load_stack()
-    return stack[0] if stack else None
-
-
-def extract_plan_context_for_criterion(criterion: str, gap_plan_text: str) -> str:
-    """
-    Extract the Implementation Plan entries relevant to `criterion`, for
-    a CriterionFrame's plan_context field. Heuristic: lines from
-    '## Implementation Plan' that mention any backtick-quoted token from
-    the criterion's own text (file paths, type names, function names -
-    the same convention the plan/gap-plan prompts use throughout).
-    Falls back to the full Implementation Plan section if the criterion
-    has no backtick tokens, or none of them match any line; falls back
-    to the entire gap plan text if there's no Implementation Plan
-    section at all. Never returns an empty string - the tester needs
-    something to work from either way.
-    """
-    match = re.search(
-        r"^## Implementation Plan\s*\n(.*?)(?:\n## |\Z)",
-        gap_plan_text,
-        re.DOTALL | re.MULTILINE,
-    )
-    if not match:
-        return gap_plan_text
-    impl_section = match.group(1).strip()
-    if not impl_section:
-        return gap_plan_text
-
-    nouns = {tok.strip() for tok in BACKTICK_TOKEN_RE.findall(criterion) if tok.strip()}
-    if not nouns:
-        return impl_section
-
-    matching_lines = [
-        line for line in impl_section.splitlines()
-        if any(noun in line for noun in nouns)
-    ]
-    return "\n".join(matching_lines) if matching_lines else impl_section
-
-
-FINDINGS_SECTION_RE = re.compile(r"^## Findings\s*\n(.*?)(?:\n## |\Z)", re.DOTALL | re.MULTILINE)
-FINDING_BULLET_TEXT_RE = re.compile(r"^[-*]\s*(?:\[[ xX]?\]\s*)?(.+)$")
-FALLBACK_FINDING_RE = re.compile(r"^-\s*\*\*(.+?)\*\*:\s*(.+)$", re.MULTILINE)
-
-
-def extract_review_findings(review_text: str) -> list[str]:
-    """
-    Parse a CHANGES REQUESTED review into a list of finding strings, one
-    per actionable bullet - mechanical text extraction only, no AI call.
-
-    Primary path: a '## Findings' section (see the Final Answer format
-    added to review-singlepass.prompt.md) with one '- [ ] ...' bullet
-    per finding. Fallback, for review output that predates or otherwise
-    doesn't produce that section: '- **Category**: description' bullets,
-    the shape review-singlepass.prompt.md's Step 3 has always produced
-    for its findings list.
-
-    Returns [] if neither shape is found - the caller (next_step.py)
-    must die_with_log on an empty result rather than silently pushing
-    zero frames for a CHANGES REQUESTED verdict.
-    """
-    match = FINDINGS_SECTION_RE.search(review_text)
-    if match:
-        findings = []
-        for line in match.group(1).splitlines():
-            line = line.strip()
-            if not LIST_MARKER_RE.match(line):
-                continue
-            bullet_match = FINDING_BULLET_TEXT_RE.match(line)
-            if bullet_match:
-                findings.append(bullet_match.group(1).strip())
-        if findings:
-            return findings
-
-    return [
-        f"{category.strip()}: {description.strip()}"
-        for category, description in FALLBACK_FINDING_RE.findall(review_text)
-    ]
+    path = Path(file_path)
+    if not path.is_file():
+        return False
+    content = path.read_text(encoding="utf-8", errors="replace")
+    leaf = qualified_test_name.rsplit("::", 1)[-1]
+    return leaf in content
 
 
 def run_scoped_test(qualified_test_name: str, commands: dict, label: str) -> subprocess.CompletedProcess:
@@ -1140,25 +1037,20 @@ def run_lint_gate(commands: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# next_step.py's TICKET_VALIDATE phase support - implementation here is
-# manual (a human, not tool calls), so there's no automated agent
+# validate-and-review.py support - this script has no automated agent
 # tracking written_paths the way every other run_review_gate caller
-# does, and an optional smoke-test gate no toolchain default should have
-# to define.
+# does (the implementation here is manual, not tool calls), and may want
+# an optional smoke-test gate no toolchain default should have to define.
 # ---------------------------------------------------------------------------
 
 
-# This pipeline's own scaffolding (ticket/plan/gap-plan/log/stack) ends
-# up as real filesystem changes too (write_file_block/save_stack write
-# them like any other file) but is never itself "the implementation" -
-# excluded from git_changed_files so TICKET_VALIDATE's review gate
-# judges the human's actual work, not the artifacts this pipeline wrote
-# along the way.
+# This pipeline's own scaffolding (ticket/plan/gap-plan/log) ends up as
+# real filesystem changes too (write_file_block writes them like any
+# other file) but is never itself "the implementation" - excluded from
+# git_changed_files so validate-and-review.py's review gate judges the
+# human's actual work, not the artifacts this pipeline wrote along the way.
 _SCAFFOLDING_PATHS = frozenset(
-    str(p) for p in (
-        TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE,
-        PIPELINE_LOG_FILE, CRITERIA_STACK_FILE,
-    )
+    str(p) for p in (TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE, PIPELINE_LOG_FILE)
 )
 
 
@@ -1221,38 +1113,57 @@ def run_smoke_gate(smoke_cmd: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Per-criterion test step, and the final review gate. run_test_for_criterion
-# (and its compile-retry variant) are next_step.py's WRITE_TEST phase; there
-# is no per-criterion implement step - next_step always pauses for a human
-# to implement (see the module docstring). `plan_context` here is a frame's
-# already-scoped Implementation Plan excerpt (see
-# extract_plan_context_for_criterion below), not the full gap plan - the
-# caller (push_ticket.py, at frame-build time) does the scoping once, so
-# this layer doesn't need to strip anything out of a full plan itself.
+# Per-criterion test/implement steps. run_test_for_criterion is shared by
+# resolve-ticket.py (continues into implement) and write-tests.py (test
+# only, no implementer - manual implementation follows); the implement
+# half (run_implement_for_criterion) is resolve-ticket.py only.
 # ---------------------------------------------------------------------------
 
 TEST_WITNESS_RE = re.compile(r"TEST_WITNESS:\s*(.+?)\s*::\s*(.+)$", re.MULTILINE)
 
 
-def build_test_criterion_prompt(criterion: str, plan_context: str) -> str:
+def scoped_plan_text_for_criterion(plan_text: str) -> str:
+    """
+    Drop the '## Implementation Plan' section before handing the gap plan
+    to a single-criterion Tester run.
+
+    That section describes the whole feature (every criterion's plumbing
+    - OAuth refresh, remote API calls, schema, etc.), but a Tester run is
+    scoped to exactly one criterion. Keeping it in the prompt pulls the
+    agent into researching unrelated context (e.g. wiremock/HTTP-mock
+    setup for a criterion that never calls out) and burns its turn budget
+    chasing it. The '## Source' and '## Acceptance Criteria' sections
+    (with their Test: annotations pointing at files/tests already
+    written for sibling criteria) stay - those are the breadcrumbs that
+    actually help it land in the right file fast.
+    """
+    return re.sub(
+        r"\n## Implementation Plan\s*\n.*?(?=\n## |\Z)",
+        "",
+        plan_text,
+        flags=re.DOTALL,
+    )
+
+
+def build_test_criterion_prompt(criterion: str, plan_text: str) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
+    scoped_plan_text = scoped_plan_text_for_criterion(plan_text)
     return (
         f"{instructions}\n\n---\n\n"
-        f"Here is the relevant Implementation Plan context for this "
-        f"criterion, extracted from the gap plan - already complete and "
-        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"Here is the gap plan ({GAP_PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{scoped_plan_text}\n\n"
         f"Write a failing test for exactly this one acceptance criterion, "
         f"and only this one:\n\n{criterion}"
     )
 
 
-def run_test_for_criterion(criterion: str, plan_context: str, model: str) -> tuple[str, str]:
+def run_test_for_criterion(criterion: str, plan_text: str, model: str) -> tuple[str, str]:
     test_files: list[str] = []
 
     def attempt():
         test_files.clear()
         return run_with_tools(
-            build_test_criterion_prompt(criterion, plan_context),
+            build_test_criterion_prompt(criterion, plan_text),
             tools.READ_WRITE_TOOLS,
             tools.make_executor(written_paths=test_files),
             "test-criterion",
@@ -1279,13 +1190,13 @@ def run_test_for_criterion(criterion: str, plan_context: str, model: str) -> tup
     return witness.group(1).strip(), witness.group(2).strip()
 
 
-def build_test_criterion_fix_prompt(criterion: str, plan_context: str, file_path: str, error_output: str) -> str:
+def build_test_criterion_fix_prompt(criterion: str, plan_text: str, file_path: str, error_output: str) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
+    scoped_plan_text = scoped_plan_text_for_criterion(plan_text)
     return (
         f"{instructions}\n\n---\n\n"
-        f"Here is the relevant Implementation Plan context for this "
-        f"criterion, extracted from the gap plan - already complete and "
-        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"Here is the gap plan ({GAP_PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{scoped_plan_text}\n\n"
         f"You already wrote a failing test for exactly this one "
         f"acceptance criterion, and only this one:\n\n{criterion}\n\n"
         f"but the test suite does not compile. read_file {file_path} and "
@@ -1301,7 +1212,7 @@ def build_test_criterion_fix_prompt(criterion: str, plan_context: str, file_path
 
 def run_test_for_criterion_with_compile_retry(
     criterion: str,
-    plan_context: str,
+    plan_text: str,
     model: str,
     commands: dict,
     max_attempts: int = 3,
@@ -1316,9 +1227,7 @@ def run_test_for_criterion_with_compile_retry(
     behaviour for a bounded self-correction loop: if max_attempts is
     exhausted with the suite still not compiling, the caller gets back
     the last (still-failing) CompletedProcess to report and die on,
-    rather than this function retrying forever. next_step.py's
-    WRITE_TEST phase uses this variant, not the plain one above, so a
-    flaky first compile doesn't immediately abort the whole run.
+    rather than this function retrying forever.
     """
     test_files: list[str] = []
     file_path: str | None = None
@@ -1328,13 +1237,13 @@ def run_test_for_criterion_with_compile_retry(
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            prompt = build_test_criterion_prompt(criterion, plan_context)
+            prompt = build_test_criterion_prompt(criterion, plan_text)
         else:
             log.warning(
                 "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
                 attempt - 1, max_attempts,
             )
-            prompt = build_test_criterion_fix_prompt(criterion, plan_context, file_path, last_error)
+            prompt = build_test_criterion_fix_prompt(criterion, plan_text, file_path, last_error)
 
         def attempt_step():
             test_files.clear()
@@ -1380,6 +1289,178 @@ def run_test_for_criterion_with_compile_retry(
     return file_path, test_name, compile_result
 
 
+def build_implement_criterion_prompt(criterion: str, plan_text: str, test_file: str) -> str:
+    instructions = load_prompt_body(IMPLEMENT_CRITERION_PROMPT_FILE)
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the gap plan ({GAP_PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"This implementation is for exactly this one acceptance "
+        f"criterion, and only this one:\n\n{criterion}\n\n"
+        f"The failing test that proves it (must be made to pass without "
+        f"modifying it): {test_file}"
+    )
+
+
+def _extract_function_block(content: str, qualified_test_name: str) -> str | None:
+    """
+    Best-effort extraction of a test function's full source (signature
+    through closing brace) by its short name (the last `::`-separated
+    segment of qualified_test_name) - used to verify the test wasn't
+    altered when it can't be fully protected from writes (see
+    run_implement_for_criterion). Brace-counting only works for
+    brace-delimited languages (Rust/TS/JS/C++/Java/Go/...); returns None
+    for anything that doesn't match (e.g. Python), in which case the
+    caller skips the check rather than false-failing on a language this
+    can't parse.
+    """
+    short_name = qualified_test_name.rsplit("::", 1)[-1]
+    match = re.search(rf"^[ \t]*.*\b{re.escape(short_name)}\s*\(", content, re.MULTILINE)
+    if not match:
+        return None
+    brace_start = content.find("{", match.end())
+    if brace_start == -1:
+        return None
+    depth = 0
+    for i in range(brace_start, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[match.start():i + 1]
+    return None
+
+
+def run_implement_for_criterion(
+    criterion: str, plan_text: str, model: str, test_file: str, qualified_test_name: str
+) -> list[str]:
+    # protected_paths can't be used here the way it is for other steps:
+    # when the test lives inline in the same file as the production code
+    # it covers (e.g. Rust's #[cfg(test)] mod tests, the convention this
+    # pipeline's own Tester prompt names as the default), test_file *is*
+    # the file Implementor must edit to satisfy the criterion - blocking
+    # writes to it entirely makes the task impossible, not safe. Instead,
+    # snapshot the named test's own source before the run and verify
+    # byte-for-byte afterward that it's unchanged, which protects against
+    # tampering without blocking the surrounding edits Implementor
+    # legitimately needs to make in the same file.
+    original_content = Path(test_file).read_text(encoding="utf-8") if Path(test_file).is_file() else None
+    original_block = (
+        _extract_function_block(original_content, qualified_test_name)
+        if original_content is not None else None
+    )
+
+    changed_files: list[str] = []
+
+    def attempt():
+        changed_files.clear()
+        return run_with_tools(
+            build_implement_criterion_prompt(criterion, plan_text, test_file),
+            tools.READ_WRITE_TOOLS,
+            tools.make_executor(written_paths=changed_files),
+            "implement-criterion",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        )
+
+    try:
+        result = run_ai_step_with_retry(attempt, "implement-criterion", criterion=criterion)
+    except (AIError, tools.PipelineAbort) as e:
+        die_with_log("implement-criterion", str(e), criterion=criterion)
+    if not changed_files:
+        die_with_log(
+            "implement-criterion", "Implementor finished without writing any files.", criterion=criterion
+        )
+
+    if original_block is not None and test_file in changed_files:
+        new_content = Path(test_file).read_text(encoding="utf-8")
+        new_block = _extract_function_block(new_content, qualified_test_name)
+        if new_block is None:
+            die_with_log(
+                "implement-criterion",
+                f"the named test {qualified_test_name} could not be found in "
+                f"{test_file} after implementation - it may have been removed "
+                f"or renamed, which isn't allowed.",
+                criterion=criterion,
+            )
+        if new_block != original_block:
+            die_with_log(
+                "implement-criterion",
+                f"the named test {qualified_test_name} in {test_file} was "
+                f"modified during implementation, which isn't allowed - only "
+                f"the surrounding production code may change.",
+                criterion=criterion,
+            )
+
+    render_step_output(result.text)
+    return changed_files
+
+
+# ---------------------------------------------------------------------------
+# Test / coverage-gate / implement / review steps
+# ---------------------------------------------------------------------------
+
+
+def build_test_prompt(plan_text: str, scope_note: str | None = None) -> str:
+    instructions = load_prompt_body(TEST_PROMPT_FILE)
+    scope_block = ""
+    if scope_note:
+        scope_block = (
+            f"\n\nA coverage validator already checked this plan against the "
+            f"current codebase and found gaps - write tests ONLY for the "
+            f"specific acceptance criteria it lists as failing below; skip "
+            f"any criterion not named there, it's already satisfied by "
+            f"existing code and tests:\n\n{scope_note}"
+        )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"Write failing tests for this plan."
+        f"{scope_block}"
+    )
+
+
+def build_test_coverage_prompt(
+    test_files: list[str], plan_text: str, scope_note: str | None = None
+) -> str:
+    instructions = load_prompt_body(TEST_COVERAGE_PROMPT_FILE)
+    file_list = "\n".join(f"- {p}" for p in test_files)
+    scope_block = ""
+    if scope_note:
+        scope_block = (
+            f"\n\nNote: these tests were only meant to cover specific gaps a "
+            f"coverage validator found, not every criterion in the plan "
+            f"above - judge coverage only against the criteria it listed as "
+            f"failing below; do not flag missing coverage for any criterion "
+            f"not named there, it's already satisfied elsewhere:\n\n{scope_note}"
+        )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"The following test files were just written and should be "
+        f"judged:\n{file_list}\n\n"
+        f"Judge whether these tests adequately encode the acceptance "
+        f"criteria, per the steps and rules in your instructions."
+        f"{scope_block}"
+    )
+
+
+def build_implement_prompt(test_files: list[str], plan_text: str) -> str:
+    instructions = load_prompt_body(IMPLEMENT_PROMPT_FILE)
+    file_list = "\n".join(f"- {p}" for p in test_files)
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the TDD plan ({PLAN_FILE}) - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_text}\n\n"
+        f"The following failing test files must be made to pass without "
+        f"modifying them:\n{file_list}\n\n"
+        f"Implement the changes needed."
+    )
+
+
 def build_review_prompt(changed_files: list[str], plan_text: str) -> str:
     instructions = load_prompt_body(REVIEW_PROMPT_FILE)
     file_list = "\n".join(f"- {p}" for p in changed_files)
@@ -1392,18 +1473,67 @@ def build_review_prompt(changed_files: list[str], plan_text: str) -> str:
     )
 
 
-def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> tuple[str, str]:
-    """
-    Returns (verdict, raw_review_text) for any recognized verdict,
-    including APPROVED - next_step.py's TICKET_VALIDATE phase branches
-    on the verdict itself (APPROVED -> done; CHANGES REQUESTED -> pass
-    raw_review_text straight to extract_review_findings), rather than
-    this function dying on a non-APPROVED result the way it used to when
-    "review failed" and "review passed" were this function's only two
-    outcomes. die_with_log still fires on a genuine tool/AI failure or an
-    unparseable verdict - those aren't a normal CHANGES REQUESTED result
-    for the caller to act on.
-    """
+def run_test_step(plan_text: str, model: str, scope_note: str | None = None) -> list[str]:
+    test_files: list[str] = []
+    try:
+        result = run_with_tools(
+            build_test_prompt(plan_text, scope_note),
+            tools.READ_WRITE_TOOLS,
+            tools.make_executor(written_paths=test_files),
+            "test",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        die(str(e))
+    if not test_files:
+        die("Tester finished without writing any test files.")
+    render_step_output(result.text)
+    return test_files
+
+
+def run_test_coverage_gate(
+    test_files: list[str], plan_text: str, model: str, scope_note: str | None = None
+) -> None:
+    try:
+        coverage_result = run_with_tools(
+            build_test_coverage_prompt(test_files, plan_text, scope_note),
+            tools.READ_ONLY_TOOLS,
+            tools.make_executor(allow_write=False),
+            "test-coverage",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        die(str(e))
+    render_step_output(coverage_result.text)
+    verdict = find_verdict(
+        coverage_result.text, ["INCOMPLETE REVIEW", "INADEQUATE", "ADEQUATE"]
+    )
+    if verdict != "ADEQUATE":
+        die(f"Test coverage gate did not pass (verdict: {verdict or 'unknown'}).")
+
+
+def run_implement_step(test_files: list[str], plan_text: str, model: str) -> list[str]:
+    changed_files: list[str] = []
+    try:
+        result = run_with_tools(
+            build_implement_prompt(test_files, plan_text),
+            tools.READ_WRITE_TOOLS,
+            tools.make_executor(written_paths=changed_files, protected_paths=set(test_files)),
+            "implement",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        die(str(e))
+    if not changed_files:
+        die("Implementor finished without writing any files.")
+    render_step_output(result.text)
+    return changed_files
+
+
+def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> None:
     try:
         review_result = run_with_tools(
             build_review_prompt(changed_files, plan_text),
@@ -1414,9 +1544,8 @@ def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> tup
             summarize_call=tools.summarize_tool_call,
         )
     except (AIError, tools.PipelineAbort) as e:
-        die_with_log("review", str(e))
+        die(str(e))
     render_step_output(review_result.text)
     verdict = find_verdict(review_result.text, ["CHANGES REQUESTED", "APPROVED"])
-    if verdict is None:
-        die_with_log("review", "Reviewer's output did not contain a recognizable verdict (see output above).")
-    return verdict, review_result.text
+    if verdict != "APPROVED":
+        die(f"Code review gate did not pass (verdict: {verdict or 'unknown'}).")

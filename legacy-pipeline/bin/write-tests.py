@@ -7,10 +7,27 @@ implementation - that's a manual step that follows this one.
 
 Re-entrant: fetch/plan/narrow are skipped if .ticket.md/.tdd-plan.md/
 .gap-plan.md already exist and pass their validity check (see
-pipeline_lib.build_planning_blocks), and each criterion is skipped if it
-already has a recorded test that passes when run scoped - so running
-this again after some criteria already have tests (e.g. from manual
-work since the last run) only writes tests for what's still missing.
+pipeline_lib.build_planning_blocks), and each criterion already
+recorded in .gap-plan.md (a "Test: <file> :: <name>" line written by a
+prior run) is never rewritten - it's re-verified (compile gate, then a
+scoped run) and skipped either way, whether that scoped run passes
+(already covered) or still fails red (implementation pending). This
+also makes the test-compile gate failure below resumable: fix the
+compile error by hand, then just rerun the same command - criteria
+already written are re-checked, not redone, and the loop picks up at
+the first criterion that still has no test.
+
+--max-new turns this into a write-next-test loop: pass --max-new 1 and
+the script stops right after writing its first genuinely new test for
+this run, instead of continuing on through every remaining criterion.
+Combined with the skip-if-already-covered logic above, this gives you a
+manual RED-GREEN-RED cycle - write-tests --max-new 1, implement that one
+criterion to green, write-tests --max-new 1 again (the just-greened
+criterion is skipped as "already covered", and the next uncovered
+criterion gets a new test), repeat - without ever writing two untested
+criteria's tests ahead of where your implementation actually is.
+Already-covered/already-written skips don't count against the limit,
+since they're free re-checks, not new work.
 
 Workflow this is part of: check-ticket.py (confirm work is needed) ->
 write-tests.py (this script, optional) -> implement-tests.py (implement
@@ -19,6 +36,7 @@ against the tests this script wrote, optional) or manual implementation
 
 Usage:
     write-tests <ticket-id> [--model <model-id>] [--config <path>]
+                [--max-new <n>]
 """
 
 import argparse
@@ -53,6 +71,16 @@ def main() -> None:
         "--config",
         default=str(lib.PIPELINE_CONFIG_FILE),
         help=f"Path to the build/test command config (default: {lib.PIPELINE_CONFIG_FILE}).",
+    )
+    parser.add_argument(
+        "--max-new",
+        type=int,
+        default=None,
+        help="Stop after writing this many genuinely new tests (criteria "
+             "skipped as already-covered/already-written don't count). "
+             "Omit to write tests for every remaining criterion in one run "
+             "(default). Pass 1 to use this as a write-next-test loop: "
+             "write one, implement it to green, call again for the next.",
     )
     parser.add_argument(
         "--ticket-file-in",
@@ -107,12 +135,28 @@ def main() -> None:
 
         if existing and lib.criterion_test_exists(*existing):
             file_path, test_name = existing
+            # A prior run may have died at the compile gate (see below) after
+            # annotating this criterion's test but before the suite compiled
+            # cleanly. Re-check compilation here so resuming after a manual
+            # fix doesn't silently skip a criterion whose test still doesn't
+            # build - we'd otherwise treat "exists" as "fine" and move on.
+            compile_result = lib.run_command(commands["test_compile_cmd"], "test compile gate (resume check)")
+            if compile_result.returncode != 0:
+                log_summary()
+                lib.die_with_log(
+                    "compile", f"Tests still do not compile (exit {compile_result.returncode}). See output above.",
+                    criterion=criterion,
+                )
             result = lib.run_scoped_test(test_name, commands, "resume check")
             if result.returncode == 0:
                 log.info("-- Already covered by a passing test. Skipping.")
                 skipped += 1
                 outcomes.append(f"[already covered] {criterion} -> {file_path} :: {test_name}")
-                continue
+            else:
+                log.info("-- Test already written and compiles (not yet passing - implementation pending). Skipping rewrite.")
+                skipped += 1
+                outcomes.append(f"[already written] {criterion} -> {file_path} :: {test_name}")
+            continue
 
         file_path, test_name = lib.run_test_for_criterion(criterion, gap_plan_text, model)
         gap_plan_text = lib.annotate_criterion_test(lib.GAP_PLAN_FILE, criterion, file_path, test_name)
@@ -126,6 +170,10 @@ def main() -> None:
                 "compile", f"Tests do not compile (exit {result.returncode}). See output above.",
                 criterion=criterion,
             )
+
+        if args.max_new is not None and written >= args.max_new:
+            log.info("-- Hit --max-new (%d). Stopping before the next criterion.", args.max_new)
+            break
 
     log_summary()
     render.print_line(

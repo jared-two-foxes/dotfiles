@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""
+next_step - advance the criteria stack by exactly one step, pausing
+whenever human input (implementation) is genuinely required. The main
+orchestrator of the criteria-stack pipeline; run `push_ticket <id>`
+once to seed the stack, then run this repeatedly until it reports no
+work remaining.
+
+No ticket_id argument - the ticket is read from the stack itself.
+
+Phase detection (re-run fresh from real state at the top of every
+step - the frame's `status` field is a hint, never a trust boundary):
+
+  stack empty                              -> done, nothing to do
+  top frame status == "pending"            -> WRITE_TEST
+  top frame status == "test-written",
+    missing test_file/test_name            -> WRITE_TEST (retry)
+  top frame status == "test-written"       -> re-run its scoped test:
+    green                                  -> mark done, re-detect (POP)
+    red                                    -> AWAIT_IMPL (always pauses)
+  top frame status == "done"               -> POP
+
+POP removes the top frame. If the new top frame belongs to a different
+ticket (or the stack is now empty), that ticket's frames are all done:
+run TICKET_VALIDATE (fresh re-narrow safety net, lint, full test suite,
+smoke, code review). A CHANGES REQUESTED review, or a safety-net
+re-narrow that still finds criteria, pushes new frames onto the stack
+(tagged with the same ticket) instead of failing outright, so the next
+`next_step` call picks the pipeline back up automatically.
+
+Exit codes: 0 at every human pause point (red test awaiting
+implementation, review findings pushed, validate-missed criteria
+pushed, stack empty) - the user must be able to tell "go implement
+something" apart from "something broke" without parsing output. Non-
+zero only on a genuine pipeline failure (compile error exhausted its
+retries, lint/test-suite/smoke failure, unparseable review).
+
+--continuous advances through every mechanical transition (a criterion
+finishing and the next one's test-writing starting) without stopping,
+pausing only at a genuine human pause point.
+
+Usage:
+    next_step [--model <model-id>] [--config <path>] [--continuous]
+              [--log-level <level>]
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ai_client  # noqa: E402
+import pipeline_lib as lib  # noqa: E402
+import render  # noqa: E402
+import tools  # noqa: E402
+import verbosity  # noqa: E402
+
+log = verbosity.get_logger(__name__)
+
+DEFAULT_MODEL = "opencode:gpt-5.4-mini"
+
+
+def do_await_impl(frame: "lib.CriterionFrame") -> None:
+    render.print_line()
+    render.print_line("-- Test written. Implement now:")
+    render.print_line(f"   {frame.test_file} :: {frame.test_name}")
+    render.print_line(f"   Criterion: {frame.criterion}")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
+
+
+def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
+    """
+    Writes (or retries writing) frame's test, gated on compile success.
+    A red test is always a pause point (do_await_impl, never returns).
+    A green test means this criterion's gap didn't reproduce - marks
+    the frame done and returns, so the caller's phase-detection loop
+    re-dispatches it straight to POP without a separate invocation.
+    """
+    file_path, test_name, compile_result = lib.run_test_for_criterion_with_compile_retry(
+        frame.criterion, frame.plan_context, model, commands
+    )
+    if compile_result is None or compile_result.returncode != 0:
+        exit_code = compile_result.returncode if compile_result is not None else "unknown"
+        lib.die_with_log(
+            "test-criterion",
+            f"Test does not compile after retries (exit {exit_code}). See output above.",
+            criterion=frame.criterion,
+        )
+
+    red_result = lib.run_scoped_test(test_name, commands, "red check")
+    if red_result.returncode == 0:
+        log.info(
+            "-- Test passed without implementation - this criterion's "
+            "gap didn't reproduce."
+        )
+        frame.status = "done"
+        lib.save_stack(stack)
+        return
+
+    frame.test_file = file_path
+    frame.test_name = test_name
+    frame.status = "test-written"
+    lib.save_stack(stack)
+    do_await_impl(frame)
+
+
+def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: dict, config_path: Path) -> None:
+    just_popped_ticket = frame.ticket
+    just_popped_criterion = frame.criterion
+    lib.pop_frame()
+    new_stack = lib.load_stack()
+
+    render.print_line()
+    render.print_line(f"-- Criterion done: {just_popped_criterion}")
+
+    if not new_stack or new_stack[0].ticket != just_popped_ticket:
+        do_ticket_validate(just_popped_ticket, model, commands, config_path)
+        return
+
+    if not continuous:
+        render.print_line(f"-- Next: {new_stack[0].criterion}")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        sys.exit(0)
+    # continuous: fall through, letting the caller's loop re-dispatch
+    # straight into the new top frame's WRITE_TEST phase.
+
+
+def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: Path) -> None:
+    """
+    Full ticket-validation gate, run once a ticket's per-criterion
+    frames are all popped: fresh re-fetch + re-narrow (safety net for
+    criteria the per-criterion gates missed), lint, full test suite,
+    smoke test, code review. A CHANGES REQUESTED review or a non-empty
+    safety-net re-narrow pushes new frames instead of failing outright -
+    next_step is meant to be re-run, not treated as a one-shot gate.
+    """
+    render.print_line()
+    render.print_line(f"-- All criteria for {ticket_id} done. Running full ticket validation ...")
+
+    ticket_content = lib.fetch_ticket_text(ticket_id)
+    tools.write_file_block(str(lib.TICKET_FILE))(ticket_content)
+
+    if lib.PLAN_FILE.is_file():
+        plan_text = lib.PLAN_FILE.read_text(encoding="utf-8")
+    else:
+        plan_text = lib.run_plan_step(ticket_content, model)
+
+    gap_plan_content = lib.run_narrow_step(ticket_content, plan_text, model)
+    remaining = lib.extract_acceptance_criteria(gap_plan_content)
+    if remaining:
+        log.warning(
+            "-- Safety-net re-narrow found %d criteria the per-criterion gates "
+            "missed. This should not normally happen. Pushing them as new "
+            "criteria instead of failing.",
+            len(remaining),
+        )
+        missed_frames = [
+            lib.CriterionFrame(
+                ticket=ticket_id,
+                criterion=criterion,
+                plan_context=lib.extract_plan_context_for_criterion(criterion, gap_plan_content),
+                test_file=None,
+                test_name=None,
+                status="pending",
+                origin="validate-missed",
+            )
+            for criterion in remaining
+        ]
+        lib.push_frames(missed_frames)
+        render.print_line()
+        render.print_line(
+            f"-- Ticket validation's re-narrow found {len(remaining)} criteria the "
+            f"per-criterion gates missed. Pushed as new criteria. Run 'next_step' "
+            f"to begin addressing them."
+        )
+        for missed in missed_frames:
+            render.print_line(f"   {missed.criterion}")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        sys.exit(0)
+
+    lib.run_lint_gate(commands)
+
+    result = lib.run_command(commands["test_cmd"], "full test suite gate")
+    if result.returncode != 0:
+        lib.die_with_log(
+            "test-suite",
+            f"Full test suite fails after all criteria implemented (exit "
+            f"{result.returncode}). A criterion's scoped test passing doesn't "
+            f"guarantee an earlier criterion's test still does - see output above.",
+        )
+
+    smoke_cmd = lib.load_smoke_cmd(config_path)
+    lib.run_smoke_gate(smoke_cmd)
+
+    changed_files = lib.git_changed_files()
+    if not changed_files:
+        lib.die_with_log(
+            "review", "No changed files found (git diff/untracked are both empty). Nothing to review."
+        )
+
+    verdict, review_text = lib.run_review_gate(changed_files, gap_plan_content, model)
+
+    if verdict == "APPROVED":
+        render.print_line()
+        render.print_line("-- Summary:")
+        render.print_line(f"   Ticket: {ticket_id}")
+        render.print_line("   Acceptance criteria: all satisfied")
+        render.print_line("   Lint: clean")
+        render.print_line("   Test suite: passed")
+        render.print_line(f"   Smoke test: {'passed' if smoke_cmd else 'skipped (not configured)'}")
+        render.print_line(f"   Files reviewed ({len(changed_files)}): {', '.join(changed_files)}")
+        render.print_line("   Code review: APPROVED")
+        render.print_line()
+        render.print_line(f"-- {ticket_id} fully validated. Success.")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        sys.exit(0)
+
+    do_push_review_findings(ticket_id, review_text)
+
+
+def do_push_review_findings(ticket_id: str, review_text: str) -> None:
+    findings = lib.extract_review_findings(review_text)
+    if not findings:
+        lib.die_with_log(
+            "review",
+            "Review verdict was CHANGES REQUESTED but no parseable findings were "
+            "found in its output (see output above). Refusing to push zero frames "
+            "for a failed review.",
+        )
+    new_frames = [
+        lib.CriterionFrame(
+            ticket=ticket_id,
+            criterion=f"- [ ] {finding}",
+            plan_context=finding,
+            test_file=None,
+            test_name=None,
+            status="pending",
+            origin="review",
+        )
+        for finding in findings
+    ]
+    lib.push_frames(new_frames)
+    render.print_line()
+    render.print_line(
+        f"-- Review found {len(findings)} issue(s). Pushed as new criteria. "
+        f"Run 'next_step' to begin addressing them."
+    )
+    for new_frame in new_frames:
+        render.print_line(f"   {new_frame.criterion}")
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
+
+
+def step(model: str, commands: dict, continuous: bool, config_path: Path) -> None:
+    """
+    One pass of phase detection + dispatch. Returns normally only when
+    the caller's loop should immediately re-detect and dispatch again
+    (a green test cascading into POP, or --continuous advancing into
+    the next criterion) - every other path exits the process directly.
+    """
+    stack = lib.load_stack()
+    if not stack:
+        render.print_line("-- No work remaining. Stack is empty.")
+        sys.exit(0)
+
+    frame = stack[0]
+    log.info("-- next_step: ticket=%s status=%s criterion=%s", frame.ticket, frame.status, frame.criterion)
+
+    if frame.status == "pending":
+        do_write_test(stack, frame, model, commands)
+        return
+
+    if frame.status == "test-written":
+        if frame.test_file is None or frame.test_name is None:
+            log.warning("-- Frame is test-written but missing test_file/test_name - retrying WRITE_TEST.")
+            do_write_test(stack, frame, model, commands)
+            return
+        result = lib.run_scoped_test(frame.test_name, commands, "phase check")
+        if result.returncode == 0:
+            frame.status = "done"
+            lib.save_stack(stack)
+            return
+        do_await_impl(frame)
+        return
+
+    # frame.status == "done" - shouldn't normally be seen fresh off disk
+    # (WRITE_TEST/the phase-check above both cascade into this same step()
+    # call rather than persisting a "done" frame across invocations), but
+    # handled the same way regardless of how we got here.
+    do_pop(frame, continuous, model, commands, config_path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Advance the criteria stack by exactly one step, pausing "
+                     "when human input is genuinely required.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
+    )
+    parser.add_argument(
+        "--config",
+        default=str(lib.PIPELINE_CONFIG_FILE),
+        help=f"Path to the build/test command config (default: {lib.PIPELINE_CONFIG_FILE}).",
+    )
+    parser.add_argument(
+        "--continuous",
+        action="store_true",
+        help="Advance through every mechanical transition without pausing, "
+             "stopping only when human input is genuinely required (a red "
+             "test awaiting implementation, or the stack going empty).",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="info",
+        choices=list(verbosity.LEVELS),
+        help="Console verbosity (default: info). 'debug' shows per-tool-call "
+             "activity and command output even on success; 'trace' adds raw "
+             "request/response payloads; 'warning'/'error'/'critical' show "
+             "progressively less.",
+    )
+    args = parser.parse_args()
+    verbosity.setup_logging(args.log_level)
+
+    config_path = Path(args.config)
+    commands = lib.load_pipeline_config(config_path)
+
+    while True:
+        step(args.model, commands, args.continuous, config_path)
+
+
+if __name__ == "__main__":
+    main()
