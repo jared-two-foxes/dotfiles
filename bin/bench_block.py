@@ -240,17 +240,22 @@ def main() -> None:
     success = False
     reason = ""
     try:
+        # ticket_id=args.ticket_name below is a fixture label ("sa452"),
+        # not a real Linear ticket - but .pipeline-log.jsonl doesn't care
+        # which, and tagging bench trials with it means bench runs get
+        # the same per-block token/cost accounting as real pipeline runs,
+        # broken out by fixture, for free.
         if args.block == "plan":
-            output_text = lib.run_plan_step(ticket_content, args.model)
+            output_text = lib.run_plan_step(ticket_content, args.model, ticket_id=args.ticket_name)
             success, reason = grader(output_text)
         elif args.block == "narrow":
             if not args.plan_file:
                 raise ValueError("--plan-file is required for --block narrow")
             plan_content = args.plan_file.read_text(encoding="utf-8")
-            output_text = lib.run_narrow_step(ticket_content, plan_content, args.model)
+            output_text = lib.run_narrow_step(ticket_content, plan_content, args.model, ticket_id=args.ticket_name)
             success, reason = grader(output_text)
         elif args.block == "plan-narrow":
-            output_text = lib.run_plan_narrow_step(ticket_content, args.model)
+            output_text = lib.run_plan_narrow_step(ticket_content, args.model, ticket_id=args.ticket_name)
             success, reason = grader(output_text)
         else:  # test-criterion
             if not args.plan_file:
@@ -260,7 +265,7 @@ def main() -> None:
             plan_content = args.plan_file.read_text(encoding="utf-8")
             plan_context = lib.extract_plan_context_for_criterion(args.criterion, plan_content)
             file_path, qualified_test_name = lib.run_test_for_criterion(
-                args.criterion, plan_context, args.model
+                args.criterion, plan_context, args.model, ticket_id=args.ticket_name
             )
             success, reason = grade_test_criterion_compiles_and_red(file_path, qualified_test_name)
     except SystemExit as e:

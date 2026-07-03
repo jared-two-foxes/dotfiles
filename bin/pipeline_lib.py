@@ -146,6 +146,51 @@ def get_toolchain() -> toolchains.Toolchain:
         _toolchain_detected = True
     return _toolchain_cache or toolchains.RUST
 
+
+def extract_test_output_signal(output: str, pattern: str, context_lines: int = 15) -> str:
+    """
+    Filter a test run's raw stdout+stderr down to the lines a human
+    actually needs to see why it's red, using the current toolchain's
+    test_output_signal_pattern (see toolchains.py - built for exactly
+    this, previously unused). Necessary because test_filter_cmd's
+    default (e.g. cargo's "cargo test {filter}") isn't scoped to a
+    single test binary - it's a name filter applied across every
+    integration test file in the project, so the raw output is mostly
+    "Running tests\\X.rs (...)" binary-listing noise for files that
+    have nothing to do with the criterion at hand, with the actual
+    panic/assertion detail buried or scrolled past entirely.
+
+    Keeps each matching line plus up to `context_lines` following lines
+    (a panic message's expected-vs-actual detail follows the "panicked
+    at"/"---- test_name stdout ----" line that matches, not the line
+    itself) and one line of leading context, collapsing gaps between
+    kept ranges with a "..." separator so multiple failures in the same
+    run all show, without the noise between them. Falls back to the
+    full, untouched output if the pattern matches nothing - a test
+    runner this heuristic doesn't fit should still show *something*
+    rather than silently discarding real output.
+    """
+    if not output.strip():
+        return output
+    lines = output.splitlines()
+    compiled = re.compile(pattern)
+    keep: set[int] = set()
+    for i, line in enumerate(lines):
+        if compiled.search(line):
+            keep.update(range(max(0, i - 1), min(len(lines), i + context_lines + 1)))
+    if not keep:
+        return output
+
+    result_lines = []
+    prev_idx = None
+    for idx in sorted(keep):
+        if prev_idx is not None and idx > prev_idx + 1:
+            result_lines.append("...")
+        result_lines.append(lines[idx])
+        prev_idx = idx
+    return "\n".join(result_lines)
+
+
 # ---------------------------------------------------------------------------
 # Generic helpers
 # ---------------------------------------------------------------------------
@@ -207,25 +252,96 @@ def remove_scratch_files(paths: tuple[Path, ...]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def log_event(block: str, status: str, error: str | None = None, criterion: str | None = None) -> None:
+def log_event(
+    block: str,
+    status: str,
+    error: str | None = None,
+    criterion: str | None = None,
+    ticket: str | None = None,
+    tokens_prompt: int | None = None,
+    tokens_completion: int | None = None,
+    cost_usd: float | None = None,
+) -> None:
+    """
+    tokens_prompt/tokens_completion/cost_usd are a *delta* attributable
+    to this one event, not a running total - callers computing one use
+    _usage_snapshot()/_usage_delta() (see below) around just the work
+    this event reports on. None (not 0) for any event with no AI call
+    behind it (a lint/build/test-suite gate failure, for instance) -
+    0 would falsely claim "measured, cost nothing" for a block that was
+    never priced at all.
+    """
     entry = {
         "block": block,
+        "ticket": ticket,
         "criterion": criterion,
         "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "status": status,
         "error": error,
+        "tokens_prompt": tokens_prompt,
+        "tokens_completion": tokens_completion,
+        "cost_usd": cost_usd,
     }
     with PIPELINE_LOG_FILE.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
 
-def die_with_log(block: str, msg: str, criterion: str | None = None) -> None:
+def die_with_log(
+    block: str,
+    msg: str,
+    criterion: str | None = None,
+    ticket: str | None = None,
+    tokens_prompt: int | None = None,
+    tokens_completion: int | None = None,
+    cost_usd: float | None = None,
+) -> None:
     """
     Like die(), but also records the failure to the diagnostic log first
-    - used by every push_ticket.py/next_step.py failure path.
+    - used by every push_ticket.py/next_step.py failure path. Token
+    fields are optional (see log_event) - most die_with_log call sites
+    are gate failures (lint/build/test-suite) with no AI cost to report;
+    a caller that does have a delta on hand (e.g. an AIError raised by a
+    step this function wraps) should pass it through rather than losing
+    it at the point of failure.
     """
-    log_event(block, "failed", error=msg, criterion=criterion)
+    log_event(
+        block, "failed", error=msg, criterion=criterion, ticket=ticket,
+        tokens_prompt=tokens_prompt, tokens_completion=tokens_completion, cost_usd=cost_usd,
+    )
     die(msg)
+
+
+@dataclass
+class _UsageSnapshot:
+    """
+    A point-in-time read of ai_client.usage's running totals - UsageTracker
+    itself only exposes cumulative-since-process-start totals, not deltas,
+    so a block wanting "what did just this call cost" snapshots before and
+    after and subtracts. Safe because these totals only ever grow across a
+    single-process run (see ai_client.UsageTracker) - never reset, never
+    decrease - so a later-minus-earlier subtraction is exactly what was
+    added in between, with no risk of going negative.
+    """
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+def _usage_snapshot() -> _UsageSnapshot:
+    cost, _unpriced = ai_client.usage.total_cost_usd()
+    return _UsageSnapshot(ai_client.usage.prompt_tokens, ai_client.usage.completion_tokens, cost)
+
+
+def _usage_delta(start: _UsageSnapshot) -> dict:
+    """Returns a dict of tokens_prompt/tokens_completion/cost_usd kwargs
+    ready to splat into log_event/die_with_log, covering everything
+    ai_client.usage has accumulated since `start` was taken."""
+    now = _usage_snapshot()
+    return {
+        "tokens_prompt": now.prompt_tokens - start.prompt_tokens,
+        "tokens_completion": now.completion_tokens - start.completion_tokens,
+        "cost_usd": round(now.cost_usd - start.cost_usd, 6),
+    }
 
 
 AI_STEP_MAX_ATTEMPTS = 3
@@ -236,6 +352,7 @@ def run_ai_step_with_retry(
     step_fn: Callable[[], object],
     label: str,
     criterion: str | None = None,
+    ticket: str | None = None,
     max_attempts: int = AI_STEP_MAX_ATTEMPTS,
 ) -> object:
     """
@@ -254,31 +371,54 @@ def run_ai_step_with_retry(
     at the top of each call, since a failed attempt's partial writes
     must not carry over into the next attempt's result.
 
-    Logs every failed attempt via log_event(status="retry") before
-    sleeping with exponential backoff (matches ai_client's own
-    transient-HTTP-retry backoff shape), so a human reading
-    .pipeline-log.jsonl later can see "it flaked twice then succeeded"
-    instead of nothing. After max_attempts is exhausted, re-raises the
-    last AIError untouched - this helper never itself decides to die,
-    that's still each call site's existing except/die_with_log handling.
+    Every outcome is logged with its own token/cost delta (see
+    _usage_snapshot/_usage_delta), not just failures - this is the data
+    a later `.pipeline-log.jsonl` pass needs to compare models per
+    block/ticket empirically instead of by feel:
+      - "retry": one failed attempt's own delta, before sleeping with
+        exponential backoff (matches ai_client's own transient-HTTP-retry
+        backoff shape).
+      - "success": step_fn() returned - the *cumulative* delta across
+        every attempt this call made (including any that failed and were
+        retried), so one block invocation nets exactly one success
+        entry with its true total cost, not one entry per attempt.
+      - "exhausted": every attempt failed and max_attempts is used up -
+        same cumulative delta as "success" would have carried, logged
+        here (not left for the call site) since only this function
+        tracked it across every attempt. This helper still never itself
+        decides to die - it logs, then re-raises the last AIError
+        untouched, same as before; the call site's existing
+        except/die_with_log handling is unchanged.
     """
     attempt = 0
+    call_start = _usage_snapshot()
     while True:
         attempt += 1
+        attempt_start = _usage_snapshot()
         try:
-            return step_fn()
+            result = step_fn()
         except ai_client.StepBudgetExceeded:
             raise
         except AIError as e:
             if attempt >= max_attempts:
+                log_event(
+                    label, "exhausted", error=str(e), criterion=criterion, ticket=ticket,
+                    **_usage_delta(call_start),
+                )
                 raise
-            log_event(label, "retry", error=str(e), criterion=criterion)
+            log_event(
+                label, "retry", error=str(e), criterion=criterion, ticket=ticket,
+                **_usage_delta(attempt_start),
+            )
             backoff_s = AI_STEP_RETRY_BACKOFF_BASE_S * (2 ** (attempt - 1))
             log.warning(
                 "-- %s: attempt %d/%d failed (%s), retrying in %.0fs ...",
                 label, attempt, max_attempts, e, backoff_s,
             )
             time.sleep(backoff_s)
+            continue
+        log_event(label, "success", criterion=criterion, ticket=ticket, **_usage_delta(call_start))
+        return result
 
 
 def show_last_failure() -> None:
@@ -365,7 +505,7 @@ def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | Non
         Block(
             name="planner",
             check=lambda: PLAN_FILE.is_file() and "## Acceptance Criteria" in PLAN_FILE.read_text(encoding="utf-8"),
-            run=lambda: run_plan_step(TICKET_FILE.read_text(encoding="utf-8"), model),
+            run=lambda: run_plan_step(TICKET_FILE.read_text(encoding="utf-8"), model, ticket_id=ticket_id),
         ),
         Block(
             name="narrower",
@@ -374,6 +514,7 @@ def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | Non
                 TICKET_FILE.read_text(encoding="utf-8"),
                 PLAN_FILE.read_text(encoding="utf-8"),
                 model,
+                ticket_id=ticket_id,
             ),
         ),
     ]
@@ -431,7 +572,7 @@ def render_step_output(text: str, level: int = logging.DEBUG) -> None:
         render_markdown(text)
 
 
-def run_command(command_str: str, label: str) -> subprocess.CompletedProcess:
+def run_command(command_str: str, label: str, quiet: bool = False) -> subprocess.CompletedProcess:
     """
     Commands come from the project-local pipeline config, which is
     user-authored and trusted (unlike ticket-derived text) - shlex-split
@@ -444,11 +585,18 @@ def run_command(command_str: str, label: str) -> subprocess.CompletedProcess:
     exactly the output whoever's watching needs to diagnose it. Visible
     at the default `info` level only on failure, same as before; `debug`
     and below also show it on success.
+
+    quiet=True always logs at DEBUG regardless of returncode - for a
+    call where a nonzero exit is the *expected*, not exceptional, result
+    (a red-test check) and the caller is about to present a filtered
+    version of this same output itself (see next_step.py's
+    do_await_impl/lib.extract_test_output_signal) - logging the raw dump
+    at ERROR there would just be the same content twice, once as noise.
     """
     command_tokens = shlex.split(command_str)
     log.info("-- Running '%s' (%s) ...", command_str, label)
     result = subprocess.run(command_tokens, capture_output=True, text=True, check=False)
-    log_fn = log.error if result.returncode != 0 else log.debug
+    log_fn = log.debug if quiet or result.returncode == 0 else log.error
     if result.stdout:
         log_fn(result.stdout)
     if result.stderr:
@@ -632,11 +780,15 @@ def build_plan_prompt(ticket_content: str) -> str:
     )
 
 
-def run_plan_step(ticket_content: str, model: str) -> str:
+def run_plan_step(ticket_content: str, model: str, ticket_id: str | None = None) -> str:
     """
     Runs the plan step end to end: prompt, run_with_tools, validity
     check, write to disk, render. Returns plan_text for the caller to
-    thread into whichever step comes next.
+    thread into whichever step comes next. ticket_id is passed straight
+    through to run_ai_step_with_retry purely for its log_event calls -
+    it's not needed for the prompt or the step itself, only so
+    .pipeline-log.jsonl entries for this block can be attributed to the
+    right ticket.
     """
     try:
         result = run_ai_step_with_retry(
@@ -649,6 +801,7 @@ def run_plan_step(ticket_content: str, model: str) -> str:
                 summarize_call=tools.summarize_tool_call,
             ),
             "plan",
+            ticket=ticket_id,
         )
     except (AIError, tools.PipelineAbort) as e:
         die(str(e))
@@ -791,7 +944,7 @@ def build_narrow_prompt(
     )
 
 
-def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
+def run_narrow_step(ticket_content: str, plan_content: str, model: str, ticket_id: str | None = None) -> str:
     plan_file_context, plan_file_paths = gather_plan_file_context(plan_content)
     preloaded = {str(TICKET_FILE), str(PLAN_FILE)} | plan_file_paths
     try:
@@ -805,12 +958,13 @@ def run_narrow_step(ticket_content: str, plan_content: str, model: str) -> str:
                 summarize_call=tools.summarize_tool_call,
             ),
             "narrow",
+            ticket=ticket_id,
         )
     except (AIError, tools.PipelineAbort) as e:
-        die_with_log("narrow", str(e))
+        die_with_log("narrow", str(e), ticket=ticket_id)
     if "## Acceptance Criteria" not in result.text:
         render_step_output(result.text)
-        die_with_log("narrow", "Narrower did not produce a valid gap plan (see output above).")
+        die_with_log("narrow", "Narrower did not produce a valid gap plan (see output above).", ticket=ticket_id)
     log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
     render_step_output(gap_plan_content)
@@ -866,7 +1020,7 @@ def build_plan_narrow_prompt(ticket_content: str) -> str:
     )
 
 
-def run_plan_narrow_step(ticket_content: str, model: str) -> str:
+def run_plan_narrow_step(ticket_content: str, model: str, ticket_id: str | None = None) -> str:
     """
     Merged plan+narrow: one model session, one artifact (the gap plan).
     See module-level comment above for why this doesn't also produce
@@ -883,12 +1037,16 @@ def run_plan_narrow_step(ticket_content: str, model: str) -> str:
                 summarize_call=tools.summarize_tool_call,
             ),
             "plan-narrow",
+            ticket=ticket_id,
         )
     except (AIError, tools.PipelineAbort) as e:
-        die_with_log("plan-narrow", str(e))
+        die_with_log("plan-narrow", str(e), ticket=ticket_id)
     if "## Acceptance Criteria" not in result.text:
         render_step_output(result.text)
-        die_with_log("plan-narrow", "Planner-Narrower did not produce a valid gap plan (see output above).")
+        die_with_log(
+            "plan-narrow", "Planner-Narrower did not produce a valid gap plan (see output above).",
+            ticket=ticket_id,
+        )
     log.info("-- Gap plan generated, writing to disk ...")
     gap_plan_content = tools.write_file_block(str(GAP_PLAN_FILE))(result.text)
     render_step_output(gap_plan_content)
@@ -1094,9 +1252,11 @@ def extract_review_findings(review_text: str) -> list[str]:
     ]
 
 
-def run_scoped_test(qualified_test_name: str, commands: dict, label: str) -> subprocess.CompletedProcess:
+def run_scoped_test(
+    qualified_test_name: str, commands: dict, label: str, quiet: bool = False
+) -> subprocess.CompletedProcess:
     command_str = commands["test_filter_cmd"].format(filter=qualified_test_name)
-    return run_command(command_str, label)
+    return run_command(command_str, label, quiet=quiet)
 
 
 def run_lint_gate(commands: dict) -> None:
@@ -1246,7 +1406,9 @@ def build_test_criterion_prompt(criterion: str, plan_context: str) -> str:
     )
 
 
-def run_test_for_criterion(criterion: str, plan_context: str, model: str) -> tuple[str, str]:
+def run_test_for_criterion(
+    criterion: str, plan_context: str, model: str, ticket_id: str | None = None
+) -> tuple[str, str]:
     test_files: list[str] = []
 
     def attempt():
@@ -1261,12 +1423,13 @@ def run_test_for_criterion(criterion: str, plan_context: str, model: str) -> tup
         )
 
     try:
-        result = run_ai_step_with_retry(attempt, "test-criterion", criterion=criterion)
+        result = run_ai_step_with_retry(attempt, "test-criterion", criterion=criterion, ticket=ticket_id)
     except (AIError, tools.PipelineAbort) as e:
-        die_with_log("test-criterion", str(e), criterion=criterion)
+        die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
     if not test_files:
         die_with_log(
-            "test-criterion", "Tester finished without writing any test files.", criterion=criterion
+            "test-criterion", "Tester finished without writing any test files.",
+            criterion=criterion, ticket=ticket_id,
         )
     render_step_output(result.text)
     witness = TEST_WITNESS_RE.search(result.text)
@@ -1274,7 +1437,7 @@ def run_test_for_criterion(criterion: str, plan_context: str, model: str) -> tup
         die_with_log(
             "test-criterion",
             "Tester's final answer did not include a TEST_WITNESS line (see output above).",
-            criterion=criterion,
+            criterion=criterion, ticket=ticket_id,
         )
     return witness.group(1).strip(), witness.group(2).strip()
 
@@ -1305,6 +1468,7 @@ def run_test_for_criterion_with_compile_retry(
     model: str,
     commands: dict,
     max_attempts: int = 3,
+    ticket_id: str | None = None,
 ) -> tuple[str, str, subprocess.CompletedProcess]:
     """
     Like run_test_for_criterion, but also gates the written test on
@@ -1348,12 +1512,15 @@ def run_test_for_criterion_with_compile_retry(
             )
 
         try:
-            result = run_ai_step_with_retry(attempt_step, "test-criterion", criterion=criterion)
+            result = run_ai_step_with_retry(
+                attempt_step, "test-criterion", criterion=criterion, ticket=ticket_id
+            )
         except (AIError, tools.PipelineAbort) as e:
-            die_with_log("test-criterion", str(e), criterion=criterion)
+            die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
         if not test_files:
             die_with_log(
-                "test-criterion", "Tester finished without writing any test files.", criterion=criterion
+                "test-criterion", "Tester finished without writing any test files.",
+                criterion=criterion, ticket=ticket_id,
             )
         render_step_output(result.text)
         witness = TEST_WITNESS_RE.search(result.text)
@@ -1361,7 +1528,7 @@ def run_test_for_criterion_with_compile_retry(
             die_with_log(
                 "test-criterion",
                 "Tester's final answer did not include a TEST_WITNESS line (see output above).",
-                criterion=criterion,
+                criterion=criterion, ticket=ticket_id,
             )
         file_path, test_name = witness.group(1).strip(), witness.group(2).strip()
 
@@ -1372,9 +1539,14 @@ def run_test_for_criterion_with_compile_retry(
             return file_path, test_name, compile_result
 
         last_error = (compile_result.stdout or "") + (compile_result.stderr or "")
+        # No token/cost delta here deliberately: this event is about the
+        # compile gate (a subprocess, zero AI cost of its own) failing,
+        # not about the Tester call above it - that call already got its
+        # own "success" event (with its real cost) from run_ai_step_with_retry
+        # regardless of whether the test it wrote went on to compile.
         log_event(
             "test-criterion", "retry",
-            error=f"compile failed (attempt {attempt}/{max_attempts})", criterion=criterion,
+            error=f"compile failed (attempt {attempt}/{max_attempts})", criterion=criterion, ticket=ticket_id,
         )
 
     return file_path, test_name, compile_result
@@ -1392,7 +1564,7 @@ def build_review_prompt(changed_files: list[str], plan_text: str) -> str:
     )
 
 
-def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> tuple[str, str]:
+def run_review_gate(changed_files: list[str], plan_text: str, model: str, ticket_id: str | None = None) -> tuple[str, str]:
     """
     Returns (verdict, raw_review_text) for any recognized verdict,
     including APPROVED - next_step.py's TICKET_VALIDATE phase branches
@@ -1403,20 +1575,33 @@ def run_review_gate(changed_files: list[str], plan_text: str, model: str) -> tup
     outcomes. die_with_log still fires on a genuine tool/AI failure or an
     unparseable verdict - those aren't a normal CHANGES REQUESTED result
     for the caller to act on.
+
+    Routed through run_ai_step_with_retry like every other AI-calling
+    step here (this used to call run_with_tools directly, with no retry
+    on a transient AIError and no token/cost accounting) - both for
+    consistency and so a review's cost shows up in .pipeline-log.jsonl
+    same as every other block's.
     """
     try:
-        review_result = run_with_tools(
-            build_review_prompt(changed_files, plan_text),
-            tools.READ_ONLY_TOOLS,
-            tools.make_executor(allow_write=False),
+        review_result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_review_prompt(changed_files, plan_text),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False),
+                "review",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
             "review",
-            model=model,
-            summarize_call=tools.summarize_tool_call,
+            ticket=ticket_id,
         )
     except (AIError, tools.PipelineAbort) as e:
-        die_with_log("review", str(e))
+        die_with_log("review", str(e), ticket=ticket_id)
     render_step_output(review_result.text)
     verdict = find_verdict(review_result.text, ["CHANGES REQUESTED", "APPROVED"])
     if verdict is None:
-        die_with_log("review", "Reviewer's output did not contain a recognizable verdict (see output above).")
+        die_with_log(
+            "review", "Reviewer's output did not contain a recognizable verdict (see output above).",
+            ticket=ticket_id,
+        )
     return verdict, review_result.text

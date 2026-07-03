@@ -108,4 +108,5 @@
   "vsicons.dontShowNewVersionMessage": true,
   "chat.viewSessions.orientation": "stacked",
   "cSpell.enabled": false,
+  "diffEditor.renderSideBySide": false,
 }

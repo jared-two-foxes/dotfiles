@@ -45,6 +45,7 @@ Usage:
 """
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
@@ -60,11 +61,31 @@ log = verbosity.get_logger(__name__)
 DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 
 
-def do_await_impl(frame: "lib.CriterionFrame") -> None:
+# Final safety cap after signal-extraction (see lib.extract_test_output_signal)
+# - a heuristic filter can still let through a lot if a run genuinely has
+# many failures, so this is a backstop, not the primary noise control.
+RED_CHECK_OUTPUT_TAIL_CHARS = 4000
+
+
+def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.CompletedProcess | None = None) -> None:
     render.print_line()
     render.print_line("-- Test written. Implement now:")
     render.print_line(f"   {frame.test_file} :: {frame.test_name}")
     render.print_line(f"   Criterion: {frame.criterion}")
+    if test_result is not None:
+        output = ((test_result.stdout or "") + (test_result.stderr or "")).strip()
+        if output:
+            # test_filter_cmd's default isn't scoped to a single test
+            # binary/file (it's a name filter applied across every test
+            # file in the project - see toolchains.py), so raw output is
+            # often mostly irrelevant "running tests\other_file.rs (...)"
+            # noise. Filter to the toolchain's own signal pattern first;
+            # only fall back to a blind tail if that heuristic somehow
+            # matched nothing.
+            signal = lib.extract_test_output_signal(output, lib.get_toolchain().test_output_signal_pattern)
+            render.print_line()
+            render.print_line("-- Red test output (why it currently fails):")
+            render.print_line(signal[-RED_CHECK_OUTPUT_TAIL_CHARS:])
     render.print_line(f"-- Token usage: {ai_client.usage}")
     sys.exit(0)
 
@@ -78,7 +99,7 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
     re-dispatches it straight to POP without a separate invocation.
     """
     file_path, test_name, compile_result = lib.run_test_for_criterion_with_compile_retry(
-        frame.criterion, frame.plan_context, model, commands
+        frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket
     )
     if compile_result is None or compile_result.returncode != 0:
         exit_code = compile_result.returncode if compile_result is not None else "unknown"
@@ -86,9 +107,14 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
             "test-criterion",
             f"Test does not compile after retries (exit {exit_code}). See output above.",
             criterion=frame.criterion,
+            ticket=frame.ticket,
         )
 
-    red_result = lib.run_scoped_test(test_name, commands, "red check")
+    # quiet=True: a red result here is the expected outcome, not a real
+    # error, and do_await_impl below prints its own filtered version of
+    # this exact output - logging the raw dump at ERROR too would just
+    # be the same content twice, with the noisier copy first.
+    red_result = lib.run_scoped_test(test_name, commands, "red check", quiet=True)
     if red_result.returncode == 0:
         log.info(
             "-- Test passed without implementation - this criterion's "
@@ -102,7 +128,7 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
     frame.test_name = test_name
     frame.status = "test-written"
     lib.save_stack(stack)
-    do_await_impl(frame)
+    do_await_impl(frame, red_result)
 
 
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: dict, config_path: Path) -> None:
@@ -144,9 +170,9 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     if lib.PLAN_FILE.is_file():
         plan_text = lib.PLAN_FILE.read_text(encoding="utf-8")
     else:
-        plan_text = lib.run_plan_step(ticket_content, model)
+        plan_text = lib.run_plan_step(ticket_content, model, ticket_id=ticket_id)
 
-    gap_plan_content = lib.run_narrow_step(ticket_content, plan_text, model)
+    gap_plan_content = lib.run_narrow_step(ticket_content, plan_text, model, ticket_id=ticket_id)
     remaining = lib.extract_acceptance_criteria(gap_plan_content)
     if remaining:
         log.warning(
@@ -188,6 +214,7 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
             f"Full test suite fails after all criteria implemented (exit "
             f"{result.returncode}). A criterion's scoped test passing doesn't "
             f"guarantee an earlier criterion's test still does - see output above.",
+            ticket=ticket_id,
         )
 
     smoke_cmd = lib.load_smoke_cmd(config_path)
@@ -196,10 +223,18 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     changed_files = lib.git_changed_files()
     if not changed_files:
         lib.die_with_log(
-            "review", "No changed files found (git diff/untracked are both empty). Nothing to review."
+            "review", "No changed files found (git diff/untracked are both empty). Nothing to review.",
+            ticket=ticket_id,
         )
 
-    verdict, review_text = lib.run_review_gate(changed_files, gap_plan_content, model)
+    # plan_text (the full original plan), not gap_plan_content: by this
+    # point remaining is guaranteed empty (a non-empty one would have
+    # exited above), so gap_plan_content's Acceptance Criteria section
+    # always reads "nothing left to do" here - useless, misleading scope
+    # for the reviewer. plan_text is the actual full ticket scope the
+    # implementation was supposed to satisfy, same as the legacy
+    # validate-and-review.py's review gate always used.
+    verdict, review_text = lib.run_review_gate(changed_files, plan_text, model, ticket_id=ticket_id)
 
     if verdict == "APPROVED":
         render.print_line()
@@ -227,6 +262,7 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
             "Review verdict was CHANGES REQUESTED but no parseable findings were "
             "found in its output (see output above). Refusing to push zero frames "
             "for a failed review.",
+            ticket=ticket_id,
         )
     new_frames = [
         lib.CriterionFrame(
@@ -276,12 +312,12 @@ def step(model: str, commands: dict, continuous: bool, config_path: Path) -> Non
             log.warning("-- Frame is test-written but missing test_file/test_name - retrying WRITE_TEST.")
             do_write_test(stack, frame, model, commands)
             return
-        result = lib.run_scoped_test(frame.test_name, commands, "phase check")
+        result = lib.run_scoped_test(frame.test_name, commands, "phase check", quiet=True)
         if result.returncode == 0:
             frame.status = "done"
             lib.save_stack(stack)
             return
-        do_await_impl(frame)
+        do_await_impl(frame, result)
         return
 
     # frame.status == "done" - shouldn't normally be seen fresh off disk
