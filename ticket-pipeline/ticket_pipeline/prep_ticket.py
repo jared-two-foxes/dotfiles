@@ -41,9 +41,19 @@ Never touches Linear and never touches .ticket.md - --ticket-file-out is
 the one working file passed between review/propose rounds (explicit, no
 implicit naming convention - default .ticket-proposed-{ticket-id}.md,
 same as you'd pick by hand; same flag name propose-ticket-edit.py itself
-uses for the same file). Stops early if propose-ticket-edit.py produces
-no revision (its "no remaining work" case) - there's nothing left to
-loop on.
+uses for the same file).
+
+Exit codes distinguish three outcomes, not two - "stopped" is not always
+"failed":
+  0 - either phase reached a real conclusion: a clean review that's also
+      right-sized (explore-ticket next), a split recommendation (split in
+      Linear, then re-run per child), or propose-ticket-edit's "no
+      remaining work" case - which in practice means every acceptance
+      criterion turned out to already be satisfied by existing code, so
+      there's nothing to prep at all (consider closing the ticket
+      instead). All three are successful, actionable findings.
+  1 - a genuine pipeline failure: a subprocess errored, or the review
+      loop hit --max-iterations without ever reaching a clean verdict.
 
 Usage:
     prep-ticket <ticket-id> [--model <model-id>] [--max-iterations <n>]
@@ -229,10 +239,24 @@ def main() -> None:
             break
 
         if not run_propose(args.ticket_id, args.model, work_file, cost):
-            print("\n-- propose-ticket-edit.py produced no revision (no remaining work) - nothing left to loop on.")
-            print(f"-- Combined token usage: {cost}")
-            print(f"\n>>> FAILED: stopped after round {i} with unresolved concerns and no revision to try - see {review_file_path(args.ticket_id)}.")
-            sys.exit(1)
+            # Not a failure: propose-ticket-edit's own "no remaining work"
+            # case fires specifically when resolving review-ticket's
+            # concerns leaves nothing left to implement - in practice this
+            # means every acceptance criterion turned out to already be
+            # satisfied by existing code (see review-ticket.prompt.md's
+            # Step 2 and propose-ticket-edit.prompt.md's Step 3). That's a
+            # successful, actionable finding, not a broken run - exit 0,
+            # and say so plainly rather than folding it into the generic
+            # max-iterations/error failure path below.
+            print(f"\n-- Combined token usage: {cost}")
+            print(
+                f"\n>>> ALREADY SATISFIED: resolving review-ticket's concerns for {args.ticket_id} "
+                f"leaves no remaining work (see the 'No revision proposed' reasoning printed above, "
+                f"and {review_file_path(args.ticket_id)}). This usually means the described "
+                f"behavior already exists - consider closing {args.ticket_id} instead of "
+                f"continuing to explore-ticket/push_ticket."
+            )
+            return
     else:
         print(f"\n-- Hit --max-iterations ({args.max_iterations}) without a clean review. Last working file: {work_file}")
         print(f"-- Combined token usage: {cost}")
