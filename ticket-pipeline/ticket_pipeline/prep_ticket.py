@@ -16,13 +16,16 @@ Two phases, both non-interactive (no AI call here ever needs a human):
      the same working file and tries again next round.
 
   2. Complexity check: once the review is clean, runs split-ticket.py
-     against the (possibly revised) working file and reads its verdict
-     out of .ticket-split-{ticket-id}.md. A "no-split" verdict means the
-     ticket is ready; anything else means it should be split into child
-     tickets before continuing - split-ticket.py never creates those
-     tickets itself (a human copies the proposed bodies into Linear), so
-     this script can't push past that point either. It reports the
-     verdict and stops.
+     against the (possibly revised) working file, passing along the
+     phase-1 review report as grounding context (--review-file-in - see
+     split-ticket.py's own docstring for exactly what that does and
+     doesn't change), and reads its verdict out of
+     .ticket-split-{ticket-id}.md. A "no-split" verdict means the ticket
+     is ready; anything else means it should be split into child tickets
+     before continuing - split-ticket.py never creates those tickets
+     itself (a human copies the proposed bodies into Linear), so this
+     script can't push past that point either. It reports the verdict
+     and stops.
 
 Why these two phases specifically, and not further (e.g. all the way
 through explore-ticket): explore-ticket is a real, interactive
@@ -197,6 +200,13 @@ def run_split(
         cmd += ["--threshold", str(threshold)]
     if force_ai:
         cmd += ["--force-ai"]
+    # Phase 1 always leaves a review report behind by the time phase 2
+    # runs (either the original clean review, or the last loop round) -
+    # feed it to split-ticket.py as grounding context (see its own
+    # docstring for why this doesn't change which criteria go where).
+    review_file = review_file_path(ticket_id)
+    if review_file.exists():
+        cmd += ["--review-file-in", str(review_file)]
     print(f"-- running: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout)

@@ -41,9 +41,19 @@ create-child-tickets.py).
 Re-entrant via --ticket-file-in: review a local file instead of fetching
 from Linear (same flag convention as review-ticket.py / check-ticket.py).
 
+--review-file-in optionally feeds a prior review-ticket.py report into the
+prompt as grounding context - what it already confirmed exists in the
+codebase - so the complexity assessment and child-ticket descriptions
+don't have to re-derive facts a previous step already checked. Purely
+additional context: it never changes which criteria end up in which
+child, or whether the verdict is a split at all - review-ticket.py
+already strips out any criterion it finds fully satisfied before this
+ticket ever reaches split-ticket.py (see prep-ticket.py, which wires this
+up automatically), so there's nothing here to react to on that front.
+
 Usage:
     split-ticket <ticket-id> [--model <model-id>] [--ticket-file-in <path>]
-                             [--force-ai] [--threshold <n>]
+                             [--force-ai] [--threshold <n>] [--review-file-in <path>]
 """
 
 import argparse
@@ -194,15 +204,29 @@ def save_split(ticket_id: str, ticket_content: str, report: str) -> Path:
     return path
 
 
-def build_split_prompt(ticket_content: str, mechanical_explanation: str) -> str:
+def build_split_prompt(ticket_content: str, mechanical_explanation: str, review_context: str = "") -> str:
     instructions = lib.load_prompt_body(SPLIT_PROMPT_FILE)
+    review_section = (
+        f"\n\nA prior review-ticket.py pass already checked this ticket's "
+        f"claims against the codebase - its report is below. Use it to keep "
+        f"your Reasoning and child-ticket descriptions grounded in what's "
+        f"already confirmed to exist, rather than re-deriving it yourself, "
+        f"and as a cohesion signal if it names specific existing code "
+        f"multiple criteria share. This does not change Step 1's rule: it's "
+        f"still cohesion-only, not a redundancy check - review-ticket.py "
+        f"already removed any criterion it found fully satisfied before "
+        f"this ticket reached you, so nothing here should be treated as a "
+        f"reason to drop or reword a criterion.\n\n{review_context}"
+        if review_context else ""
+    )
     return (
         f"{instructions}\n\n---\n\n"
         f"The following mechanical pre-check has already been run on this "
         f"ticket and flagged it for your review:\n\n"
         f"> {mechanical_explanation}\n\n"
         f"Here is the ticket - already complete and current, no need to "
-        f"read_file it again:\n\n{ticket_content}\n\n"
+        f"read_file it again:\n\n{ticket_content}"
+        f"{review_section}\n\n"
         f"Use read_file/list_dir/search_files to map each acceptance "
         f"criterion to the codebase areas it would modify - use this to "
         f"judge cohesion, not to assess whether the work is done. "
@@ -212,11 +236,11 @@ def build_split_prompt(ticket_content: str, mechanical_explanation: str) -> str:
     )
 
 
-def run_split_step(ticket_content: str, mechanical_explanation: str, model: str) -> str:
+def run_split_step(ticket_content: str, mechanical_explanation: str, model: str, review_context: str = "") -> str:
     try:
         result = lib.run_ai_step_with_retry(
             lambda: ai_client.run_with_tools(
-                build_split_prompt(ticket_content, mechanical_explanation),
+                build_split_prompt(ticket_content, mechanical_explanation, review_context),
                 tools.READ_ONLY_TOOLS,
                 tools.make_executor(allow_write=False, preloaded_paths={TICKET_DEDUP_KEY}),
                 "split-ticket",
@@ -261,6 +285,15 @@ def main() -> None:
         help="Skip the mechanical pre-check and always run the AI step.",
     )
     parser.add_argument(
+        "--review-file-in",
+        type=Path,
+        default=None,
+        help="Optional: a review-ticket.py report (e.g. .ticket-review-{ticket-id}.md) "
+             "to ground the complexity assessment in what's already confirmed to exist "
+             "in the codebase. Purely additional context - has no effect on which "
+             "criteria get carried into which child ticket.",
+    )
+    parser.add_argument(
         "--threshold",
         type=int,
         default=COMPLEX_THRESHOLD,
@@ -286,6 +319,12 @@ def main() -> None:
         ticket_content = args.ticket_file_in.read_text(encoding="utf-8")
     else:
         ticket_content = lib.fetch_ticket_text(args.ticket_id)
+
+    review_context = ""
+    if args.review_file_in is not None:
+        if not args.review_file_in.exists():
+            lib.die(f"{args.review_file_in} not found.")
+        review_context = args.review_file_in.read_text(encoding="utf-8")
 
     # 2. Mechanical pre-check
     if args.force_ai:
@@ -316,7 +355,7 @@ def main() -> None:
 
     # 3. AI step
     render.print_line(f"-- Running AI complexity review for {args.ticket_id} ...")
-    report = run_split_step(ticket_content, mechanical_explanation, args.model)
+    report = run_split_step(ticket_content, mechanical_explanation, args.model, review_context)
     saved_path = save_split(args.ticket_id, ticket_content, report)
 
     render.print_line()
