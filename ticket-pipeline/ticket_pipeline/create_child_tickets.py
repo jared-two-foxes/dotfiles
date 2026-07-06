@@ -127,6 +127,57 @@ def build_child_body(child: ChildTicket) -> str:
     return "\n".join(lines) + "\n"
 
 
+@dataclass
+class ChildCreationResult:
+    created: list[dict]  # ordered [{"id": identifier, "title": title}, ...]
+    failure: str | None  # None if every child was created successfully
+
+
+def create_children(ticket_id: str, children: list[ChildTicket]) -> ChildCreationResult:
+    """
+    Creates each proposed child as a real Linear sub-issue of ticket_id,
+    in order, stopping at the first failure. Does not write the manifest
+    file or print a summary - callers own both (this script's own main()
+    below, and push_ticket.py, want different surrounding messaging
+    around the same core creation loop).
+    """
+    render.print_line(f"-- Fetching {ticket_id} to resolve its internal id/team ...")
+    try:
+        parent_data = ticket_source.fetch_ticket(ticket_id)
+    except urllib.error.HTTPError as e:
+        lib.die(f"Fetching {ticket_id} failed: HTTP {e.code}: {e.read().decode()}")
+    if "errors" in parent_data:
+        lib.die(f"Ticket fetch failed: {parent_data['errors']}")
+    parent_issue = parent_data.get("data", {}).get("issue")
+    if not parent_issue:
+        lib.die(f"{ticket_id} not found in Linear.")
+    parent_internal_id = parent_issue["id"]
+    team_id = parent_issue["team"]["id"]
+
+    created: list[dict] = []
+    failure: str | None = None
+    for i, child in enumerate(children, 1):
+        render.print_line(f"-- Creating child {i}/{len(children)}: {child.title} ...")
+        try:
+            result = ticket_source.create_ticket(
+                team_id, child.title, build_child_body(child), parent_id=parent_internal_id,
+            )
+        except urllib.error.HTTPError as e:
+            failure = f"HTTP {e.code}: {e.read().decode()}"
+            break
+        if "errors" in result:
+            failure = str(result["errors"])
+            break
+        if not result.get("data", {}).get("issueCreate", {}).get("success"):
+            failure = f"Linear did not report success: {result}"
+            break
+        issue = result["data"]["issueCreate"]["issue"]
+        render.print_line(f"   -> {issue['identifier']}: {issue['url']}")
+        created.append({"id": issue["identifier"], "title": child.title})
+
+    return ChildCreationResult(created=created, failure=failure)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create Linear sub-issues from split-ticket.py's proposed child tickets.",
@@ -180,53 +231,21 @@ def main() -> None:
         )
         return
 
-    render.print_line(f"\n-- Fetching {args.ticket_id} to resolve its internal id/team ...")
-    try:
-        parent_data = ticket_source.fetch_ticket(args.ticket_id)
-    except urllib.error.HTTPError as e:
-        lib.die(f"Fetching {args.ticket_id} failed: HTTP {e.code}: {e.read().decode()}")
-    if "errors" in parent_data:
-        lib.die(f"Ticket fetch failed: {parent_data['errors']}")
-    parent_issue = parent_data.get("data", {}).get("issue")
-    if not parent_issue:
-        lib.die(f"{args.ticket_id} not found in Linear.")
-    parent_internal_id = parent_issue["id"]
-    team_id = parent_issue["team"]["id"]
-
-    created: list[dict] = []
-    failure: str | None = None
-    for i, child in enumerate(children, 1):
-        render.print_line(f"-- Creating child {i}/{len(children)}: {child.title} ...")
-        try:
-            result = ticket_source.create_ticket(
-                team_id, child.title, build_child_body(child), parent_id=parent_internal_id,
-            )
-        except urllib.error.HTTPError as e:
-            failure = f"HTTP {e.code}: {e.read().decode()}"
-            break
-        if "errors" in result:
-            failure = str(result["errors"])
-            break
-        if not result.get("data", {}).get("issueCreate", {}).get("success"):
-            failure = f"Linear did not report success: {result}"
-            break
-        issue = result["data"]["issueCreate"]["issue"]
-        render.print_line(f"   -> {issue['identifier']}: {issue['url']}")
-        created.append({"id": issue["identifier"], "title": child.title})
+    result = create_children(args.ticket_id, children)
 
     manifest_path = children_file_path(args.ticket_id)
-    manifest_path.write_text(json.dumps(created, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(json.dumps(result.created, indent=2) + "\n", encoding="utf-8")
 
-    if failure is not None:
-        render.print_line(f"\n-- Saved {len(created)}/{len(children)} successfully-created child(ren) to {manifest_path}.")
+    if result.failure is not None:
+        render.print_line(f"\n-- Saved {len(result.created)}/{len(children)} successfully-created child(ren) to {manifest_path}.")
         lib.die(
-            f"Creating '{children[len(created)].title}' failed: {failure}. "
-            f"The {len(created)} child(ren) already created above were not rolled back - "
+            f"Creating '{children[len(result.created)].title}' failed: {result.failure}. "
+            f"The {len(result.created)} child(ren) already created above were not rolled back - "
             f"fix the issue, then either re-run with a --split-file-in trimmed to the "
             f"remaining children, or clean up manually in Linear before retrying."
         )
 
-    render.print_line(f"\n-- Created {len(created)} child ticket(s), saved to {manifest_path}.")
+    render.print_line(f"\n-- Created {len(result.created)} child ticket(s), saved to {manifest_path}.")
 
 
 if __name__ == "__main__":
