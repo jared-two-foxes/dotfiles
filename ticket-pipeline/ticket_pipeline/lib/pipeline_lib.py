@@ -1089,6 +1089,30 @@ def extract_acceptance_criteria(plan_content: str) -> list[str]:
     ]
 
 
+VERIFICATION_TAG_RE = re.compile(r"verify:\s*(test|manual)\b", re.IGNORECASE)
+
+
+def extract_verification_mode(criterion: str) -> str:
+    """
+    Parses a "verify: test|manual" tag out of a criterion's trailing HTML
+    comment (narrow-plan.prompt.md's Final answer format embeds this
+    alongside the existing "why" reason, per its Step 3 - Narrower tags
+    each retained criterion this way at the source, rather than a
+    separate classification pass).
+
+    Defaults to "test" - the universal behavior before this
+    classification existed, and the safe default for anything this can't
+    parse a tag from: a review/validate-missed finding (extracted from
+    reviewer prose, never carries this tag at all), a hand-written or
+    foreign criterion, or a criterion from a .gap-plan.md that predates
+    this tag.
+    """
+    match = VERIFICATION_TAG_RE.search(criterion)
+    if match and match.group(1).lower() == "manual":
+        return "manual"
+    return "test"
+
+
 # ---------------------------------------------------------------------------
 # Criteria stack - .criteria-stack.json is the pipeline's canonical
 # work-queue and the only file either push_ticket.py or next_step.py
@@ -1111,6 +1135,19 @@ class CriterionFrame:
                             # recorded but not yet acted on differently;
                             # all origins go through the identical
                             # test-write -> implement -> gate cycle.
+    verification: str = "test"  # "test" | "manual" - set from the gap
+                            # plan's own "verify:" tag (see
+                            # extract_verification_mode) for criteria
+                            # that aren't expressible as a red/green test
+                            # (documentation, config, CI changes...).
+                            # Defaults to "test" - the universal behavior
+                            # before this field existed, and the safe
+                            # default for anything the tag-parsing can't
+                            # find one on (review/validate-missed
+                            # findings, which come from prose rather
+                            # than a plan step, and older stack files
+                            # from before this field existed - see
+                            # load_stack's **entry unpacking).
 
 
 def load_stack() -> list[CriterionFrame]:

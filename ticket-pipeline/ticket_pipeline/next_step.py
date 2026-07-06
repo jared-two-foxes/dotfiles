@@ -22,6 +22,10 @@ step - the frame's `status` field is a hint, never a trust boundary):
                                                (someone fixed the test)
     still green, --accept-green passed     -> mark done, re-detect (POP)
     still green, no --accept-green         -> pause again (always exits)
+  top frame status in ("pending",
+    "awaiting-manual-impl"),
+    verification == "manual"                -> MANUAL_CRITERION (no test
+                                               involved at all - see below)
   top frame status == "pending"            -> WRITE_TEST
   top frame status == "test-written",
     missing test_file/test_name            -> WRITE_TEST (retry)
@@ -42,6 +46,22 @@ here is what turns into a boundless validate -> false-green -> pop ->
 re-validate loop, silently burning AI calls under --continuous with no
 human ever seeing it. --accept-green explicitly confirms one is
 legitimate and moves on.
+
+A frame tagged verification="manual" (documentation, config, CI changes
+- anything narrow-plan.prompt.md's Step 4 judged as having no meaningful
+red/green - see extract_verification_mode) skips WRITE_TEST/AWAIT_IMPL
+entirely: there's no test to write. Its own mechanical floor is weaker
+by necessity - do the file(s) named in the criterion/plan_context
+(extract_referenced_paths) actually show up in git_changed_files()? A
+match there is real, direct evidence (unlike a test, it can't be
+trivially gamed the way a weak test's false green can, so - unlike
+green-unconfirmed - it's trusted regardless of origin) and pops the
+frame immediately, even on the very first look, before ever pausing. No
+match pauses (always exits), same shape as AWAIT_IMPL. If no file could
+be identified at all, there's nothing to mechanically check - popping
+requires an explicit --accept-manual, the same escape-hatch shape as
+--accept-green, rather than ever silently trusting a criterion this
+pipeline has no way to verify.
 
 POP removes the top frame. If the new top frame belongs to a different
 ticket (or the stack is now empty), that ticket's frames are all done:
@@ -108,6 +128,15 @@ RED_CHECK_OUTPUT_TAIL_CHARS = 4000
 # ever seeing it.
 GREEN_UNCONFIRMED_STATUS = "green-unconfirmed"
 
+# A verification="manual" frame (see extract_verification_mode) that's
+# been paused at least once already - distinguishes "first look, not
+# checked yet" (status="pending") from "already told the human to make
+# this change" only for the pause message's wording; the mechanical
+# floor check in do_manual_criterion runs identically either way, same
+# principle as every other phase (status is a hint, never a trust
+# boundary).
+MANUAL_PENDING_STATUS = "awaiting-manual-impl"
+
 
 def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.CompletedProcess | None = None) -> None:
     render.print_line()
@@ -154,6 +183,60 @@ def do_await_green_unconfirmed(frame: "lib.CriterionFrame") -> None:
     )
     render.print_line(f"-- Token usage: {ai_client.usage}")
     sys.exit(0)
+
+
+def do_await_manual_impl(frame: "lib.CriterionFrame", paths: list[str]) -> None:
+    render.print_line()
+    render.print_line("-- Manual change needed (not test-verifiable):")
+    render.print_line(f"   Criterion: {frame.criterion}")
+    if frame.plan_context:
+        render.print_line(f"   Context: {frame.plan_context}")
+    if paths:
+        render.print_line(f"   Expecting changes to: {', '.join(paths)}")
+        render.print_line(
+            "   Make the change, then run 'next_step' again - it checks whether "
+            "those file(s) actually changed before marking this done."
+        )
+    else:
+        render.print_line(
+            "   No specific file could be identified from this criterion, so there's "
+            "nothing to mechanically check here. Make the change, then run "
+            "'next_step --accept-manual' to confirm it's done."
+        )
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
+
+
+def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual: bool) -> None:
+    """
+    Handles a verification="manual" frame - a criterion that isn't
+    expressible as a red/green test (documentation, config, CI changes -
+    see extract_verification_mode). There's no scoped test to mechanically
+    re-check the way every other phase can, so the floor here is
+    different: does git_changed_files() show the file(s) this criterion/
+    plan_context actually names (extract_referenced_paths)? That's real,
+    direct evidence - the exact referenced file changed - not a proxy a
+    lazy edit could trivially satisfy the way a weak test's false green
+    can, so unlike GREEN_UNCONFIRMED_STATUS this doesn't need an
+    origin-based trust distinction: a match is trusted regardless of why
+    the frame was pushed, even on the very first look before ever pausing
+    (mirrors do_write_test's origin="ticket" case - one criterion's
+    change can satisfy another as a side effect).
+
+    If no file could be identified at all, there is genuinely nothing to
+    check mechanically - popping requires an explicit --accept-manual,
+    same escape-hatch shape as --accept-green, rather than ever silently
+    trusting a criterion this pipeline has no way to verify.
+    """
+    paths = lib.extract_referenced_paths(f"{frame.criterion}\n{frame.plan_context}")
+    mechanically_confirmed = bool(paths) and bool(set(paths) & set(lib.git_changed_files()))
+    if mechanically_confirmed or accept_manual:
+        frame.status = "done"
+        lib.save_stack(stack)
+        return
+    frame.status = MANUAL_PENDING_STATUS
+    lib.save_stack(stack)
+    do_await_manual_impl(frame, paths)
 
 
 def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
@@ -289,6 +372,7 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
                 test_name=None,
                 status="pending",
                 origin="validate-missed",
+                verification=lib.extract_verification_mode(criterion),
             )
             for criterion in remaining
         ]
@@ -392,7 +476,10 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
     sys.exit(0)
 
 
-def step(model: str, commands: dict, continuous: bool, config_path: Path, accept_green: bool = False) -> None:
+def step(
+    model: str, commands: dict, continuous: bool, config_path: Path,
+    accept_green: bool = False, accept_manual: bool = False,
+) -> None:
     """
     One pass of phase detection + dispatch. Returns normally only when
     the caller's loop should immediately re-detect and dispatch again
@@ -436,6 +523,10 @@ def step(model: str, commands: dict, continuous: bool, config_path: Path, accept
             lib.save_stack(stack)
             return
         do_await_green_unconfirmed(frame)
+        return
+
+    if frame.verification == "manual" and frame.status in ("pending", MANUAL_PENDING_STATUS):
+        do_manual_criterion(stack, frame, accept_manual)
         return
 
     if frame.status == "pending":
@@ -498,6 +589,19 @@ def main() -> None:
              "is already present - not as a way to silence the warning.",
     )
     parser.add_argument(
+        "--accept-manual",
+        action="store_true",
+        help="Accept the top frame as satisfied if it's currently paused in the "
+             "'awaiting-manual-impl' state (a verification=\"manual\" criterion - "
+             "documentation, config, etc.). Overrides the mechanical floor check "
+             "(did a referenced file actually change) whether or not one could be "
+             "identified in the first place - use this after confirming the "
+             "change is actually made, whether the automatic check missed it or "
+             "there was nothing for it to check at all. Has no effect if the top "
+             "frame isn't in that state, or if the automatic check already "
+             "confirmed it (nothing to override).",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -513,7 +617,10 @@ def main() -> None:
     commands = lib.load_pipeline_config(config_path)
 
     while True:
-        step(args.model, commands, args.continuous, config_path, accept_green=args.accept_green)
+        step(
+            args.model, commands, args.continuous, config_path,
+            accept_green=args.accept_green, accept_manual=args.accept_manual,
+        )
 
 
 if __name__ == "__main__":

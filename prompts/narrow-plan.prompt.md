@@ -69,6 +69,14 @@ For each acceptance criterion:
 - Use `read_file`/`list_dir` to find the specific test(s), assertion(s),
   or production code that demonstrates it is met *in the current state*
   - not "was touched by the most recent change."
+- For a documentation/manual-verification criterion (see Step 4 below),
+  there is no test to find - the evidence is the prose itself. Read the
+  file(s) the criterion names (or, if none are named, the ones most
+  plausibly relevant) and judge whether the actual content satisfies
+  what the criterion asks for, the same way you'd judge any other piece
+  of evidence. A file merely existing or being mentioned somewhere is
+  not enough - the specific thing the criterion describes needs to
+  actually be present and accurate.
 - For criteria that name an exact command (e.g. "`cargo test` passes"),
   you cannot run it yourself. Two different shapes of this come up:
   - The command-criterion is the *only* evidence for a specific behavior
@@ -106,14 +114,37 @@ now-dropped PASS criterion is dropped too.
 - **If every criterion is PASS:** the plan is fully satisfied - see the
   empty-criteria form in Final answer below.
 
+## Step 4 - Classify how each retained criterion gets verified
+
+For each criterion retained in Step 3, decide: can satisfying it be
+checked by a test that fails until the work is done and passes once it
+is (`test`), or not (`manual`)? Tag it with whichever applies - see the
+Final answer format below for exactly where.
+
+- `test` is the default assumption for anything that changes behavior a
+  test can observe: application code, config that affects runtime
+  behavior, anything with an assertable input/output.
+- `manual` is for criteria with no meaningful red/green: prose
+  documentation (README updates, docs describing a feature), comments
+  explaining *why* rather than asserting behavior, CI/tooling config
+  that doesn't change what a test suite checks, or anything else where
+  writing a "test" would mean asserting a string exists in a file rather
+  than actually verifying the criterion's substance.
+- If a criterion is genuinely mixed (e.g. "add the endpoint and document
+  it"), that's really two criteria bundled into one - tag it `test`
+  (the behavior is what a test can hold you to) and let the
+  documentation half be covered by code review at ticket-validation
+  time, rather than inventing a third category.
+
 ## Final answer
 
 Your final response (no further tool calls) must be exactly the
 narrowed plan below in this exact format - nothing else, no chat
 header, no preamble or trailing commentary, no FAIL/UNKNOWN reasoning
 shown (the evidence-gathering above was necessary work, not necessary
-output) except the one-line "why" comment per retained criterion
-described below. The caller writes this text verbatim to `.gap-plan.md`.
+output) except the one-line "why" reason and the "verify:" tag per
+retained criterion described below. The caller writes this text
+verbatim to `.gap-plan.md`.
 
 \`\`\`markdown
 <!-- narrowed by Narrower on YYYY-MM-DD from .tdd-plan.md -->
@@ -123,7 +154,7 @@ described below. The caller writes this text verbatim to `.gap-plan.md`.
 
 ## Acceptance Criteria
 <!-- only criteria marked FAIL or UNKNOWN in Step 2 -->
-- [ ] [criterion, copied verbatim from the original plan] <!-- why: one-line reason it's not yet satisfied -->
+- [ ] [criterion, copied verbatim from the original plan] <!-- why: one-line reason it's not yet satisfied; verify: test|manual -->
 (or, if every criterion was PASS: "(none - all criteria satisfied)")
 
 ## Implementation Plan
@@ -139,4 +170,6 @@ no criteria remain)
   an UNKNOWN criterion is retained, not dropped, same as FAIL.
 - Never invent a new criterion not in the original plan, and never
   reword a retained criterion's substance - copy it verbatim; the
-  one-line "why" comment is the only addition.
+  one-line "why" reason and "verify:" tag are the only additions.
+- Every retained criterion gets exactly one "verify:" tag - `test` or
+  `manual`, never both, never omitted (see Step 4).
