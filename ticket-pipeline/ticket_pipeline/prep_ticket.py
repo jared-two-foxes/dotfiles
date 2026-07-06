@@ -67,6 +67,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Every subprocess.run() below passes text=True with no explicit encoding
+# unless one is given - and each one *is* given encoding="utf-8",
+# errors="replace" - because the child scripts (review_ticket.py etc.)
+# write UTF-8 via render.py's own TextIOWrapper, but subprocess.run's
+# default text-mode decoding falls back to locale.getpreferredencoding()
+# (cp1252 on this machine), which doesn't cover every UTF-8 byte
+# sequence - e.g. a stray 0x9D from a multi-byte character is outright
+# undefined in cp1252. Without the explicit encoding, that decode fails
+# inside subprocess.run's internal reader thread, silently leaving
+# result.stdout as None rather than raising where it'd be caught. Same
+# fix bench.py's own bench_block subprocess call already needed for
+# identical reasons. Reconfiguring this script's own stdout/stderr below
+# guards the symmetric case - printing decoded child output back out
+# through this process's own (possibly non-UTF-8) console.
+sys.stdout.reconfigure(errors="replace")
+sys.stderr.reconfigure(errors="replace")
+
 VERDICT_RE = re.compile(r"^###\s*Verdict\s*\n+(\S+)", re.MULTILINE)
 NO_REVISION_MARKER = "no-remaining-work case"
 
@@ -137,7 +154,7 @@ def run_review(ticket_id: str, model: str, ticket_file_in: Path | None, cost: Co
     if ticket_file_in is not None:
         cmd += ["--ticket-file-in", str(ticket_file_in)]
     print(f"-- running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout)
     cost.add(result.stdout)
     if result.returncode != 0:
@@ -154,7 +171,7 @@ def run_propose(ticket_id: str, model: str, ticket_file_out: Path, cost: CostTot
         "--model", model, "--ticket-file-out", str(ticket_file_out),
     ]
     print(f"-- running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout)
     cost.add(result.stdout)
     if result.returncode != 0:
@@ -181,7 +198,7 @@ def run_split(
     if force_ai:
         cmd += ["--force-ai"]
     print(f"-- running: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(result.stdout)
     cost.add(result.stdout)
     if result.returncode != 0:
