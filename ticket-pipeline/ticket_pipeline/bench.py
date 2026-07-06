@@ -22,9 +22,10 @@ known-bad (file-split) plan - so you get two independent answers: does
 this model narrow correctly from a clean plan, and does it catch/fix a
 bad one.
 
-Usage:
-    bench.py --block plan --models deepseek-v4-pro,glm-5 --trials 3
-    bench.py --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
+Usage (not a console-script command - deliberately excluded from the
+standard install as situational; run via `python -m`):
+    python -m ticket_pipeline.bench --block plan --models deepseek-v4-pro,glm-5 --trials 3
+    python -m ticket_pipeline.bench --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
 
 Each trial calls bench_block.py as a subprocess with cwd set to its
 worktree - see that file for the actual block invocation + grading.

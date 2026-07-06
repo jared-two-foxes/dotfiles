@@ -118,10 +118,13 @@ were captured against.
 ### Usage
 
 ```
-python bench.py --block plan --models gpt-5.4-mini,deepseek-v4-pro --trials 10 --concurrency 8
-python bench.py --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
-python bench.py --block test-criterion --models gpt-5.4-mini,kimi-k2.6 --trials 3
+python -m ticket_pipeline.bench --block plan --models gpt-5.4-mini,deepseek-v4-pro --trials 10 --concurrency 8
+python -m ticket_pipeline.bench --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
+python -m ticket_pipeline.bench --block test-criterion --models gpt-5.4-mini,kimi-k2.6 --trials 3
 ```
+
+(`bench`/`bench_block` are deliberately not console-script commands - they're
+situational benchmarking tools, run via `python -m` rather than a bare command.)
 
 Results stream to stdout and to a `results.jsonl` (`--out` to name it, else
 timestamped). Always inspect the per-trial `reason` strings, not just the
