@@ -27,8 +27,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
-import ai_client
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
+import ai_client  # noqa: E402
 
 # The public OAuth app client_id GitHub Copilot's own editor integrations
 # use for device-flow auth - not a secret, the same id widely embedded in

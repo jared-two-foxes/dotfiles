@@ -261,6 +261,8 @@ def summarize_tool_call(name: str, args: dict) -> str:
         return f"Search for {pattern!r} in {args.get('path', '.')}"
     if name == "ask_user_prompt":
         return "Ask user a clarifying question"
+    if name == ASK_USER_QUESTION_TOOL_NAME:
+        return f"Ask: {args.get('question', '(no question)')}"
     if name == "run_command":
         return f"Attempt to run command: {args.get('command', '')}"
     return f"{name}({args})"
@@ -411,6 +413,37 @@ ASK_USER_PROMPT_SCHEMA = {
     },
 }
 
+ASK_USER_QUESTION_TOOL_NAME = "ask_user_question"
+
+ASK_USER_QUESTION_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": ASK_USER_QUESTION_TOOL_NAME,
+        "description": (
+            "Ask the human a single, specific question and wait for their "
+            "real answer before continuing - this session is genuinely "
+            "interactive, unlike ask_user_prompt elsewhere in this "
+            "pipeline. Use this liberally whenever a requirement is "
+            "missing, ambiguous, or would materially change the scope or "
+            "acceptance criteria, and whenever you cannot resolve the gap "
+            "yourself by reading the codebase - asking is expected and "
+            "cheap here, not a last resort. Ask one focused question at a "
+            "time rather than bundling several into one call, so the "
+            "human can answer each on its own merits."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The specific question to ask the human.",
+                }
+            },
+            "required": ["question"],
+        },
+    },
+}
+
 RUN_COMMAND_TOOL_NAME = "run_command"
 
 RUN_COMMAND_SCHEMA = {
@@ -467,12 +500,27 @@ READ_WRITE_TOOLS = [
     RUN_COMMAND_SCHEMA,
 ]
 
+# For genuinely interactive sessions (a human present at the terminal for
+# the whole run, e.g. explore-ticket.py) - swaps the abort-on-ask
+# ASK_USER_PROMPT_SCHEMA for ASK_USER_QUESTION_SCHEMA, which make_executor
+# answers for real when interactive=True instead of raising
+# ClarificationNeeded. No write_file - this is exploration + discussion,
+# never a place that edits repo files.
+EXPLORE_TOOLS = [
+    READ_FILE_SCHEMA,
+    LIST_DIR_SCHEMA,
+    SEARCH_FILES_SCHEMA,
+    ASK_USER_QUESTION_SCHEMA,
+    RUN_COMMAND_SCHEMA,
+]
+
 
 def make_executor(
     written_paths: list[str] | None = None,
     allow_write: bool = True,
     protected_paths: set[str] | None = None,
     preloaded_paths: set[str] | None = None,
+    interactive: bool = False,
 ):
     """
     Build a tool_executor(name, args) -> str for ai_client.run_with_tools.
@@ -495,6 +543,14 @@ def make_executor(
         short dedup note instead of resending content the model was
         already given - including a partial-range read, since having
         the whole file already covers any slice of it.
+    interactive: if True, ask_user_question calls print the question and
+        block on real terminal input (via input()), returning the human's
+        answer as the tool result so the model's conversation continues -
+        for a script where a human is genuinely present the whole run
+        (e.g. explore-ticket.py). If False (default), ask_user_question is
+        rejected the same way write_file is when allow_write=False - this
+        executor is meant to answer for real or not offer the tool at all,
+        never to silently no-op a live question.
 
     Every chat-completions turn resends the *entire* message history,
     tool results included - the API has no server-side session state.
@@ -518,6 +574,16 @@ def make_executor(
             raise ClarificationNeeded(
                 f"model requested human clarification mid-task: {question}"
             )
+        if name == ASK_USER_QUESTION_TOOL_NAME:
+            question = args.get("question", "(no question provided)")
+            if not interactive:
+                return "ERROR: ask_user_question is not available in this step"
+            print(f"\n? {question}")
+            try:
+                answer = input("> ").strip()
+            except EOFError:
+                answer = ""
+            return answer if answer else "(human gave no answer - proceed with your own best judgement)"
         if name == RUN_COMMAND_TOOL_NAME:
             command = args.get("command", "(no command provided)")
             log.warning("-- Refused run_command(%r) - recoverable, not aborting.", command)

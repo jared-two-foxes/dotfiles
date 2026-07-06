@@ -12,6 +12,16 @@ Phase detection (re-run fresh from real state at the top of every
 step - the frame's `status` field is a hint, never a trust boundary):
 
   stack empty                              -> done, nothing to do
+  top frame status == "validating"         -> TICKET_VALIDATE (a prior
+                                               attempt for this ticket
+                                               died partway through;
+                                               resume it directly)
+  top frame status == "green-unconfirmed"  -> re-run its scoped test:
+    now red                                -> becomes a normal
+                                               test-written/AWAIT_IMPL case
+                                               (someone fixed the test)
+    still green, --accept-green passed     -> mark done, re-detect (POP)
+    still green, no --accept-green         -> pause again (always exits)
   top frame status == "pending"            -> WRITE_TEST
   top frame status == "test-written",
     missing test_file/test_name            -> WRITE_TEST (retry)
@@ -20,13 +30,33 @@ step - the frame's `status` field is a hint, never a trust boundary):
     red                                    -> AWAIT_IMPL (always pauses)
   top frame status == "done"               -> POP
 
+A freshly-written test that comes back green immediately is trusted
+(marked done without pausing) only when the criterion is origin="ticket"
+(the ticket's own initial criteria - one criterion's implementation can
+legitimately satisfy a sibling as a side effect). For any other origin
+(validate-missed/review - pushed *because* an independent check already
+judged the criterion unsatisfied), an immediate green is untrusted by
+default and becomes "green-unconfirmed" instead: much more likely a weak
+test than the gap having genuinely disappeared, and auto-trusting it
+here is what turns into a boundless validate -> false-green -> pop ->
+re-validate loop, silently burning AI calls under --continuous with no
+human ever seeing it. --accept-green explicitly confirms one is
+legitimate and moves on.
+
 POP removes the top frame. If the new top frame belongs to a different
 ticket (or the stack is now empty), that ticket's frames are all done:
 run TICKET_VALIDATE (fresh re-narrow safety net, lint, full test suite,
-smoke, code review). A CHANGES REQUESTED review, or a safety-net
-re-narrow that still finds criteria, pushes new frames onto the stack
-(tagged with the same ticket) instead of failing outright, so the next
-`next_step` call picks the pipeline back up automatically.
+smoke, code review). Before doing anything fallible, TICKET_VALIDATE
+pushes a durable "validating" sentinel frame for that ticket (popped
+again only on an APPROVED verdict) - so if lint/the full test suite/
+smoke/an unparseable review kills the process partway through, the
+sentinel survives on the stack and the next `next_step` call resumes
+validation instead of reporting "no work remaining" or moving on to a
+different ticket with no way back to this one. A CHANGES REQUESTED
+review, or a safety-net re-narrow that still finds criteria, pushes new
+frames onto the stack ahead of the sentinel (tagged with the same
+ticket) instead of failing outright, so the next `next_step` call picks
+the pipeline back up automatically.
 
 Exit codes: 0 at every human pause point (red test awaiting
 implementation, review findings pushed, validate-missed criteria
@@ -49,7 +79,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import render  # noqa: E402
@@ -65,6 +95,23 @@ DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 # - a heuristic filter can still let through a lot if a run genuinely has
 # many failures, so this is a backstop, not the primary noise control.
 RED_CHECK_OUTPUT_TAIL_CHARS = 4000
+
+# A frame whose freshly-written test came back green immediately, for a
+# criterion that did NOT originate from the initial push_ticket seeding
+# (origin != "ticket" - i.e. origin="validate-missed" or "review", both
+# pushed *because* an independent check just judged this unsatisfied).
+# Distinct from "test-written": that status means a confirmed-red test
+# is waiting for implementation; this one means the test is green but
+# nobody has confirmed that's legitimate rather than a false green (the
+# test doesn't actually exercise the described behavior). See
+# do_write_test/do_await_green_unconfirmed for why this distinction
+# exists - without it, a false green here loops forever: WRITE_TEST
+# writes a weak test -> green -> auto-popped as done -> TICKET_VALIDATE's
+# safety-net re-narrow still finds the same gap (nothing was ever
+# implemented) -> pushes it right back as a new validate-missed frame ->
+# repeat, silently burning AI calls under --continuous with no human
+# ever seeing it.
+GREEN_UNCONFIRMED_STATUS = "green-unconfirmed"
 
 
 def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.CompletedProcess | None = None) -> None:
@@ -90,13 +137,49 @@ def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.Completed
     sys.exit(0)
 
 
+def do_await_green_unconfirmed(frame: "lib.CriterionFrame") -> None:
+    render.print_line()
+    render.print_line("-- Test passed immediately, without any changes - unconfirmed:")
+    render.print_line(f"   {frame.test_file} :: {frame.test_name}")
+    render.print_line(f"   Criterion: {frame.criterion}")
+    render.print_line(f"   Origin: {frame.origin}")
+    render.print_line()
+    render.print_line(
+        f"   This criterion came from {frame.origin!r}, not the ticket's initial "
+        f"criteria - it exists specifically because an earlier check just judged "
+        f"it unsatisfied. A test passing this easily is much more likely a weak "
+        f"test (not exercising the described behavior) than the gap genuinely "
+        f"having disappeared. Either:"
+    )
+    render.print_line("     - inspect the test and fix it if it's not testing the right thing,")
+    render.print_line("       then run 'next_step' again (a now-red test resumes the normal flow), or")
+    render.print_line(
+        "     - if you're confident the behaviour really is already present, run "
+        "'next_step --accept-green' to accept it and move on."
+    )
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
+
+
 def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
     """
     Writes (or retries writing) frame's test, gated on compile success.
     A red test is always a pause point (do_await_impl, never returns).
-    A green test means this criterion's gap didn't reproduce - marks
-    the frame done and returns, so the caller's phase-detection loop
-    re-dispatches it straight to POP without a separate invocation.
+
+    A green test's handling depends on origin:
+      - origin="ticket" (the ticket's own initial criteria): trusted -
+        marks the frame done and returns, so the caller's phase-detection
+        loop re-dispatches it straight to POP without a separate
+        invocation. Legitimate here because one criterion's
+        implementation can easily satisfy a sibling criterion as a side
+        effect within the same initial pass.
+      - any other origin (validate-missed/review - pushed *because* an
+        independent check already judged this unsatisfied): NOT trusted.
+        An immediate green here is much more likely a weak test than the
+        gap having genuinely disappeared - see GREEN_UNCONFIRMED_STATUS's
+        module-level comment for why auto-trusting it created a boundless
+        loop. Pauses at do_await_green_unconfirmed instead (always exits,
+        including under --continuous).
     """
     file_path, test_name, compile_result = lib.run_test_for_criterion_with_compile_retry(
         frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket
@@ -116,13 +199,19 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
     # be the same content twice, with the noisier copy first.
     red_result = lib.run_scoped_test(test_name, commands, "red check", quiet=True)
     if red_result.returncode == 0:
-        log.info(
-            "-- Test passed without implementation - this criterion's "
-            "gap didn't reproduce."
-        )
-        frame.status = "done"
+        if frame.origin == "ticket":
+            log.info(
+                "-- Test passed without implementation - this criterion's "
+                "gap didn't reproduce."
+            )
+            frame.status = "done"
+            lib.save_stack(stack)
+            return
+        frame.test_file = file_path
+        frame.test_name = test_name
+        frame.status = GREEN_UNCONFIRMED_STATUS
         lib.save_stack(stack)
-        return
+        do_await_green_unconfirmed(frame)
 
     frame.test_file = file_path
     frame.test_name = test_name
@@ -160,7 +249,22 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     smoke test, code review. A CHANGES REQUESTED review or a non-empty
     safety-net re-narrow pushes new frames instead of failing outright -
     next_step is meant to be re-run, not treated as a one-shot gate.
+
+    The very first thing this does is ensure a "validating" sentinel
+    frame for ticket_id is on the stack (see lib.ensure_validating_sentinel -
+    shared with push_ticket.py's --validate-only, which pushes the same
+    sentinel directly without going through a pop first) - every step
+    below this point is fallible (network fetch, AI calls, lint, the
+    full test suite, smoke test), and the sentinel is what makes a
+    failure at any of them resumable: it's only ever removed on an
+    APPROVED verdict, so a re-run of `next_step` after a lint/test-suite/
+    smoke failure (or a review the model failed to parse) finds the
+    sentinel again and retries validation from scratch, instead of the
+    ticket's "still needs validating" fact having vanished the moment
+    its last real criterion was popped.
     """
+    lib.ensure_validating_sentinel(ticket_id)
+
     render.print_line()
     render.print_line(f"-- All criteria for {ticket_id} done. Running full ticket validation ...")
 
@@ -237,6 +341,11 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     verdict, review_text = lib.run_review_gate(changed_files, plan_text, model, ticket_id=ticket_id)
 
     if verdict == "APPROVED":
+        # Validation is genuinely done now - remove the sentinel
+        # (lib.ensure_validating_sentinel's counterpart) so a later
+        # next_step call doesn't find a stale "still needs validating"
+        # marker for a ticket that's already fully approved.
+        lib.pop_frame()
         render.print_line()
         render.print_line("-- Summary:")
         render.print_line(f"   Ticket: {ticket_id}")
@@ -288,7 +397,7 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
     sys.exit(0)
 
 
-def step(model: str, commands: dict, continuous: bool, config_path: Path) -> None:
+def step(model: str, commands: dict, continuous: bool, config_path: Path, accept_green: bool = False) -> None:
     """
     One pass of phase detection + dispatch. Returns normally only when
     the caller's loop should immediately re-detect and dispatch again
@@ -302,6 +411,37 @@ def step(model: str, commands: dict, continuous: bool, config_path: Path) -> Non
 
     frame = stack[0]
     log.info("-- next_step: ticket=%s status=%s criterion=%s", frame.ticket, frame.status, frame.criterion)
+
+    if frame.status == lib.VALIDATING_STATUS:
+        # A prior TICKET_VALIDATE attempt for this ticket died partway
+        # through (lint/test-suite/smoke/unparseable review) and left
+        # this sentinel behind - re-enter validation directly, no pop
+        # needed (there's nothing left to pop; the real criteria are
+        # long gone).
+        do_ticket_validate(frame.ticket, model, commands, config_path)
+        return
+
+    if frame.status == GREEN_UNCONFIRMED_STATUS:
+        # Always re-verify real state rather than trusting the stored
+        # status (same principle as every other phase) - the human may
+        # have fixed the test in the meantime, in which case it's now
+        # properly red and this becomes a normal AWAIT_IMPL case.
+        result = lib.run_scoped_test(frame.test_name, commands, "green-unconfirmed re-check", quiet=True)
+        if result.returncode != 0:
+            frame.status = "test-written"
+            lib.save_stack(stack)
+            do_await_impl(frame, result)
+            return
+        if accept_green:
+            log.info(
+                "-- --accept-green: accepting %s as satisfied despite origin=%r.",
+                frame.criterion, frame.origin,
+            )
+            frame.status = "done"
+            lib.save_stack(stack)
+            return
+        do_await_green_unconfirmed(frame)
+        return
 
     if frame.status == "pending":
         do_write_test(stack, frame, model, commands)
@@ -352,6 +492,17 @@ def main() -> None:
              "test awaiting implementation, or the stack going empty).",
     )
     parser.add_argument(
+        "--accept-green",
+        action="store_true",
+        help="Accept the top frame as satisfied if it's currently paused "
+             "in the 'green-unconfirmed' state (a validate-missed/review "
+             "criterion whose test passed immediately, without any "
+             "changes - see the pause message for why that's untrusted by "
+             "default). Has no effect if the top frame isn't in that "
+             "state. Use this only after confirming the behaviour really "
+             "is already present - not as a way to silence the warning.",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -367,7 +518,7 @@ def main() -> None:
     commands = lib.load_pipeline_config(config_path)
 
     while True:
-        step(args.model, commands, args.continuous, config_path)
+        step(args.model, commands, args.continuous, config_path, accept_green=args.accept_green)
 
 
 if __name__ == "__main__":

@@ -47,16 +47,32 @@ clear on every push (including --prepend) because each frame carries
 its own plan_context already extracted at push time - a frame never
 depends on these scratch files still existing later.
 
+--validate-only skips fetch/plan/narrow and criteria-building entirely -
+it just pushes the same "validating" sentinel frame next_step's
+TICKET_VALIDATE phase itself pushes before doing anything fallible (see
+lib.ensure_validating_sentinel), so the very next `next_step` call runs
+the full validation gate (fresh re-narrow safety net, lint, full test
+suite, smoke, code review) directly, with no criteria in between. Use
+this to trigger a validation pass on demand - e.g. you believe a ticket
+is already fully implemented and just want the gate to run, without
+waiting for a criterion to naturally pop through the stack first. Goes
+through the same guard as every other push (a --force/--prepend choice
+if a different ticket is already in progress), and still clears scratch
+state first, so TICKET_VALIDATE's own fetch/plan/narrow starts from a
+clean slate rather than risking reuse of some unrelated ticket's stale
+.tdd-plan.md.
+
 Usage:
     push_ticket <ticket-id> [--model <model-id>] [--ticket-file-in <path>]
-                [--from-gap-plan] [--force | --prepend] [--log-level <level>]
+                [--from-gap-plan | --validate-only] [--force | --prepend]
+                [--log-level <level>]
 """
 
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import render  # noqa: E402
@@ -88,7 +104,8 @@ def main() -> None:
              "Linear - e.g. a not-yet-pushed revision from propose-ticket-edit.py. "
              "Ignored with --from-gap-plan (no fetch happens either way).",
     )
-    parser.add_argument(
+    seed_group = parser.add_mutually_exclusive_group()
+    seed_group.add_argument(
         "--from-gap-plan",
         action="store_true",
         help="Read criteria from the existing .gap-plan.md instead of "
@@ -98,6 +115,17 @@ def main() -> None:
              "earlier plan+narrow run already produced .gap-plan.md and you "
              "just want to seed the stack from it without paying for "
              "another plan+narrow.",
+    )
+    seed_group.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Skip fetch/plan/narrow and criteria-building entirely - just "
+             "push a 'validating' sentinel for this ticket, so the next "
+             "'next_step' call runs the full ticket-validation gate (fresh "
+             "re-narrow safety net, lint, full test suite, smoke, code "
+             "review) directly. Use this to trigger a validation pass on "
+             "demand, e.g. when you believe the ticket is already fully "
+             "implemented and just want the gate to run.",
     )
     guard_group = parser.add_mutually_exclusive_group()
     guard_group.add_argument(
@@ -179,11 +207,21 @@ def main() -> None:
     # GAP_PLAN_FILE is deliberately spared under --from-gap-plan - that
     # flag's whole point is to reuse the existing one instead of paying
     # for another plan+narrow, so clearing it here would immediately
-    # contradict the flag that was just passed.
+    # contradict the flag that was just passed. --validate-only clears
+    # everything (it never reuses a gap plan) so TICKET_VALIDATE's own
+    # fetch/plan/narrow starts clean rather than risking reuse of some
+    # unrelated ticket's stale .tdd-plan.md.
     scratch_files = (lib.TICKET_FILE, lib.PLAN_FILE) if args.from_gap_plan else (
         lib.TICKET_FILE, lib.PLAN_FILE, lib.GAP_PLAN_FILE
     )
     lib.remove_scratch_files(scratch_files)
+
+    if args.validate_only:
+        lib.ensure_validating_sentinel(ticket_id)
+        render.print_line()
+        render.print_line(f"-- Pushed a validation-pending marker for {ticket_id}.")
+        render.print_line("-- Run 'next_step' to run the full ticket validation gate now.")
+        return
 
     # ── Seed the gap plan: fetch+plan+narrow, or reuse an existing one ─────
     if args.from_gap_plan:

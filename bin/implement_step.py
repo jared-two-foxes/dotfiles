@@ -75,7 +75,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import ai_client  # noqa: E402
 from ai_client import AIError, run_with_tools  # noqa: E402
 import pipeline_lib as lib  # noqa: E402

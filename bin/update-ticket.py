@@ -33,7 +33,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
 import fetch_ticket as ticket_source  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import render  # noqa: E402

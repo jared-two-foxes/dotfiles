@@ -63,7 +63,9 @@ log = verbosity.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-PROMPTS_DIR = SCRIPT_DIR.parent / "prompts"
+# Two levels up: this module now lives in bin/lib/, prompts/ is a
+# repo-root sibling of bin/.
+PROMPTS_DIR = SCRIPT_DIR.parent.parent / "prompts"
 TICKET_FILE = Path(".ticket.md")
 PLAN_FILE = Path(".tdd-plan.md")
 UPDATED_PLAN_FILE = Path(".updated-plan.md")
@@ -1175,6 +1177,55 @@ def peek_frame() -> CriterionFrame | None:
     """Return frame 0 without modifying the stack. None if empty."""
     stack = load_stack()
     return stack[0] if stack else None
+
+
+# A ticket's per-criterion frames are all real acceptance criteria with
+# a test to write; this sentinel is not one - it's a durable stand-in
+# for "TICKET_VALIDATE still needs to run/re-run for this ticket",
+# recognized specially by next_step.py's phase detection rather than
+# flowing through WRITE_TEST/AWAIT_IMPL/POP. Shared here (not private to
+# next_step.py) because push_ticket.py's --validate-only pushes the same
+# sentinel directly, without a pop ever having happened first.
+VALIDATING_STATUS = "validating"
+VALIDATING_ORIGIN = "ticket-validate"
+VALIDATING_CRITERION_TEXT = "(ticket validation pending)"
+
+
+def ensure_validating_sentinel(ticket_id: str) -> None:
+    """
+    Makes "this ticket still needs TICKET_VALIDATE" a durable stack
+    frame instead of a fact that only exists for the duration of one
+    call. Two callers:
+      - next_step.py's do_ticket_validate, as the first thing it does,
+        before any fallible step (fetch, plan, narrow, lint, test suite,
+        smoke, review) - so if any of those dies, this sentinel is
+        already safely on disk, and the next `next_step` invocation's
+        phase detection finds it and retries validation from scratch
+        instead of reporting "no work remaining" or moving on to a
+        different ticket with no way back to this one.
+      - push_ticket.py's --validate-only, to trigger a validation pass
+        on demand for a ticket with no criteria currently on the stack
+        (e.g. you believe it's already fully implemented and just want
+        lint/test-suite/smoke/review to run) - same sentinel, same
+        resume mechanism, just pushed directly instead of arrived at
+        via a pop.
+
+    Idempotent: does nothing if this exact sentinel is already the top
+    frame - the case where this is a resumed retry after a prior
+    validation failure, not a fresh one.
+    """
+    top = peek_frame()
+    if top is not None and top.ticket == ticket_id and top.status == VALIDATING_STATUS:
+        return
+    push_frames([CriterionFrame(
+        ticket=ticket_id,
+        criterion=VALIDATING_CRITERION_TEXT,
+        plan_context="",
+        test_file=None,
+        test_name=None,
+        status=VALIDATING_STATUS,
+        origin=VALIDATING_ORIGIN,
+    )])
 
 
 def extract_plan_context_for_criterion(criterion: str, gap_plan_text: str) -> str:

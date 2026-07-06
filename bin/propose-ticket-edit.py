@@ -41,7 +41,7 @@ import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(SCRIPT_DIR / "lib"))
 import ai_client  # noqa: E402
 import pipeline_lib as lib  # noqa: E402
 import render  # noqa: E402
