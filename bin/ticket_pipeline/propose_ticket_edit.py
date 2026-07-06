@@ -35,35 +35,11 @@ Usage:
 
 import argparse
 import difflib
-import importlib.util
 import re
-import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPT_DIR / "lib"))
-import ai_client  # noqa: E402
-import pipeline_lib as lib  # noqa: E402
-import render  # noqa: E402
-import tools  # noqa: E402
-import verbosity  # noqa: E402
-
-
-def _load_review_module():
-    """
-    review-ticket.py's hyphenated filename means it can't be imported
-    with a normal `import` statement (not a valid identifier) - this is
-    the standard importlib workaround for loading a hyphenated script as
-    a module, used only to reach its review_file_path()/marker constants
-    so the on-disk format stays defined in exactly one place.
-    """
-    spec = importlib.util.spec_from_file_location("review_ticket", SCRIPT_DIR / "review-ticket.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-review = _load_review_module()  # noqa: E402
+from .lib import ai_client, pipeline_lib as lib, render, tools, verbosity
+from . import review_ticket as review
 
 log = verbosity.get_logger(__name__)
 

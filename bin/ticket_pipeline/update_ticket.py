@@ -30,14 +30,9 @@ Usage:
 import argparse
 import difflib
 import re
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import fetch_ticket as ticket_source  # noqa: E402
-import pipeline_lib as lib  # noqa: E402
-import render  # noqa: E402
-import verbosity  # noqa: E402
+from .lib import fetch_ticket as ticket_source, pipeline_lib as lib, render, verbosity
 
 log = verbosity.get_logger(__name__)
 

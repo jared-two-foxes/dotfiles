@@ -72,11 +72,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import ai_client  # noqa: E402
-import pipeline_lib as lib  # noqa: E402
-import render  # noqa: E402
-import verbosity  # noqa: E402
+from .lib import ai_client, pipeline_lib as lib, render, verbosity
 
 log = verbosity.get_logger(__name__)
 

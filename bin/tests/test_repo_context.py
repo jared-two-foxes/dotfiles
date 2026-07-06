@@ -1,16 +1,21 @@
+import sys
 import tempfile
 import types
 import unittest
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-render_stub = types.ModuleType("render")
+# Stubbed under its fully-qualified name so pipeline_lib's `from .render
+# import render_markdown` picks this up instead of the real module -
+# keeps this test independent of whether `rich` (render.py's real
+# dependency) is installed, and avoids a real console setup as a side
+# effect of importing pipeline_lib. Must be registered before
+# ticket_pipeline.lib.pipeline_lib is imported below.
+render_stub = types.ModuleType("ticket_pipeline.lib.render")
 render_stub.render_markdown = lambda _text: None
-sys.modules.setdefault("render", render_stub)
+sys.modules.setdefault("ticket_pipeline.lib.render", render_stub)
 
-import pipeline_lib
-import repo_context
+from ticket_pipeline.lib import pipeline_lib
+from ticket_pipeline.lib import repo_context
 
 
 class TicketEvidenceTokenTests(unittest.TestCase):

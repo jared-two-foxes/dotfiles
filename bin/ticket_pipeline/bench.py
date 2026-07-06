@@ -53,6 +53,10 @@ from pathlib import Path
 _WORKTREE_LOCK = threading.Lock()
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+# fixtures/ is a dev-only benchmark asset directory, kept at the project
+# root (bin/) rather than inside the installed ticket_pipeline package -
+# one level up from this module.
+PROJECT_DIR = SCRIPT_DIR.parent
 DEFAULT_REPO = Path.home() / "code" / "own" / "VirtualAssistant"
 
 # test-criterion trials actually invoke cargo (compile + scoped run) -
@@ -213,7 +217,7 @@ def run_trial(job: Job, repo: Path, base_ref: str) -> TrialResult:
     try:
         cmd = [
             sys.executable,
-            str(SCRIPT_DIR / "bench_block.py"),
+            "-m", "ticket_pipeline.bench_block",
             "--block", job.block,
             "--ticket-name", job.ticket_name,
             "--ticket-file", str(job.ticket_file),
@@ -395,7 +399,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     if args.fixtures_dir is None:
-        args.fixtures_dir = str(SCRIPT_DIR / "fixtures" / args.ticket_name)
+        args.fixtures_dir = str(PROJECT_DIR / "fixtures" / args.ticket_name)
 
     if args.base_ref is None:
         args.base_ref = resolve_fixture_base_ref(Path(args.fixtures_dir))

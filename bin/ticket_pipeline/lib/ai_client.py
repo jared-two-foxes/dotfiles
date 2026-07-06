@@ -37,7 +37,7 @@ completion_tokens) is accumulated per-model into the module-level
 `usage` UsageTracker instance for the lifetime of the process. Callers
 print `ai_client.usage` whenever they want a running or final total,
 including an estimated $ cost if the model's rate is in
-bin/lib/model-pricing.toml - models with no entry there show token counts
+bin/ticket_pipeline/lib/model-pricing.toml - models with no entry there show token counts
 with no fabricated cost.
 """
 
@@ -51,7 +51,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-import verbosity
+from . import verbosity
 
 log = verbosity.get_logger(__name__)
 
@@ -176,7 +176,7 @@ _pricing_cache: dict | None = None
 
 def load_pricing() -> dict:
     """
-    Loads bin/lib/model-pricing.toml: a [models."<model id>"] table per
+    Loads bin/ticket_pipeline/lib/model-pricing.toml: a [models."<model id>"] table per
     model with input_per_1m / output_per_1m USD rates. Missing file or
     missing model entries are not errors - cost just can't be computed
     for that model, which UsageTracker reports explicitly rather than

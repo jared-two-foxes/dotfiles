@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import Callable
 
-import verbosity
+from . import verbosity
 
 log = verbosity.get_logger(__name__)
 

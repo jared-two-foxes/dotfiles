@@ -29,7 +29,7 @@ them (the markdown "Test:" annotation mechanism, AI-driven
 per-criterion implementation, the whole-plan non-per-criterion test/
 implement/coverage steps, and the STALE_FILES/RESETTABLE_FILES generic
 cleanup lists), are retired. A frozen copy of the old scripts and
-prompts lives in ../legacy-pipeline/ for reference.
+prompts lives in the repo's legacy-pipeline/ directory for reference.
 """
 
 import json
@@ -47,14 +47,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-import ai_client
-from ai_client import AIError, run_with_tools
-import fetch_ticket as ticket_source
-from render import render_markdown
-import repo_context
-import tools
-import toolchains
-import verbosity
+from . import ai_client
+from .ai_client import AIError, run_with_tools
+from . import fetch_ticket as ticket_source
+from .render import render_markdown
+from . import repo_context
+from . import tools
+from . import toolchains
+from . import verbosity
 
 log = verbosity.get_logger(__name__)
 
@@ -63,9 +63,9 @@ log = verbosity.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-# Two levels up: this module now lives in bin/lib/, prompts/ is a
-# repo-root sibling of bin/.
-PROMPTS_DIR = SCRIPT_DIR.parent.parent / "prompts"
+# Three levels up: this module lives in bin/ticket_pipeline/lib/,
+# prompts/ is a repo-root sibling of bin/.
+PROMPTS_DIR = SCRIPT_DIR.parent.parent.parent / "prompts"
 TICKET_FILE = Path(".ticket.md")
 PLAN_FILE = Path(".tdd-plan.md")
 UPDATED_PLAN_FILE = Path(".updated-plan.md")

@@ -47,9 +47,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import ai_client  # noqa: E402
-import pipeline_lib as lib  # noqa: E402
+from .lib import ai_client, pipeline_lib as lib
 
 
 def grade_sa452_no_file_split(plan_text: str) -> tuple[bool, str]:

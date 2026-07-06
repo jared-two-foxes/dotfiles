@@ -29,7 +29,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCRIPT_DIR = Path(__file__).resolve().parent
 VERDICT_RE = re.compile(r"^###\s*Verdict\s*\n+(\S+)", re.MULTILINE)
 NO_REVISION_MARKER = "no-remaining-work case"
 
@@ -85,8 +84,14 @@ class CostTotal:
         return f"{base}, ~${self.cost_usd:.4f}{suffix}"
 
 
+# Invoked via `-m`, not a file path, since review_ticket.py/
+# propose_ticket_edit.py use package-relative imports now - running them
+# by file path would fail with no parent package to resolve `from .lib
+# import ...` against. `-m` works from any cwd once ticket_pipeline is
+# installed (editable or otherwise), same as the old absolute-file-path
+# approach did before the package conversion.
 def run_review(ticket_id: str, model: str, ticket_file_in: Path | None, cost: CostTotal) -> None:
-    cmd = [sys.executable, str(SCRIPT_DIR / "review-ticket.py"), ticket_id, "--model", model]
+    cmd = [sys.executable, "-m", "ticket_pipeline.review_ticket", ticket_id, "--model", model]
     if ticket_file_in is not None:
         cmd += ["--ticket-file-in", str(ticket_file_in)]
     print(f"-- running: {' '.join(cmd)}")
@@ -103,7 +108,7 @@ def run_review(ticket_id: str, model: str, ticket_file_in: Path | None, cost: Co
 def run_propose(ticket_id: str, model: str, ticket_file_out: Path, cost: CostTotal) -> bool:
     """Returns True if a revision was written, False for the no-remaining-work case."""
     cmd = [
-        sys.executable, str(SCRIPT_DIR / "propose-ticket-edit.py"), ticket_id,
+        sys.executable, "-m", "ticket_pipeline.propose_ticket_edit", ticket_id,
         "--model", model, "--ticket-file-out", str(ticket_file_out),
     ]
     print(f"-- running: {' '.join(cmd)}")

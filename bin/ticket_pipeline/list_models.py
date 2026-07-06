@@ -22,11 +22,8 @@ import json
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent / "lib"))
-import ai_client  # noqa: E402
-import render  # noqa: E402
+from .lib import ai_client, render
 
 
 def fetch_models(provider: ai_client.Provider) -> list[dict]:

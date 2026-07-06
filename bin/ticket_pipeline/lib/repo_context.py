@@ -19,8 +19,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-import toolchains
-import tools
+from . import toolchains
+from . import tools
 
 DEFAULT_TREE_DEPTH = 3
 
