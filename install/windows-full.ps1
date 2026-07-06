@@ -351,14 +351,24 @@ New-Symlink `
     -Target (Join-Path $RepoRoot 'bin') `
     -Link   (Join-Path $env:USERPROFILE 'bin')
 
-$binRequirements = Join-Path $RepoRoot 'bin\requirements.txt'
+# bin/ is the ticket_pipeline Python project (see bin/pyproject.toml) -
+# an editable install against the repo checkout (not the ~/bin symlink
+# above, though they resolve to the same files) registers push_ticket,
+# review-ticket, etc. as real console-script commands, and pulls in
+# rich (its one dependency) automatically. This must stay an editable
+# (-e) install: pipeline_lib.PROMPTS_DIR and bench.py's fixtures dir are
+# resolved relative to the source tree at import time (see the note in
+# pyproject.toml), which only stays valid if the source isn't copied
+# into site-packages. See env.ps1 for the PATH entry that makes the
+# installed commands runnable as bare commands in new shells.
+$binProject = Join-Path $RepoRoot 'bin'
 if (Get-Command python -ErrorAction SilentlyContinue) {
-    Write-Step "Installing Python dependencies for bin/ scripts..."
-    python -m pip install --user -r $binRequirements --quiet
+    Write-Step "Installing ticket_pipeline (bin/) as an editable package..."
+    python -m pip install --user -e $binProject --quiet
     if ($LASTEXITCODE -eq 0) {
-        Write-Ok "bin/ Python dependencies"
+        Write-Ok "bin/ ticket_pipeline editable install"
     } else {
-        Write-Fail "bin/ Python dependencies (pip exit code $LASTEXITCODE)"
+        Write-Fail "bin/ ticket_pipeline editable install (pip exit code $LASTEXITCODE)"
     }
 } else {
     Write-Skip "python not found on PATH - skipping bin/ Python dependencies"

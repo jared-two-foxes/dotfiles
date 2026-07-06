@@ -10,6 +10,20 @@ if (Test-Path $UserBin) {
     $env:PATH = "$UserBin;$env:PATH"
 }
 
+# `pip install --user` (see install/*.ps1's editable install of
+# bin/pyproject.toml's ticket_pipeline package) puts console-script
+# shims - push_ticket, review-ticket, etc. - in this per-Python-version
+# Scripts directory, not on PATH by default. Globbed rather than
+# invoking `python -m site --user-base` to avoid a subprocess spawn on
+# every shell start.
+Get-ChildItem -Path (Join-Path $env:APPDATA 'Python') -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        $pyUserScripts = Join-Path $_.FullName 'Scripts'
+        if (Test-Path $pyUserScripts) {
+            $env:PATH = "$pyUserScripts;$env:PATH"
+        }
+    }
+
 # Prefer nvim as the default editor; fall back to vim, then notepad
 if (Get-Command nvim -ErrorAction SilentlyContinue) {
     $env:EDITOR  = 'nvim'

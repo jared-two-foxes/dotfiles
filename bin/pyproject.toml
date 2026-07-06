@@ -1,0 +1,43 @@
+# Editable-install only (`pip install -e .`) - pipeline_lib.PROMPTS_DIR
+# and bench.py's fixtures dir are both resolved relative to this
+# package's __file__ at import time, up to the prompts/ and fixtures/
+# directories that live alongside this pyproject.toml (not inside the
+# ticket_pipeline/ package itself). An editable install keeps the
+# source in place, so that resolution stays valid; a regular `pip
+# install .` would copy the package into site-packages and break both
+# paths. This is a personal dev-pipeline tool run against a live repo
+# checkout, not a distributable artifact, so that tradeoff is fine.
+[project]
+name = "ticket-pipeline"
+version = "0.1.0"
+description = "Linear-ticket-driven TDD pipeline: fetch/plan/narrow, per-criterion test-write/implement/gate, ticket quality review, and an interactive context-explorer session."
+requires-python = ">=3.11"
+dependencies = [
+    "rich",
+]
+
+[project.scripts]
+push_ticket = "ticket_pipeline.push_ticket:main"
+next_step = "ticket_pipeline.next_step:main"
+implement_step = "ticket_pipeline.implement_step:main"
+review-ticket = "ticket_pipeline.review_ticket:main"
+propose-ticket-edit = "ticket_pipeline.propose_ticket_edit:main"
+explore-ticket = "ticket_pipeline.explore_ticket:main"
+split-ticket = "ticket_pipeline.split_ticket:main"
+update-ticket = "ticket_pipeline.update_ticket:main"
+list-models = "ticket_pipeline.list_models:main"
+loop-ticket-review = "ticket_pipeline.loop_ticket_review:main"
+bench = "ticket_pipeline.bench:main"
+bench_block = "ticket_pipeline.bench_block:main"
+copilot_login = "ticket_pipeline.copilot_login:main"
+fetch_ticket = "ticket_pipeline.lib.fetch_ticket:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ticket_pipeline", "ticket_pipeline.*"]
+
+[tool.setuptools.package-data]
+"ticket_pipeline.lib" = ["model-pricing.toml"]
