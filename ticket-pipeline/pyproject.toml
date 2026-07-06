@@ -26,7 +26,7 @@ explore-ticket = "ticket_pipeline.explore_ticket:main"
 split-ticket = "ticket_pipeline.split_ticket:main"
 update-ticket = "ticket_pipeline.update_ticket:main"
 list-models = "ticket_pipeline.list_models:main"
-loop-ticket-review = "ticket_pipeline.loop_ticket_review:main"
+prep-ticket = "ticket_pipeline.prep_ticket:main"
 copilot_login = "ticket_pipeline.copilot_login:main"
 fetch_ticket = "ticket_pipeline.lib.fetch_ticket:main"
 
