@@ -23,26 +23,12 @@ def load_api_key() -> str:
     return key_file.read_text().strip()
 
 
-def fetch_ticket(identifier: str) -> dict:
+def _graphql(query: str, variables: dict) -> dict:
+    """Shared POST-and-parse for every Linear GraphQL call in this module -
+    query and mutation alike, since both are just a query string + variables
+    over the same endpoint with the same auth header."""
     api_key = load_api_key()
-    query = """
-    query Issue($identifier: String!) {
-      issue(id: $identifier) {
-        id
-        identifier
-        title
-        description
-        priority
-        state { name }
-        assignee { name email }
-        labels { nodes { name } }
-        createdAt
-        updatedAt
-        url
-      }
-    }
-    """
-    payload = json.dumps({"query": query, "variables": {"identifier": identifier}}).encode()
+    payload = json.dumps({"query": query, "variables": variables}).encode()
     req = urllib.request.Request(
         "https://api.linear.app/graphql",
         data=payload,
@@ -55,6 +41,28 @@ def fetch_ticket(identifier: str) -> dict:
         return json.loads(resp.read())
 
 
+def fetch_ticket(identifier: str) -> dict:
+    query = """
+    query Issue($identifier: String!) {
+      issue(id: $identifier) {
+        id
+        identifier
+        title
+        description
+        priority
+        state { name }
+        assignee { name email }
+        labels { nodes { name } }
+        team { id }
+        createdAt
+        updatedAt
+        url
+      }
+    }
+    """
+    return _graphql(query, {"identifier": identifier})
+
+
 def update_ticket(issue_id: str, title: str | None = None, description: str | None = None) -> dict:
     """
     Mutates the title/description of an existing Linear issue. issue_id
@@ -64,7 +72,6 @@ def update_ticket(issue_id: str, title: str | None = None, description: str | No
     - this is the one write path against Linear in this whole set of
     scripts, deliberately not called from anywhere else.
     """
-    api_key = load_api_key()
     mutation = """
     mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
       issueUpdate(id: $id, input: $input) {
@@ -78,19 +85,31 @@ def update_ticket(issue_id: str, title: str | None = None, description: str | No
         input_fields["title"] = title
     if description is not None:
         input_fields["description"] = description
-    payload = json.dumps(
-        {"query": mutation, "variables": {"id": issue_id, "input": input_fields}}
-    ).encode()
-    req = urllib.request.Request(
-        "https://api.linear.app/graphql",
-        data=payload,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": api_key,
-        },
-    )
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+    return _graphql(mutation, {"id": issue_id, "input": input_fields})
+
+
+def create_ticket(team_id: str, title: str, description: str, parent_id: str | None = None) -> dict:
+    """
+    Creates a new Linear issue via the issueCreate mutation. team_id is
+    the internal UUID of the team the new issue belongs to (fetch_ticket()'s
+    "team.id" field on the parent, for a sub-issue). parent_id, if given,
+    is the parent issue's internal UUID (not its human-readable identifier)
+    - links the new issue as a Linear sub-issue rather than a standalone one.
+    Only used by create_child_tickets.py - the other write path against
+    Linear in this set of scripts, alongside update_ticket() above.
+    """
+    mutation = """
+    mutation IssueCreate($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue { id identifier title url }
+      }
+    }
+    """
+    input_fields = {"teamId": team_id, "title": title, "description": description}
+    if parent_id is not None:
+        input_fields["parentId"] = parent_id
+    return _graphql(mutation, {"input": input_fields})
 
 
 PRIORITY_LABELS = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}

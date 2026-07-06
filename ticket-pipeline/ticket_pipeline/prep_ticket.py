@@ -21,11 +21,15 @@ Two phases, both non-interactive (no AI call here ever needs a human):
      split-ticket.py's own docstring for exactly what that does and
      doesn't change), and reads its verdict out of
      .ticket-split-{ticket-id}.md. A "no-split" verdict means the ticket
-     is ready; anything else means it should be split into child tickets
-     before continuing - split-ticket.py never creates those tickets
-     itself (a human copies the proposed bodies into Linear), so this
-     script can't push past that point either. It reports the verdict
-     and stops.
+     is ready for explore-ticket. Anything else runs create-child-
+     tickets.py (dry run unless --yes is passed) to turn the proposed
+     children into real Linear sub-issues of the parent, then pushes each
+     one onto the criteria stack ahead of the parent via
+     `push_ticket --prepend`, in order, plus a `--validate-only`
+     sentinel for the parent itself underneath all of them - see the
+     --yes handling in main() for exactly how that ordering works and
+     why. Without --yes, nothing is created or pushed; only a preview
+     is shown.
 
 Why these two phases specifically, and not further (e.g. all the way
 through explore-ticket): explore-ticket is a real, interactive
@@ -40,31 +44,40 @@ criteria count that split-ticket's mechanical pre-check partly keys off
 scope could still trip a false "this needs splitting" signal purely from
 having been phrased more precisely.
 
-Never touches Linear and never touches .ticket.md - --ticket-file-out is
-the one working file passed between review/propose rounds (explicit, no
-implicit naming convention - default .ticket-proposed-{ticket-id}.md,
-same as you'd pick by hand; same flag name propose-ticket-edit.py itself
-uses for the same file).
+Never touches .ticket.md - --ticket-file-out is the one working file
+passed between review/propose rounds (explicit, no implicit naming
+convention - default .ticket-proposed-{ticket-id}.md, same as you'd pick
+by hand; same flag name propose-ticket-edit.py itself uses for the same
+file). Does touch Linear, but only for a split recommendation with --yes
+passed - creating the child sub-issues is the one real mutation this
+script can trigger, same --yes-gated convention update-ticket.py already
+uses for its own mutation. Without --yes, a split recommendation is
+report-only, same as everything else here.
 
 Exit codes distinguish three outcomes, not two - "stopped" is not always
 "failed":
   0 - either phase reached a real conclusion: a clean review that's also
-      right-sized (explore-ticket next), a split recommendation (split in
-      Linear, then re-run per child), or propose-ticket-edit's "no
-      remaining work" case - which in practice means every acceptance
-      criterion turned out to already be satisfied by existing code, so
-      there's nothing to prep at all (consider closing the ticket
-      instead). All three are successful, actionable findings.
-  1 - a genuine pipeline failure: a subprocess errored, or the review
-      loop hit --max-iterations without ever reaching a clean verdict.
+      right-sized (explore-ticket next), a split recommendation handled
+      (dry-run preview shown, or with --yes, children created in Linear
+      and pushed onto the stack ahead of the parent), or propose-ticket-
+      edit's "no remaining work" case - which in practice means every
+      acceptance criterion turned out to already be satisfied by
+      existing code, so there's nothing to prep at all (consider closing
+      the ticket instead). All of these are successful, actionable
+      outcomes.
+  1 - a genuine pipeline failure: a subprocess errored, the review loop
+      hit --max-iterations without ever reaching a clean verdict, or
+      --yes was passed but nothing ended up in .ticket-children-
+      {ticket-id}.json to push.
 
 Usage:
     prep-ticket <ticket-id> [--model <model-id>] [--max-iterations <n>]
                 [--ticket-file-out <path>] [--split-threshold <n>]
-                [--force-split-ai]
+                [--force-split-ai] [--yes]
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -108,6 +121,10 @@ def review_file_path(ticket_id: str) -> Path:
 
 def split_file_path(ticket_id: str) -> Path:
     return Path(f".ticket-split-{ticket_id}.md")
+
+
+def children_file_path(ticket_id: str) -> Path:
+    return Path(f".ticket-children-{ticket_id}.json")
 
 
 class CostTotal:
@@ -218,6 +235,43 @@ def run_split(
         sys.exit(1)
 
 
+def run_create_children(ticket_id: str, split_file: Path, yes: bool, cost: CostTotal) -> None:
+    """create_child_tickets.py is purely mechanical (no AI call), so
+    cost.add() here is a harmless no-op - kept anyway so its stdout
+    still flows through the same combined-usage accounting as every
+    other step, in case that ever changes."""
+    cmd = [
+        sys.executable, "-m", "ticket_pipeline.create_child_tickets", ticket_id,
+        "--split-file-in", str(split_file),
+    ]
+    if yes:
+        cmd += ["--yes"]
+    print(f"-- running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    print(result.stdout)
+    cost.add(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        print(f"\n-- Combined token usage so far: {cost}")
+        print(f"\n>>> FAILED: create-child-tickets.py failed (exit {result.returncode}).")
+        sys.exit(1)
+
+
+def run_push_prepend(ticket_id: str, cost: CostTotal, extra_args: list[str] | None = None) -> None:
+    cmd = [sys.executable, "-m", "ticket_pipeline.push_ticket", ticket_id, "--prepend"]
+    if extra_args:
+        cmd += extra_args
+    print(f"-- running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    print(result.stdout)
+    cost.add(result.stdout)
+    if result.returncode != 0:
+        print(result.stderr, file=sys.stderr)
+        print(f"\n-- Combined token usage so far: {cost}")
+        print(f"\n>>> FAILED: push_ticket --prepend for {ticket_id} failed (exit {result.returncode}).")
+        sys.exit(1)
+
+
 def read_verdict(path: Path, label: str) -> str:
     text = path.read_text(encoding="utf-8")
     match = VERDICT_RE.search(text)
@@ -247,6 +301,14 @@ def main() -> None:
     parser.add_argument(
         "--force-split-ai", action="store_true",
         help="Passed through to split-ticket.py's --force-ai (skip its mechanical pre-check).",
+    )
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="If split-ticket recommends splitting: actually create the child tickets in "
+             "Linear (create-child-tickets.py --yes) and push them onto the stack ahead of "
+             "the parent, in order. Without this, only a dry-run preview is shown - same "
+             "convention as update-ticket.py's --yes for the other real Linear mutation in "
+             "this set of scripts.",
     )
     args = parser.parse_args()
 
@@ -304,10 +366,45 @@ def main() -> None:
         print(f"\n>>> SUCCESS: {args.ticket_id} is reviewed and right-sized. Next: explore-ticket {next_ticket_ref}")
         return
 
+    print(f"\n>>> SPLIT RECOMMENDED (verdict: {split_verdict}) - see {split_file_path(args.ticket_id)}.")
+
+    run_create_children(args.ticket_id, split_file_path(args.ticket_id), args.yes, cost)
+
+    if not args.yes:
+        print(
+            f"\n-- Dry run above - nothing was created. Re-run with --yes to create these as "
+            f"Linear sub-issues of {args.ticket_id} and push them onto the stack ahead of it, "
+            f"in order."
+        )
+        return
+
+    children = json.loads(children_file_path(args.ticket_id).read_text(encoding="utf-8"))
+    if not children:
+        print(f"\n>>> FAILED: --yes was passed but {children_file_path(args.ticket_id)} lists no children - nothing to push.")
+        sys.exit(1)
+
+    # The parent's own frame is a "validating" sentinel only, never real
+    # criteria - split-ticket guarantees the children between them cover
+    # every one of the parent's acceptance criteria, so there's nothing
+    # left for the parent itself to implement. Pushed *first*: push_frames
+    # prepends new frames ahead of whatever's already there, so pushing
+    # the children *after*, in reverse, lands them ahead of this sentinel
+    # in the final stack order (child 1 first, ..., child N last, then
+    # this sentinel). Once the last child's frames pop, this sentinel is
+    # what the parent finally validates against - a fresh re-narrow
+    # against its *original* full scope, acting as the integration check
+    # that the split actually covered everything (see next_step.py's
+    # TICKET_VALIDATE step 4 self-heal for what happens if it didn't).
+    run_push_prepend(args.ticket_id, cost, extra_args=["--validate-only"])
+    for child in reversed(children):
+        run_push_prepend(child["id"], cost)
+
+    child_list = ", ".join(c["id"] for c in children)
     print(
-        f"\n>>> SPLIT RECOMMENDED (verdict: {split_verdict}) - see {split_file_path(args.ticket_id)}.\n"
-        f"    Create the proposed child tickets in Linear yourself, then re-run\n"
-        f"    prep-ticket against each one before moving on to explore-ticket."
+        f"\n>>> SUCCESS: created and pushed {len(children)} child ticket(s) ahead of "
+        f"{args.ticket_id}: {child_list}.\n"
+        f"    Run next_step to begin working through them - {args.ticket_id} validates "
+        f"automatically (a fresh check against its original full scope) once they're all done."
     )
 
 
