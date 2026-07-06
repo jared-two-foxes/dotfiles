@@ -213,7 +213,7 @@ SA-452's known file-split failure mode at a similar rate to the other
 budget-tier models above - getting unblocked from a provider error didn't
 turn out to mean these models are actually good at this block. Cost shows
 as unpriced because Copilot bills via a flat subscription + per-model
-premium-request multiplier, not $/token - `ticket_pipeline/lib/model-pricing.toml` intentionally
+premium-request multiplier, not $/token - `ticket-pipeline/ticket_pipeline/lib/model-pricing.toml` intentionally
 has no `copilot:*` entries (see `ai_client.py`'s `COPILOT` comment); treat
 "unpriced" here as "billed differently," not "free."
 
@@ -354,7 +354,7 @@ against the standard 6-model roster (`gpt-5.4-mini`, `claude-haiku-4-5`,
 | SA-501 | needs-attention (stale premise + missing redaction) | revised ticket, but re-adds an explicit redaction criterion | **18/18** - back to not discriminating |
 | SA-502 | needs-attention (already fully implemented) | no revision - "close this ticket" | no ticket to re-bench - this is the correct outcome |
 
-A separate follow-up pass ran every model in `ticket_pipeline/lib/model-pricing.toml`'s "Free
+A separate follow-up pass ran every model in `ticket-pipeline/ticket_pipeline/lib/model-pricing.toml`'s "Free
 tier" section (`big-pickle`, `deepseek-v4-flash-free`, `mimo-v2.5-free`,
 `nemotron-3-ultra-free`, `north-mini-code-free` - all $0.00/token) against
 `sa452-proposed`:
@@ -828,7 +828,7 @@ batch next before swapping `check-ticket.py`/`resolve-ticket.py` over
   count and append the new numbers to the relevant table above - note the
   combined trial count (like `plan`'s "35 (10 + 25)"), not just the latest
   batch, since pass rate at n=3 has repeatedly been misleading.
-- **A new model**: add pricing to `ticket_pipeline/lib/model-pricing.toml` first if you want
+- **A new model**: add pricing to `ticket-pipeline/ticket_pipeline/lib/model-pricing.toml` first if you want
   real cost numbers instead of token counts; some models in opencode zen's
   `/v1/models` list 401 ("No provider available") - that's been persistent,
   not transient, for the Gemini models tried so far, so don't burn retries

@@ -11,8 +11,8 @@ if (Test-Path $UserBin) {
 }
 
 # `pip install --user` (see install/*.ps1's editable install of
-# bin/pyproject.toml's ticket_pipeline package) puts console-script
-# shims - push_ticket, review-ticket, etc. - in this per-Python-version
+# ticket-pipeline/pyproject.toml's ticket_pipeline package) puts
+# console-script shims - push_ticket, review-ticket, etc. - in this per-Python-version
 # Scripts directory, not on PATH by default. Globbed rather than
 # invoking `python -m site --user-base` to avoid a subprocess spawn on
 # every shell start.

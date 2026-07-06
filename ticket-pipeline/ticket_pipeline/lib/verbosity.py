@@ -10,8 +10,10 @@ there. The one thing it doesn't have out of the box is a level below
 DEBUG - added the standard way (addLevelName + a Logger.trace method),
 so TRACE slots into the existing ladder cleanly.
 
-Deliberately NOT named logging.py - bin/ is on sys.path, so a same-named
-module here would shadow the stdlib package for every script in it.
+Deliberately NOT named logging.py - it's a real submodule name
+(ticket_pipeline.lib.verbosity) rather than a shadowing risk now, but
+the name stays: an import of "logging" from inside this package should
+mean the stdlib module, not this one.
 """
 
 import logging

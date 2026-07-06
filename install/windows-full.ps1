@@ -343,35 +343,32 @@ New-Symlink `
     -Target (Join-Path $RepoRoot 'templates') `
     -Link   (Join-Path $env:USERPROFILE '.dotfiles\templates')
 
-# --- bin -------------------------------------------------------
+# --- ticket-pipeline --------------------------------------------
 Write-Host "
-[bin]" -ForegroundColor White
+[ticket-pipeline]" -ForegroundColor White
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'bin') `
-    -Link   (Join-Path $env:USERPROFILE 'bin')
-
-# bin/ is the ticket_pipeline Python project (see bin/pyproject.toml) -
-# an editable install against the repo checkout (not the ~/bin symlink
-# above, though they resolve to the same files) registers push_ticket,
-# review-ticket, etc. as real console-script commands, and pulls in
-# rich (its one dependency) automatically. This must stay an editable
-# (-e) install: pipeline_lib.PROMPTS_DIR and bench.py's fixtures dir are
-# resolved relative to the source tree at import time (see the note in
+# ticket-pipeline/ is a real Python project (see its pyproject.toml),
+# not a flat script directory - no longer symlinked into ~/bin (the
+# "drop portable executables here" folder, see env.ps1): an editable
+# install is what makes push_ticket, review-ticket, etc. runnable as
+# bare commands now, via console-script shims pip puts on PATH (see
+# env.ps1's PATH entry for the pip user Scripts directory), not via a
+# copy or symlink into ~/bin. This must stay an editable (-e) install:
+# pipeline_lib.PROMPTS_DIR and bench.py's fixtures dir are resolved
+# relative to the source tree at import time (see the note in
 # pyproject.toml), which only stays valid if the source isn't copied
-# into site-packages. See env.ps1 for the PATH entry that makes the
-# installed commands runnable as bare commands in new shells.
-$binProject = Join-Path $RepoRoot 'bin'
+# into site-packages.
+$ticketPipelineProject = Join-Path $RepoRoot 'ticket-pipeline'
 if (Get-Command python -ErrorAction SilentlyContinue) {
-    Write-Step "Installing ticket_pipeline (bin/) as an editable package..."
-    python -m pip install --user -e $binProject --quiet
+    Write-Step "Installing ticket_pipeline as an editable package..."
+    python -m pip install --user -e $ticketPipelineProject --quiet
     if ($LASTEXITCODE -eq 0) {
-        Write-Ok "bin/ ticket_pipeline editable install"
+        Write-Ok "ticket_pipeline editable install"
     } else {
-        Write-Fail "bin/ ticket_pipeline editable install (pip exit code $LASTEXITCODE)"
+        Write-Fail "ticket_pipeline editable install (pip exit code $LASTEXITCODE)"
     }
 } else {
-    Write-Skip "python not found on PATH - skipping bin/ Python dependencies"
+    Write-Skip "python not found on PATH - skipping ticket_pipeline editable install"
 }
 
 # --- Windows Terminal ----------------------------------------

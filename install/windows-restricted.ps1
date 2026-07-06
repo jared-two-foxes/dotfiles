@@ -354,33 +354,30 @@ Copy-DotfileDir `
     -Source (Join-Path $RepoRoot 'templates') `
     -Dest   (Join-Path $env:USERPROFILE '.dotfiles\templates')
 
-# --- bin -------------------------------------------------------
+# --- ticket-pipeline --------------------------------------------
 Write-Host "
-[bin]" -ForegroundColor White
+[ticket-pipeline]" -ForegroundColor White
 
-Copy-DotfileDir `
-    -Source (Join-Path $RepoRoot 'bin') `
-    -Dest   (Join-Path $env:USERPROFILE 'bin')
-
-# bin/ is the ticket_pipeline Python project (see bin/pyproject.toml) -
-# an editable install against the repo checkout (not the ~/bin copy
-# above) registers push_ticket, review-ticket, etc. as real
-# console-script commands, and pulls in rich (its one dependency)
-# automatically. Must stay editable (-e): see the note in
+# ticket-pipeline/ is a real Python project (see its pyproject.toml),
+# not a flat script directory - no longer copied into ~/bin (the
+# "drop portable executables here" folder, see env.ps1): an editable
+# install is what makes push_ticket, review-ticket, etc. runnable as
+# bare commands now, via console-script shims pip puts on PATH (see
+# env.ps1's PATH entry for the pip user Scripts directory), not via a
+# copy into ~/bin. Must stay editable (-e): see the note in
 # pyproject.toml about why PROMPTS_DIR/fixtures resolution depends on
-# the source tree staying in place. See env.ps1 for the PATH entry that
-# makes the installed commands runnable as bare commands in new shells.
-$binProject = Join-Path $RepoRoot 'bin'
+# the source tree staying in place.
+$ticketPipelineProject = Join-Path $RepoRoot 'ticket-pipeline'
 if (Get-Command python -ErrorAction SilentlyContinue) {
-    Write-Step "Installing ticket_pipeline (bin/) as an editable package..."
-    python -m pip install --user -e $binProject --quiet
+    Write-Step "Installing ticket_pipeline as an editable package..."
+    python -m pip install --user -e $ticketPipelineProject --quiet
     if ($LASTEXITCODE -eq 0) {
-        Write-Ok "bin/ ticket_pipeline editable install"
+        Write-Ok "ticket_pipeline editable install"
     } else {
-        Write-Warn "bin/ ticket_pipeline editable install (pip exit code $LASTEXITCODE)"
+        Write-Warn "ticket_pipeline editable install (pip exit code $LASTEXITCODE)"
     }
 } else {
-    Write-Skip "python not found on PATH - skipping bin/ Python dependencies"
+    Write-Skip "python not found on PATH - skipping ticket_pipeline editable install"
 }
 
 # --- Windows Terminal ----------------------------------------

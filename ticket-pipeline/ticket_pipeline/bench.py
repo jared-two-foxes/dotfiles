@@ -54,8 +54,8 @@ _WORKTREE_LOCK = threading.Lock()
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 # fixtures/ is a dev-only benchmark asset directory, kept at the project
-# root (bin/) rather than inside the installed ticket_pipeline package -
-# one level up from this module.
+# root (ticket-pipeline/) rather than inside the installed
+# ticket_pipeline package - one level up from this module.
 PROJECT_DIR = SCRIPT_DIR.parent
 DEFAULT_REPO = Path.home() / "code" / "own" / "VirtualAssistant"
 

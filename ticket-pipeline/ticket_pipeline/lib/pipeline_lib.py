@@ -63,8 +63,8 @@ log = verbosity.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-# Three levels up: this module lives in bin/ticket_pipeline/lib/,
-# prompts/ is a repo-root sibling of bin/.
+# Three levels up: this module lives in ticket-pipeline/ticket_pipeline/lib/,
+# prompts/ is a repo-root sibling of ticket-pipeline/.
 PROMPTS_DIR = SCRIPT_DIR.parent.parent.parent / "prompts"
 TICKET_FILE = Path(".ticket.md")
 PLAN_FILE = Path(".tdd-plan.md")
