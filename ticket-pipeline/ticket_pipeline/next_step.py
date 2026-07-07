@@ -258,9 +258,17 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
         module-level comment for why auto-trusting it created a boundless
         loop. Pauses at do_await_green_unconfirmed instead (always exits,
         including under --continuous).
+
+    Once the test compiles (before the red/green dispatch above), an
+    independent, advisory-only test-quality review runs unconditionally
+    (see run_test_quality_review) - never gates anything here, just
+    printed immediately and logged if it flags a concern, so it's still
+    visible even on a path that doesn't pause (origin="ticket" green-
+    and-done).
     """
     file_path, test_name, compile_result = lib.run_test_for_criterion_with_compile_retry(
-        frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket
+        frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
+        existing_test_ref=frame.existing_test_ref,
     )
     if compile_result is None or compile_result.returncode != 0:
         exit_code = compile_result.returncode if compile_result is not None else "unknown"
@@ -270,6 +278,22 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
             criterion=frame.criterion,
             ticket=frame.ticket,
         )
+
+    # Advisory-only, never gates anything below - printed immediately so
+    # it's visible even if this criterion turns out not to pause at all
+    # (origin="ticket" green-and-done, under --continuous or otherwise).
+    flagged = lib.run_test_quality_review(
+        frame.criterion, frame.plan_context, file_path, test_name,
+        frame.existing_test_ref, model, ticket_id=frame.ticket,
+    )
+    if flagged:
+        lib.log_event(
+            "review-test-quality", "flagged", error=flagged,
+            criterion=frame.criterion, ticket=frame.ticket,
+        )
+        render.print_line()
+        render.print_line("-- Test-quality review flagged a concern (advisory, not blocking):")
+        render.print_line(flagged)
 
     # quiet=True: a red result here is the expected outcome, not a real
     # error, and do_await_impl below prints its own filtered version of
@@ -373,6 +397,7 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
                 status="pending",
                 origin="validate-missed",
                 verification=lib.extract_verification_mode(criterion),
+                existing_test_ref=lib.extract_existing_test_ref(criterion),
             )
             for criterion in remaining
         ]

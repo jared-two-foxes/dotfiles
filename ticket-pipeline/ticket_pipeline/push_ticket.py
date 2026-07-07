@@ -246,6 +246,7 @@ def resolve_ticket_frames(
             status="pending",
             origin="ticket",
             verification=lib.extract_verification_mode(criterion),
+            existing_test_ref=lib.extract_existing_test_ref(criterion),
         )
         for criterion in criteria
     ]
@@ -432,6 +433,7 @@ def main() -> None:
                 status="pending",
                 origin="ticket",
                 verification=lib.extract_verification_mode(criterion),
+                existing_test_ref=lib.extract_existing_test_ref(criterion),
             )
             for criterion in criteria
         ]

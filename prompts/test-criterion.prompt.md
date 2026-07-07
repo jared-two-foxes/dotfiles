@@ -48,6 +48,34 @@ work.
   >
   > No criterion named to test.
 
+### If the task prompt names an existing test to modify
+
+Some criteria are about changing behavior an *existing* test already
+covers, not adding new coverage - the task prompt names the specific
+test (file and fully-qualified name) in that case. When it does, skip
+Step 2 (there's nothing to infer - you already know exactly where this
+test lives) and do this instead of Step 3's "write a new test":
+
+- `read_file` the named file and find that exact test.
+- Update *only* the assertion(s) this criterion concerns to reflect the
+  new expected behavior. Leave every other assertion, helper, and test
+  in that file exactly as it was - this file may cover other criteria or
+  other behavior entirely, and your job here is narrower than "improve
+  this file."
+- The modification itself must be what makes the test fail - it should
+  now assert something the current (unmodified) implementation does not
+  yet do. If your edit doesn't actually change what's being asserted
+  (e.g. you touched wording or formatting but not the expected value),
+  it isn't a real modification for this purpose.
+- `write_file` the complete file back, same as writing a new test would
+  - full content, never a partial file.
+- Report in your final answer that you modified an existing test rather
+  than writing a new one, and name exactly which assertion(s) changed.
+
+Everything else below (Step 3's compile/red-check reasoning, the
+`TEST_WITNESS` line, the Rules) applies identically whether the test is
+new or modified.
+
 ## Step 2 - Learn existing conventions
 
 The context below is already scoped to just this criterion - the lines
@@ -75,6 +103,9 @@ test should read like it belongs to the codebase regardless of which
 ticket prompted it.
 
 ## Step 3 - Write a failing test
+
+(Skip this step if you're modifying an existing test per the branch
+under Step 1 above - that section replaces it entirely.)
 
 - Write one test (or tightly-related small group, if the criterion
   genuinely needs more than one assertion to express) for the named
@@ -186,6 +217,11 @@ exactly right; the caller will use it verbatim to re-run just this test.
 - Do not weaken, skip, or write a trivially-passing test.
 - Never name the test file or test function after the acceptance
   criterion - name it after the subject/behavior under test (Step 2).
+- When modifying an existing test (Step 1's branch): touch only the
+  assertion(s) this criterion concerns - never weaken, remove, or alter
+  any other assertion, test, or helper in that file, even if you notice
+  something else worth improving. That file's other coverage isn't this
+  run's concern.
 - The `write_file` call must contain the complete file content.
 - The `TEST_WITNESS:` line is required and must exactly match what was
   written - the caller cannot resume correctly without it.

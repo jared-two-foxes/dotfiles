@@ -58,6 +58,17 @@ tampering a hard, mechanical failure. Pipeline bookkeeping files
 via protected_paths - the Implementor has no legitimate reason to
 touch those.
 
+Level 2 - direct implementation (verification="manual" frames only):
+criteria narrow-plan.prompt.md tagged manual (documentation, config, CI
+- no meaningful red/green) have no named test to target, so there is
+nothing to gate the build-only retry loop on except the build itself.
+This mode never touches the stack either, same single-owner rule as
+Level 1: next_step's do_manual_criterion is still the sole judge of
+whether the criterion is actually satisfied (its own mechanical floor -
+did a file this criterion names actually change - or --accept-manual),
+run on the very next 'next_step' call same as if a human had made the
+change by hand.
+
 Exit codes: 0 when the scoped test is green (whether this run made it
 green or found it already green); non-zero on exhausted attempts, a
 tampered test, or any genuine pipeline failure. Composable from shell:
@@ -84,6 +95,7 @@ DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 DEFAULT_MAX_ATTEMPTS = 3
 
 IMPLEMENT_CRITERION_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion.prompt.md"
+IMPLEMENT_CRITERION_DIRECT_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion-direct.prompt.md"
 
 # Pipeline bookkeeping the Implementor must never write, regardless of
 # what the model decides. The named test file is deliberately NOT here -
@@ -238,9 +250,130 @@ def build_implement_criterion_fix_prompt(
     )
 
 
+def build_implement_criterion_direct_prompt(criterion: str, plan_context: str) -> str:
+    instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_DIRECT_PROMPT_FILE)
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"This implementation is for exactly this one acceptance "
+        f"criterion, and only this one:\n\n{criterion}"
+    )
+
+
+def build_implement_criterion_direct_fix_prompt(
+    criterion: str, plan_context: str, changed_so_far: list[str], error_output: str
+) -> str:
+    instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_DIRECT_PROMPT_FILE)
+    changed_list = "\n".join(f"- {p}" for p in changed_so_far) or "- (none recorded)"
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"You already attempted an implementation for exactly this one "
+        f"acceptance criterion, and only this one:\n\n{criterion}\n\n"
+        f"Files changed in the previous attempt (read these first to see "
+        f"what was tried):\n{changed_list}\n\n"
+        f"but the project does not build. Fix the build error with the "
+        f"smallest targeted change - do not re-implement from scratch or "
+        f"deviate from the approach already taken unless the error itself "
+        f"proves that approach can't work.\n\n"
+        f"Error output:\n\n```\n{error_output}\n```"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The implement loop.
 # ---------------------------------------------------------------------------
+
+
+def run_implement_direct_with_refine(
+    frame: "lib.CriterionFrame",
+    model: str,
+    commands: dict,
+    max_attempts: int,
+) -> list[str]:
+    """
+    Level 2: direct implementation for a verification="manual" frame -
+    no named test, so no tamper guard and no scoped-test-green gate, just
+    a build-gate retry loop sharing the same one-budget-total shape as
+    run_implement_with_refine. Returns the deduplicated list of changed
+    files once the build passes; dies via die_with_log on exhausted
+    attempts or an AI failure. Does not judge whether the criterion is
+    actually satisfied - that's next_step's do_manual_criterion, unchanged,
+    run on the next 'next_step' call.
+    """
+    all_changed: list[str] = []
+    last_error: str | None = None
+    last_result: subprocess.CompletedProcess | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        if attempt == 1:
+            prompt = build_implement_criterion_direct_prompt(frame.criterion, frame.plan_context)
+        else:
+            log.warning(
+                "-- Build failed (attempt %d/%d). Feeding the error back to Direct Implementor to fix.",
+                attempt - 1, max_attempts,
+            )
+            prompt = build_implement_criterion_direct_fix_prompt(
+                frame.criterion, frame.plan_context, sorted(set(all_changed)), last_error,
+            )
+
+        attempt_changed: list[str] = []
+
+        def attempt_step():
+            attempt_changed.clear()
+            return run_with_tools(
+                prompt,
+                tools.READ_WRITE_TOOLS,
+                tools.make_executor(
+                    written_paths=attempt_changed,
+                    protected_paths=PROTECTED_PIPELINE_PATHS,
+                ),
+                "implement-criterion-direct",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            )
+
+        try:
+            result = lib.run_ai_step_with_retry(
+                attempt_step, "implement-criterion-direct", criterion=frame.criterion
+            )
+        except (AIError, tools.PipelineAbort) as e:
+            lib.die_with_log("implement-criterion-direct", str(e), criterion=frame.criterion)
+        if not attempt_changed:
+            lib.die_with_log(
+                "implement-criterion-direct",
+                "Direct Implementor finished without writing any files.",
+                criterion=frame.criterion,
+            )
+        all_changed.extend(attempt_changed)
+        lib.render_step_output(result.text)
+
+        build_result = lib.run_command(
+            commands["build_cmd"], f"build gate (attempt {attempt}/{max_attempts})"
+        )
+        if build_result.returncode == 0:
+            return sorted(set(all_changed))
+
+        last_error = (build_result.stdout or "") + (build_result.stderr or "")
+        last_result = build_result
+        lib.log_event(
+            "implement-criterion-direct", "retry",
+            error=f"build failed (attempt {attempt}/{max_attempts})",
+            criterion=frame.criterion,
+        )
+
+    exit_code = last_result.returncode if last_result is not None else "unknown"
+    lib.die_with_log(
+        "implement-criterion-direct",
+        f"Code does not build after {max_attempts} attempt(s) (exit {exit_code}). See "
+        f"output above. The frame is untouched - run 'implement_step' again (perhaps "
+        f"with a different --model), or make the change by hand and run 'next_step'.",
+        criterion=frame.criterion,
+    )
 
 
 def run_implement_with_refine(
@@ -419,9 +552,39 @@ def main() -> None:
 
     frame = stack[0]
     log.info(
-        "-- implement_step: ticket=%s status=%s criterion=%s",
-        frame.ticket, frame.status, frame.criterion,
+        "-- implement_step: ticket=%s status=%s verification=%s criterion=%s",
+        frame.ticket, frame.status, frame.verification, frame.criterion,
     )
+
+    # ── Level 2: manual-verification frames have no target test, so they
+    # branch out here before Level 1's test-written guard even applies.
+    # "pending"/"awaiting-manual-impl" mirror next_step.py's own pending
+    # and MANUAL_PENDING_STATUS values - duplicated as literals rather
+    # than imported, same as this script already does for "test-written".
+    if frame.verification == "manual":
+        if frame.status not in ("pending", "awaiting-manual-impl"):
+            render.print_line(
+                f"-- Top frame is a manual-verification criterion but its status "
+                f"({frame.status!r}) isn't awaiting implementation. Run 'next_step' first."
+            )
+            sys.exit(1)
+
+        render.print_line()
+        render.print_line("-- Implementing directly (verification=manual, no target test):")
+        render.print_line(f"   Criterion: {frame.criterion}")
+
+        changed_files = run_implement_direct_with_refine(
+            frame, args.model, commands, args.max_attempts
+        )
+
+        render.print_line()
+        render.print_line(f"-- Implemented: {frame.criterion}")
+        render.print_line(f"   Files changed ({len(changed_files)}): {', '.join(changed_files)}")
+        render.print_line(
+            "-- Run 'next_step' to check whether this satisfies the criterion and continue."
+        )
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        return
 
     if frame.status != "test-written" or frame.test_file is None or frame.test_name is None:
         render.print_line(

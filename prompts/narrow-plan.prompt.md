@@ -99,6 +99,15 @@ For each acceptance criterion:
   or FAIL, and must not be reported as PASS.
 - If no test covers a criterion and it can't be confirmed by reading the
   code either, mark it FAIL - "implemented but unverified" is not a pass.
+- A FAIL can mean two different things, and it's worth distinguishing
+  which: "no test/code covers this at all" versus "a specific existing
+  test currently asserts the *old* behavior, and this criterion wants it
+  changed." For the second case, cite that test's exact file and
+  fully-qualified name as your evidence (the same form the codebase's
+  test runner would use) - not just that it exists, but which one. This
+  becomes the `existing_test:` tag in Step 4/Final answer, and is what
+  lets the downstream test-writer modify that specific test instead of
+  adding a new, possibly-contradictory one alongside it.
 
 ## Step 3 - Narrow the plan
 
@@ -136,15 +145,25 @@ Final answer format below for exactly where.
   documentation half be covered by code review at ticket-validation
   time, rather than inventing a third category.
 
+If a criterion is tagged `test` and Step 2 found a *specific* existing
+test that currently asserts the behavior this criterion wants changed
+(not just "some test exists somewhere in this area"), additionally tag
+it `existing_test: <file>::<test_name>` using the exact reference you
+cited as evidence. Omit this tag entirely otherwise - it never appears
+on a `manual` criterion (there's no test to point at), and never on a
+`test` criterion that needs genuinely new coverage. Never guess at a
+name to fill this in; an omitted tag correctly tells the test-writer to
+write a new test, same as always.
+
 ## Final answer
 
 Your final response (no further tool calls) must be exactly the
 narrowed plan below in this exact format - nothing else, no chat
 header, no preamble or trailing commentary, no FAIL/UNKNOWN reasoning
 shown (the evidence-gathering above was necessary work, not necessary
-output) except the one-line "why" reason and the "verify:" tag per
-retained criterion described below. The caller writes this text
-verbatim to `.gap-plan.md`.
+output) except the one-line "why" reason and the "verify:"/
+"existing_test:" tags per retained criterion described below. The
+caller writes this text verbatim to `.gap-plan.md`.
 
 \`\`\`markdown
 <!-- narrowed by Narrower on YYYY-MM-DD from .tdd-plan.md -->
@@ -155,6 +174,7 @@ verbatim to `.gap-plan.md`.
 ## Acceptance Criteria
 <!-- only criteria marked FAIL or UNKNOWN in Step 2 -->
 - [ ] [criterion, copied verbatim from the original plan] <!-- why: one-line reason it's not yet satisfied; verify: test|manual -->
+- [ ] [criterion needing an existing test updated instead of a new one] <!-- why: existing test asserts old behavior; verify: test; existing_test: path/to/file::test_name -->
 (or, if every criterion was PASS: "(none - all criteria satisfied)")
 
 ## Implementation Plan
@@ -170,6 +190,10 @@ no criteria remain)
   an UNKNOWN criterion is retained, not dropped, same as FAIL.
 - Never invent a new criterion not in the original plan, and never
   reword a retained criterion's substance - copy it verbatim; the
-  one-line "why" reason and "verify:" tag are the only additions.
+  one-line "why" reason and "verify:"/"existing_test:" tags are the
+  only additions.
 - Every retained criterion gets exactly one "verify:" tag - `test` or
   `manual`, never both, never omitted (see Step 4).
+- "existing_test:" is optional and only ever accompanies `verify: test`
+  - never `manual`, and never guessed at when Step 2 didn't confirm a
+  specific existing test to point at (see Step 4).

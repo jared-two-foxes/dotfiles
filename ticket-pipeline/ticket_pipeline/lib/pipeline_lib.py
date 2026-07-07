@@ -94,6 +94,7 @@ NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
 REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-singlepass.prompt.md"
 TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
+TEST_QUALITY_REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-test-quality.prompt.md"
 
 # Always injected. Instructs the planner to self-clarify before planning,
 # since none of these scripts have a path for a human to answer follow-up
@@ -1113,6 +1114,34 @@ def extract_verification_mode(criterion: str) -> str:
     return "test"
 
 
+EXISTING_TEST_TAG_RE = re.compile(r"existing_test:\s*(\S+)")
+
+
+def extract_existing_test_ref(criterion: str) -> str | None:
+    """
+    Parses an "existing_test: <file>::<test_name>" tag out of a
+    criterion's trailing HTML comment, alongside the "why"/"verify" tags
+    extract_verification_mode reads (narrow-plan.prompt.md's Step 2
+    surfaces this when a criterion is FAIL specifically because an
+    existing test asserts the *old* behavior, rather than "no coverage
+    found at all" - Narrower already located that test to reach its
+    verdict; this just keeps the pointer instead of discarding it).
+
+    None means "write a new test" - the universal behavior before this
+    tag existed, and the correct default for anything that doesn't carry
+    it: a review/validate-missed finding, a hand-written criterion, or a
+    criterion this specific FAIL reason didn't apply to.
+    """
+    match = EXISTING_TEST_TAG_RE.search(criterion)
+    if not match:
+        return None
+    ref = match.group(1)
+    if ref.endswith("-->"):
+        ref = ref[:-3]
+    ref = ref.rstrip(";").strip()
+    return ref or None
+
+
 # ---------------------------------------------------------------------------
 # Criteria stack - .criteria-stack.json is the pipeline's canonical
 # work-queue and the only file either push_ticket.py or next_step.py
@@ -1148,6 +1177,15 @@ class CriterionFrame:
                             # than a plan step, and older stack files
                             # from before this field existed - see
                             # load_stack's **entry unpacking).
+    existing_test_ref: str | None = None  # "file::test_name" - set from
+                            # the gap plan's "existing_test:" tag (see
+                            # extract_existing_test_ref) when this
+                            # criterion is about changing behavior an
+                            # existing test already covers, rather than
+                            # adding new coverage. None (the default)
+                            # means WRITE_TEST writes a brand-new test,
+                            # same as always; set, it modifies the
+                            # referenced test's own assertion instead.
 
 
 def load_stack() -> list[CriterionFrame]:
@@ -1436,6 +1474,24 @@ def git_changed_files() -> list[str]:
     return deduped
 
 
+def git_diff_for_file(path: str) -> str:
+    """
+    Best-effort `git diff -- <path>` output for one file, used to hand
+    the test-quality reviewer real before/after evidence when Tester
+    modified an existing test rather than writing a new one (see
+    run_test_quality_review). Returns "" on any failure (not a tracked
+    file yet, git error, etc.) rather than raising - this is advisory
+    input to an advisory-only reviewer, never worth failing a run over.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--", path], capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
 def load_smoke_cmd(config_path: Path) -> str | None:
     """
     Peeks for an optional 'smoke_cmd' key in the project-local pipeline
@@ -1482,8 +1538,17 @@ def run_smoke_gate(smoke_cmd: str | None) -> None:
 TEST_WITNESS_RE = re.compile(r"TEST_WITNESS:\s*(.+?)\s*::\s*(.+)$", re.MULTILINE)
 
 
-def build_test_criterion_prompt(criterion: str, plan_context: str) -> str:
+def build_test_criterion_prompt(
+    criterion: str, plan_context: str, existing_test_ref: str | None = None
+) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
+    existing_test_section = (
+        f"\n\nThis criterion is about changing behavior an *existing* test "
+        f"already covers, not adding new coverage - modify that test "
+        f"instead of writing a new one (see this prompt's own instructions "
+        f"for exactly how). The test to change: {existing_test_ref}."
+        if existing_test_ref else ""
+    )
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the relevant Implementation Plan context for this "
@@ -1491,6 +1556,7 @@ def build_test_criterion_prompt(criterion: str, plan_context: str) -> str:
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"Write a failing test for exactly this one acceptance criterion, "
         f"and only this one:\n\n{criterion}"
+        f"{existing_test_section}"
     )
 
 
@@ -1557,6 +1623,7 @@ def run_test_for_criterion_with_compile_retry(
     commands: dict,
     max_attempts: int = 3,
     ticket_id: str | None = None,
+    existing_test_ref: str | None = None,
 ) -> tuple[str, str, subprocess.CompletedProcess]:
     """
     Like run_test_for_criterion, but also gates the written test on
@@ -1571,6 +1638,14 @@ def run_test_for_criterion_with_compile_retry(
     rather than this function retrying forever. next_step.py's
     WRITE_TEST phase uses this variant, not the plain one above, so a
     flaky first compile doesn't immediately abort the whole run.
+
+    existing_test_ref (frame.existing_test_ref, see extract_existing_
+    test_ref): when set, the initial prompt tells Tester to modify that
+    specific existing test rather than writing a new one - only affects
+    the attempt-1 prompt. A compile-retry fix prompt already says
+    "read_file {file_path} and fix it" regardless of whether file_path
+    is a brand-new file or the modified existing one, so it needs no
+    separate wording for this case.
     """
     test_files: list[str] = []
     file_path: str | None = None
@@ -1580,7 +1655,7 @@ def run_test_for_criterion_with_compile_retry(
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            prompt = build_test_criterion_prompt(criterion, plan_context)
+            prompt = build_test_criterion_prompt(criterion, plan_context, existing_test_ref)
         else:
             log.warning(
                 "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
@@ -1638,6 +1713,91 @@ def run_test_for_criterion_with_compile_retry(
         )
 
     return file_path, test_name, compile_result
+
+
+def build_test_quality_review_prompt(
+    criterion: str,
+    plan_context: str,
+    test_file: str,
+    test_name: str,
+    existing_test_ref: str | None,
+) -> str:
+    instructions = load_prompt_body(TEST_QUALITY_REVIEW_PROMPT_FILE)
+    if existing_test_ref:
+        diff_text = git_diff_for_file(test_file)
+        modification_section = (
+            f"\n\nThis test is a modification of an existing test "
+            f"({existing_test_ref}), not a new one - apply Step 3. "
+            f"Diff of {test_file} since before this change:\n\n"
+            f"```diff\n{diff_text}\n```"
+            if diff_text.strip() else
+            f"\n\nThis test is a modification of an existing test "
+            f"({existing_test_ref}), not a new one, but no diff is "
+            f"available (the file wasn't tracked before this change) - "
+            f"skip Step 3's diff-based check and say so."
+        )
+    else:
+        modification_section = ""
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"Acceptance criterion this test is for:\n\n{criterion}\n\n"
+        f"The test to review: {test_file} :: {test_name}"
+        f"{modification_section}"
+    )
+
+
+def run_test_quality_review(
+    criterion: str,
+    plan_context: str,
+    test_file: str,
+    test_name: str,
+    existing_test_ref: str | None,
+    model: str,
+    ticket_id: str | None = None,
+) -> str | None:
+    """
+    Advisory-only: reviews the test Tester just wrote or modified for
+    this criterion, returning a flagged-concern string, or None if the
+    reviewer found no concerns. Unlike every other AI-calling step in
+    this module, a failure here (AIError, an unparseable verdict) is
+    NEVER fatal - this whole function is a side channel that must not
+    take the pipeline down with it, so any failure degrades to a single
+    logged warning and a None return (treated the same as "no concerns")
+    rather than die_with_log. The caller (next_step.py's do_write_test)
+    surfaces a non-None result alongside its normal pause message; it
+    never gates anything on the result.
+    """
+    try:
+        result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_test_quality_review_prompt(
+                    criterion, plan_context, test_file, test_name, existing_test_ref
+                ),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False),
+                "review-test-quality",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
+            "review-test-quality",
+            criterion=criterion, ticket=ticket_id,
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        log.warning("-- Test-quality review failed to run (advisory, continuing): %s", e)
+        return None
+    render_step_output(result.text)
+    verdict = find_verdict(result.text, ["FLAGGED", "NO CONCERNS"])
+    if verdict != "FLAGGED":
+        if verdict is None:
+            log.warning(
+                "-- Test-quality review's output had no recognizable verdict "
+                "(advisory, continuing). See output above."
+            )
+        return None
+    return result.text
 
 
 def build_review_prompt(changed_files: list[str], plan_text: str) -> str:
