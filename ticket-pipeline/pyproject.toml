@@ -28,6 +28,7 @@ create-child-tickets = "ticket_pipeline.create_child_tickets:main"
 update-ticket = "ticket_pipeline.update_ticket:main"
 list-models = "ticket_pipeline.list_models:main"
 prep-ticket = "ticket_pipeline.prep_ticket:main"
+reset-pipeline = "ticket_pipeline.reset_pipeline:main"
 copilot_login = "ticket_pipeline.copilot_login:main"
 fetch_ticket = "ticket_pipeline.lib.fetch_ticket:main"
 
