@@ -42,7 +42,7 @@ import sys
 import time
 import tomllib
 import urllib.error
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -1060,8 +1060,8 @@ def run_plan_narrow_step(ticket_content: str, model: str, ticket_id: str | None 
 # Per-criterion parsing (push_ticket.py) and scoped test execution
 # (next_step.py). The old markdown "Test: <file> :: <name>" annotation
 # mechanism that used to record a criterion's test pointer directly on
-# .gap-plan.md is retired - CriterionFrame.test_file/test_name (see the
-# stack section below) is the same information, stored as real
+# .gap-plan.md is retired - CriterionFrame.test_files/test_names (see
+# the stack section below) is the same information, stored as real
 # structured state on the stack instead of a text annotation on a
 # scratch file.
 # ---------------------------------------------------------------------------
@@ -1117,29 +1117,36 @@ def extract_verification_mode(criterion: str) -> str:
 EXISTING_TEST_TAG_RE = re.compile(r"existing_test:\s*(\S+)")
 
 
-def extract_existing_test_ref(criterion: str) -> str | None:
+def extract_existing_test_refs(criterion: str) -> list[str]:
     """
-    Parses an "existing_test: <file>::<test_name>" tag out of a
+    Parses every "existing_test: <file>::<test_name>" tag out of a
     criterion's trailing HTML comment, alongside the "why"/"verify" tags
     extract_verification_mode reads (narrow-plan.prompt.md's Step 2
-    surfaces this when a criterion is FAIL specifically because an
-    existing test asserts the *old* behavior, rather than "no coverage
-    found at all" - Narrower already located that test to reach its
-    verdict; this just keeps the pointer instead of discarding it).
+    surfaces one of these when a criterion is FAIL specifically because
+    an existing test asserts the *old* behavior, rather than "no
+    coverage found at all" - Narrower already located that test to reach
+    its verdict; this just keeps the pointer instead of discarding it).
+    The tag is repeatable - a criterion whose old behavior is asserted
+    by more than one pre-existing test carries one `existing_test:`
+    clause per test, all in the same trailing comment.
 
-    None means "write a new test" - the universal behavior before this
-    tag existed, and the correct default for anything that doesn't carry
-    it: a review/validate-missed finding, a hand-written criterion, or a
-    criterion this specific FAIL reason didn't apply to.
+    An empty list means "write a new test (or tests)" - the universal
+    behavior before this tag existed, and the correct default for
+    anything that doesn't carry it: a review/validate-missed finding, a
+    hand-written criterion, or a criterion this specific FAIL reason
+    didn't apply to. Deliberately a list, not `list[str] | None` -
+    callers only ever need to loop 0..N times over it, never branch on
+    None specifically.
     """
-    match = EXISTING_TEST_TAG_RE.search(criterion)
-    if not match:
-        return None
-    ref = match.group(1)
-    if ref.endswith("-->"):
-        ref = ref[:-3]
-    ref = ref.rstrip(";").strip()
-    return ref or None
+    refs = []
+    for match in EXISTING_TEST_TAG_RE.finditer(criterion):
+        ref = match.group(1)
+        if ref.endswith("-->"):
+            ref = ref[:-3]
+        ref = ref.rstrip(";").strip()
+        if ref:
+            refs.append(ref)
+    return refs
 
 
 # ---------------------------------------------------------------------------
@@ -1157,8 +1164,17 @@ class CriterionFrame:
     plan_context: str      # Implementation Plan lines relevant to this
                             # criterion, extracted at push time (see
                             # extract_plan_context_for_criterion)
-    test_file: str | None       # set once the test-writer runs
-    test_name: str | None       # fully-qualified, for run_scoped_test
+    test_files: list[str] | None  # set once the test-writer runs - None
+                            # until then, otherwise parallel to
+                            # test_names (same length, same order).
+                            # Almost always length 1; more than one only
+                            # when this criterion's behavior genuinely
+                            # spans call paths/subjects that can't share
+                            # a single test function (see
+                            # test-criterion.prompt.md's Step 3).
+    test_names: list[str] | None  # fully-qualified, parallel to
+                            # test_files, for run_scoped_test/
+                            # run_scoped_tests.
     status: str            # "pending" | "test-written" | "done"
     origin: str             # "ticket" | "review" | "validate-missed" -
                             # recorded but not yet acted on differently;
@@ -1177,15 +1193,35 @@ class CriterionFrame:
                             # than a plan step, and older stack files
                             # from before this field existed - see
                             # load_stack's **entry unpacking).
-    existing_test_ref: str | None = None  # "file::test_name" - set from
-                            # the gap plan's "existing_test:" tag (see
-                            # extract_existing_test_ref) when this
-                            # criterion is about changing behavior an
-                            # existing test already covers, rather than
-                            # adding new coverage. None (the default)
-                            # means WRITE_TEST writes a brand-new test,
-                            # same as always; set, it modifies the
-                            # referenced test's own assertion instead.
+    existing_test_refs: list[str] = field(default_factory=list)  # each a
+                            # "file::test_name" reference, from the gap
+                            # plan's repeatable "existing_test:" tag (see
+                            # extract_existing_test_refs) when this
+                            # criterion is about changing behavior one or
+                            # more existing tests already cover, rather
+                            # than adding new coverage. Empty (the
+                            # default) means WRITE_TEST writes brand-new
+                            # test(s), same as always; each entry present
+                            # names one existing test to modify instead
+                            # of duplicating with a new one.
+    unconfirmed_tests: list[str] = field(default_factory=list)  # subset
+                            # of test_names currently believed green
+                            # without any implementation having happened
+                            # (origin != "ticket", observed green the
+                            # very first time WRITE_TEST looked at it -
+                            # see next_step.py's do_write_test/
+                            # recheck_test_frame). Only ever shrinks
+                            # after that first observation (a name is
+                            # dropped once observed red - it's no longer
+                            # a "suspiciously easy green" at that point,
+                            # it's just a normal red test needing real
+                            # implementation) - never re-added later.
+                            # Gates the final "pop as done" decision
+                            # once every test is green: non-empty means
+                            # --accept-green is required, same escape
+                            # hatch GREEN_UNCONFIRMED_STATUS has always
+                            # used, generalized from "the one test" to
+                            # "whichever of the N were never confirmed."
 
 
 def load_stack() -> list[CriterionFrame]:
@@ -1195,6 +1231,17 @@ def load_stack() -> list[CriterionFrame]:
     (die_with_log), not something to silently reset - the stack is the
     pipeline's only cross-invocation state, so guessing at a recovery
     would risk silently discarding in-progress work.
+
+    Entries written by a pre-multi-test schema (singular "test_file"/
+    "test_name" string keys, and/or a singular "existing_test_ref"
+    string-or-null key) are upgraded in place before construction: the
+    old keys are popped and rewrapped into the new list-shaped ones
+    (None stays None; a non-None existing_test_ref becomes a one-element
+    list; absent entirely becomes []). Without this, a stack file
+    written before this migration would raise TypeError here - the only
+    schema-compatibility concern this rename introduces, since every
+    other field on this dataclass was additive (a new field with a
+    default), not a rename.
     """
     if not CRITERIA_STACK_FILE.is_file():
         return []
@@ -1205,6 +1252,15 @@ def load_stack() -> list[CriterionFrame]:
         raw = json.loads(text)
     except json.JSONDecodeError as e:
         die_with_log("stack", f"{CRITERIA_STACK_FILE} is not valid JSON: {e}")
+    for entry in raw:
+        if "test_file" in entry or "test_name" in entry:
+            old_file = entry.pop("test_file", None)
+            old_name = entry.pop("test_name", None)
+            entry.setdefault("test_files", [old_file] if old_file is not None else None)
+            entry.setdefault("test_names", [old_name] if old_name is not None else None)
+        if "existing_test_ref" in entry:
+            old_ref = entry.pop("existing_test_ref")
+            entry.setdefault("existing_test_refs", [old_ref] if old_ref is not None else [])
     try:
         return [CriterionFrame(**entry) for entry in raw]
     except TypeError as e:
@@ -1296,8 +1352,8 @@ def ensure_validating_sentinel(ticket_id: str) -> None:
         ticket=ticket_id,
         criterion=VALIDATING_CRITERION_TEXT,
         plan_context="",
-        test_file=None,
-        test_name=None,
+        test_files=None,
+        test_names=None,
         status=VALIDATING_STATUS,
         origin=VALIDATING_ORIGIN,
     )])
@@ -1383,6 +1439,27 @@ def run_scoped_test(
 ) -> subprocess.CompletedProcess:
     command_str = commands["test_filter_cmd"].format(filter=qualified_test_name)
     return run_command(command_str, label, quiet=quiet)
+
+
+def run_scoped_tests(
+    qualified_test_names: list[str], commands: dict, label: str, quiet: bool = False
+) -> list[subprocess.CompletedProcess]:
+    """
+    Like run_scoped_test, but for a criterion tracking more than one
+    test: loops run_scoped_test once per name, in order, so callers can
+    zip(qualified_test_names, results) to know which specific test(s)
+    are red/green. No toolchain's test_filter_cmd is asked to take more
+    than one name at once - N separate subprocess calls is simple and
+    correct; a composite OR-filter per toolchain would be a real
+    optimization but isn't needed for what should be a small N in
+    practice. A single-element list behaves identically to calling
+    run_scoped_test directly - this is the general form, not a special
+    multi-test path.
+    """
+    return [
+        run_scoped_test(name, commands, f"{label} ({name})", quiet=quiet)
+        for name in qualified_test_names
+    ]
 
 
 def run_lint_gate(commands: dict) -> None:
@@ -1538,16 +1615,32 @@ def run_smoke_gate(smoke_cmd: str | None) -> None:
 TEST_WITNESS_RE = re.compile(r"TEST_WITNESS:\s*(.+?)\s*::\s*(.+)$", re.MULTILINE)
 
 
+def _parse_test_witnesses(text: str) -> list[tuple[str, str]]:
+    """
+    Every "TEST_WITNESS: <file> :: <name>" line in the Tester's output,
+    in the order written - almost always one, since almost every
+    criterion needs exactly one test; more than one only when the
+    criterion's own behavior spans call paths/subjects that couldn't
+    share a single test function (test-criterion.prompt.md's Step 3).
+    The line format itself is unchanged from the single-test era; the
+    only change is capturing every match instead of just the first.
+    """
+    return [
+        (file_path.strip(), test_name.strip())
+        for file_path, test_name in TEST_WITNESS_RE.findall(text)
+    ]
+
+
 def build_test_criterion_prompt(
-    criterion: str, plan_context: str, existing_test_ref: str | None = None
+    criterion: str, plan_context: str, existing_test_refs: list[str] | None = None
 ) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
     existing_test_section = (
-        f"\n\nThis criterion is about changing behavior an *existing* test "
-        f"already covers, not adding new coverage - modify that test "
+        f"\n\nThis criterion is about changing behavior existing test(s) "
+        f"already cover, not adding new coverage - modify {'that test' if len(existing_test_refs) == 1 else 'those tests'} "
         f"instead of writing a new one (see this prompt's own instructions "
-        f"for exactly how). The test to change: {existing_test_ref}."
-        if existing_test_ref else ""
+        f"for exactly how). The test(s) to change: {', '.join(existing_test_refs)}."
+        if existing_test_refs else ""
     )
     return (
         f"{instructions}\n\n---\n\n"
@@ -1562,7 +1655,7 @@ def build_test_criterion_prompt(
 
 def run_test_for_criterion(
     criterion: str, plan_context: str, model: str, ticket_id: str | None = None
-) -> tuple[str, str]:
+) -> tuple[list[str], list[str]]:
     test_files: list[str] = []
 
     def attempt():
@@ -1586,30 +1679,34 @@ def run_test_for_criterion(
             criterion=criterion, ticket=ticket_id,
         )
     render_step_output(result.text)
-    witness = TEST_WITNESS_RE.search(result.text)
-    if not witness:
+    witnesses = _parse_test_witnesses(result.text)
+    if not witnesses:
         die_with_log(
             "test-criterion",
             "Tester's final answer did not include a TEST_WITNESS line (see output above).",
             criterion=criterion, ticket=ticket_id,
         )
-    return witness.group(1).strip(), witness.group(2).strip()
+    return [w[0] for w in witnesses], [w[1] for w in witnesses]
 
 
-def build_test_criterion_fix_prompt(criterion: str, plan_context: str, file_path: str, error_output: str) -> str:
+def build_test_criterion_fix_prompt(
+    criterion: str, plan_context: str, file_paths: list[str], error_output: str
+) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
+    file_list = ", ".join(file_paths)
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the relevant Implementation Plan context for this "
         f"criterion, extracted from the gap plan - already complete and "
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
-        f"You already wrote a failing test for exactly this one "
+        f"You already wrote (a) failing test(s) for exactly this one "
         f"acceptance criterion, and only this one:\n\n{criterion}\n\n"
-        f"but the test suite does not compile. read_file {file_path} and "
-        f"fix it with write_file so it compiles and still fails for the "
+        f"but the test suite does not compile. read_file {file_list} and "
+        f"fix {'it' if len(file_paths) == 1 else 'them'} with write_file so "
+        f"the suite compiles and every test you wrote still fails for the "
         f"right reason - missing or incorrect behaviour, not a syntax or "
-        f"type error. Do not weaken, skip, or remove the test, and do not "
-        f"implement the production behaviour it's testing for. The "
+        f"type error. Do not weaken, skip, or remove any test, and do not "
+        f"implement the production behaviour they're testing for. The "
         f"criterion must remain covered exactly as before; only the "
         f"compile error should be fixed.\n\n"
         f"Compile error:\n\n```\n{error_output}\n```"
@@ -1623,10 +1720,10 @@ def run_test_for_criterion_with_compile_retry(
     commands: dict,
     max_attempts: int = 3,
     ticket_id: str | None = None,
-    existing_test_ref: str | None = None,
-) -> tuple[str, str, subprocess.CompletedProcess]:
+    existing_test_refs: list[str] | None = None,
+) -> tuple[list[str], list[str], subprocess.CompletedProcess]:
     """
-    Like run_test_for_criterion, but also gates the written test on
+    Like run_test_for_criterion, but also gates the written test(s) on
     compilation and, if it fails to compile, feeds the compile error
     back to the Tester for a fix attempt instead of dying immediately -
     up to max_attempts attempts *total* (the initial write plus every
@@ -1639,29 +1736,32 @@ def run_test_for_criterion_with_compile_retry(
     WRITE_TEST phase uses this variant, not the plain one above, so a
     flaky first compile doesn't immediately abort the whole run.
 
-    existing_test_ref (frame.existing_test_ref, see extract_existing_
-    test_ref): when set, the initial prompt tells Tester to modify that
-    specific existing test rather than writing a new one - only affects
-    the attempt-1 prompt. A compile-retry fix prompt already says
-    "read_file {file_path} and fix it" regardless of whether file_path
-    is a brand-new file or the modified existing one, so it needs no
-    separate wording for this case.
+    Returns parallel lists (file_paths, test_names), same order as the
+    TEST_WITNESS lines Tester emitted - almost always length 1.
+
+    existing_test_refs (frame.existing_test_refs, see
+    extract_existing_test_refs): when non-empty, the initial prompt
+    tells Tester to modify those specific existing tests rather than
+    writing new ones - only affects the attempt-1 prompt. A
+    compile-retry fix prompt already says "read_file {files} and fix
+    them" regardless of whether they're brand-new files or modified
+    existing ones, so it needs no separate wording for this case.
     """
     test_files: list[str] = []
-    file_path: str | None = None
-    test_name: str | None = None
+    file_paths: list[str] = []
+    test_names: list[str] = []
     last_error: str | None = None
     compile_result: subprocess.CompletedProcess | None = None
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            prompt = build_test_criterion_prompt(criterion, plan_context, existing_test_ref)
+            prompt = build_test_criterion_prompt(criterion, plan_context, existing_test_refs)
         else:
             log.warning(
                 "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
                 attempt - 1, max_attempts,
             )
-            prompt = build_test_criterion_fix_prompt(criterion, plan_context, file_path, last_error)
+            prompt = build_test_criterion_fix_prompt(criterion, plan_context, file_paths, last_error)
 
         def attempt_step():
             test_files.clear()
@@ -1686,20 +1786,20 @@ def run_test_for_criterion_with_compile_retry(
                 criterion=criterion, ticket=ticket_id,
             )
         render_step_output(result.text)
-        witness = TEST_WITNESS_RE.search(result.text)
-        if not witness:
+        witnesses = _parse_test_witnesses(result.text)
+        if not witnesses:
             die_with_log(
                 "test-criterion",
                 "Tester's final answer did not include a TEST_WITNESS line (see output above).",
                 criterion=criterion, ticket=ticket_id,
             )
-        file_path, test_name = witness.group(1).strip(), witness.group(2).strip()
+        file_paths, test_names = [w[0] for w in witnesses], [w[1] for w in witnesses]
 
         compile_result = run_command(
             commands["test_compile_cmd"], f"test compile gate (attempt {attempt}/{max_attempts})"
         )
         if compile_result.returncode == 0:
-            return file_path, test_name, compile_result
+            return file_paths, test_names, compile_result
 
         last_error = (compile_result.stdout or "") + (compile_result.stderr or "")
         # No token/cost delta here deliberately: this event is about the
@@ -1712,69 +1812,80 @@ def run_test_for_criterion_with_compile_retry(
             error=f"compile failed (attempt {attempt}/{max_attempts})", criterion=criterion, ticket=ticket_id,
         )
 
-    return file_path, test_name, compile_result
+    return file_paths, test_names, compile_result
 
 
 def build_test_quality_review_prompt(
     criterion: str,
     plan_context: str,
-    test_file: str,
-    test_name: str,
-    existing_test_ref: str | None,
+    test_files: list[str],
+    test_names: list[str],
+    existing_test_refs: list[str],
 ) -> str:
     instructions = load_prompt_body(TEST_QUALITY_REVIEW_PROMPT_FILE)
-    if existing_test_ref:
-        diff_text = git_diff_for_file(test_file)
-        modification_section = (
-            f"\n\nThis test is a modification of an existing test "
-            f"({existing_test_ref}), not a new one - apply Step 3. "
-            f"Diff of {test_file} since before this change:\n\n"
-            f"```diff\n{diff_text}\n```"
-            if diff_text.strip() else
-            f"\n\nThis test is a modification of an existing test "
-            f"({existing_test_ref}), not a new one, but no diff is "
-            f"available (the file wasn't tracked before this change) - "
-            f"skip Step 3's diff-based check and say so."
+    # Correlate each written/modified test against the hint list by
+    # exact "file::name" match - no separate bookkeeping needed, the
+    # witness output and the existing_test_refs hints already share the
+    # same "file::name" shape.
+    sections = []
+    for test_file, test_name in zip(test_files, test_names):
+        ref_match = next(
+            (ref for ref in existing_test_refs if ref == f"{test_file}::{test_name}"), None
         )
-    else:
-        modification_section = ""
+        if ref_match:
+            diff_text = git_diff_for_file(test_file)
+            modification_note = (
+                f"This is a modification of an existing test ({ref_match}), "
+                f"not a new one - apply Step 3. Diff of {test_file} since "
+                f"before this change:\n\n```diff\n{diff_text}\n```"
+                if diff_text.strip() else
+                f"This is a modification of an existing test ({ref_match}), "
+                f"not a new one, but no diff is available (the file wasn't "
+                f"tracked before this change) - skip Step 3's diff-based "
+                f"check for this one and say so."
+            )
+        else:
+            modification_note = "This is a newly-written test."
+        sections.append(f"- {test_file} :: {test_name}\n  {modification_note}")
+    tests_block = "\n".join(sections)
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the relevant Implementation Plan context for this "
         f"criterion, extracted from the gap plan - already complete and "
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"Acceptance criterion this test is for:\n\n{criterion}\n\n"
-        f"The test to review: {test_file} :: {test_name}"
-        f"{modification_section}"
+        f"The test(s) to review:\n{tests_block}"
     )
 
 
 def run_test_quality_review(
     criterion: str,
     plan_context: str,
-    test_file: str,
-    test_name: str,
-    existing_test_ref: str | None,
+    test_files: list[str],
+    test_names: list[str],
+    existing_test_refs: list[str],
     model: str,
     ticket_id: str | None = None,
 ) -> str | None:
     """
-    Advisory-only: reviews the test Tester just wrote or modified for
-    this criterion, returning a flagged-concern string, or None if the
-    reviewer found no concerns. Unlike every other AI-calling step in
-    this module, a failure here (AIError, an unparseable verdict) is
-    NEVER fatal - this whole function is a side channel that must not
-    take the pipeline down with it, so any failure degrades to a single
-    logged warning and a None return (treated the same as "no concerns")
-    rather than die_with_log. The caller (next_step.py's do_write_test)
-    surfaces a non-None result alongside its normal pause message; it
-    never gates anything on the result.
+    Advisory-only: reviews the test(s) Tester just wrote or modified for
+    this criterion (almost always one; see test-criterion.prompt.md's
+    Step 3 for when it's more), returning a flagged-concern string, or
+    None if the reviewer found no concerns across any of them. Unlike
+    every other AI-calling step in this module, a failure here (AIError,
+    an unparseable verdict) is NEVER fatal - this whole function is a
+    side channel that must not take the pipeline down with it, so any
+    failure degrades to a single logged warning and a None return
+    (treated the same as "no concerns") rather than die_with_log. The
+    caller (next_step.py's do_write_test) surfaces a non-None result
+    alongside its normal pause message; it never gates anything on the
+    result.
     """
     try:
         result = run_ai_step_with_retry(
             lambda: run_with_tools(
                 build_test_quality_review_prompt(
-                    criterion, plan_context, test_file, test_name, existing_test_ref
+                    criterion, plan_context, test_files, test_names, existing_test_refs
                 ),
                 tools.READ_ONLY_TOOLS,
                 tools.make_executor(allow_write=False),

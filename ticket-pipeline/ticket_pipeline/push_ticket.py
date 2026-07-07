@@ -214,8 +214,8 @@ def resolve_ticket_frames(
             ticket=ticket_id,
             criterion="(ticket validation pending)",
             plan_context="",
-            test_file=None,
-            test_name=None,
+            test_files=None,
+            test_names=None,
             status="validating",
             origin="ticket-validate",
         )
@@ -241,12 +241,12 @@ def resolve_ticket_frames(
             ticket=ticket_id,
             criterion=criterion,
             plan_context=lib.extract_plan_context_for_criterion(criterion, gap_plan_content),
-            test_file=None,
-            test_name=None,
+            test_files=None,
+            test_names=None,
             status="pending",
             origin="ticket",
             verification=lib.extract_verification_mode(criterion),
-            existing_test_ref=lib.extract_existing_test_ref(criterion),
+            existing_test_refs=lib.extract_existing_test_refs(criterion),
         )
         for criterion in criteria
     ]
@@ -428,12 +428,12 @@ def main() -> None:
                 ticket=ticket_id,
                 criterion=criterion,
                 plan_context=lib.extract_plan_context_for_criterion(criterion, gap_plan_content),
-                test_file=None,
-                test_name=None,
+                test_files=None,
+                test_names=None,
                 status="pending",
                 origin="ticket",
                 verification=lib.extract_verification_mode(criterion),
-                existing_test_ref=lib.extract_existing_test_ref(criterion),
+                existing_test_refs=lib.extract_existing_test_refs(criterion),
             )
             for criterion in criteria
         ]

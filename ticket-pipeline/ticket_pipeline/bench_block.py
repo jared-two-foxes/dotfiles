@@ -72,15 +72,18 @@ def grade_sa452_no_file_split(plan_text: str) -> tuple[bool, str]:
     return True, "plan anchors the fix in the existing accounting_webhooks.rs"
 
 
-def grade_test_criterion_compiles_and_red(file_path: str, qualified_test_name: str) -> tuple[bool, str]:
+def grade_test_criterion_compiles_and_red(file_paths: list[str], qualified_test_names: list[str]) -> tuple[bool, str]:
     """
     Real correctness check (not a text heuristic) for any ticket: the
-    test the model wrote must (a) compile as part of the whole test
-    binary, and (b) fail when run scoped to just that test - the
-    criterion it covers isn't implemented yet in the fixture's gap plan,
-    so a correct test must be red. A test that doesn't compile is a
-    Tester bug; a test that passes green means it didn't actually
-    exercise the missing behavior (the gap "didn't reproduce").
+    test(s) the model wrote must (a) compile as part of the whole test
+    binary, and (b) each fail when run scoped to just that test - the
+    criterion they cover isn't implemented yet in the fixture's gap
+    plan, so every correct test must be red. A test that doesn't
+    compile is a Tester bug; any test that passes green means it didn't
+    actually exercise the missing behavior (the gap "didn't reproduce").
+    Almost always a single test; more than one only for a criterion
+    needing genuinely separate tests (test-criterion.prompt.md's Step
+    3) - all must pass this check, not just one of them.
     """
     commands = lib.load_pipeline_config(Path(lib.PIPELINE_CONFIG_FILE))
 
@@ -89,11 +92,18 @@ def grade_test_criterion_compiles_and_red(file_path: str, qualified_test_name: s
         tail = (compile_result.stdout + compile_result.stderr)[-1500:]
         return False, f"test does not compile (exit {compile_result.returncode}): {tail}"
 
-    red_result = lib.run_scoped_test(qualified_test_name, commands, "bench red check")
-    if red_result.returncode == 0:
-        return False, "test passed without implementation - gap didn't reproduce (false green)"
+    red_results = lib.run_scoped_tests(qualified_test_names, commands, "bench red check")
+    false_greens = [
+        n for n, r in zip(qualified_test_names, red_results) if r.returncode == 0
+    ]
+    if false_greens:
+        return False, (
+            f"test(s) passed without implementation - gap didn't reproduce "
+            f"(false green): {', '.join(false_greens)}"
+        )
 
-    return True, f"test ({file_path}::{qualified_test_name}) compiles and correctly fails red"
+    test_list = ", ".join(f"{f}::{n}" for f, n in zip(file_paths, qualified_test_names))
+    return True, f"test(s) ({test_list}) compile and correctly fail red"
 
 
 def grade_sa500_standard(plan_text: str) -> tuple[bool, str]:
@@ -262,10 +272,10 @@ def main() -> None:
                 raise ValueError("--criterion is required for --block test-criterion")
             plan_content = args.plan_file.read_text(encoding="utf-8")
             plan_context = lib.extract_plan_context_for_criterion(args.criterion, plan_content)
-            file_path, qualified_test_name = lib.run_test_for_criterion(
+            file_paths, qualified_test_names = lib.run_test_for_criterion(
                 args.criterion, plan_context, args.model, ticket_id=args.ticket_name
             )
-            success, reason = grade_test_criterion_compiles_and_red(file_path, qualified_test_name)
+            success, reason = grade_test_criterion_compiles_and_red(file_paths, qualified_test_names)
     except SystemExit as e:
         error = f"block aborted (exit {e.code}) - see die() output above"
     except Exception as e:  # noqa: BLE001 - report any failure as a graded trial, not a crash

@@ -9,43 +9,62 @@ work remaining.
 No ticket_id argument - the ticket is read from the stack itself.
 
 Phase detection (re-run fresh from real state at the top of every
-step - the frame's `status` field is a hint, never a trust boundary):
+step - the frame's `status` field is a hint, never a trust boundary).
+A criterion almost always tracks exactly one test, but can track
+several (test_files/test_names are parallel lists) when its own
+behavior genuinely spans call paths that can't share one test function
+- see test-criterion.prompt.md's Step 3. Everything below describes the
+general N-test case; N=1 behaves exactly as it always has.
 
   stack empty                              -> done, nothing to do
   top frame status == "validating"         -> TICKET_VALIDATE (a prior
                                                attempt for this ticket
                                                died partway through;
                                                resume it directly)
-  top frame status == "green-unconfirmed"  -> re-run its scoped test:
-    now red                                -> becomes a normal
+  top frame status == "green-unconfirmed"  -> re-run every scoped test
+                                               (recheck_test_frame):
+    any still red                          -> becomes a normal
                                                test-written/AWAIT_IMPL case
-                                               (someone fixed the test)
-    still green, --accept-green passed     -> mark done, re-detect (POP)
-    still green, no --accept-green         -> pause again (always exits)
+                                               (someone fixed it)
+    all green, nothing left unconfirmed    -> mark done, re-detect (POP)
+    all green, some still unconfirmed,
+      --accept-green passed                -> mark done, re-detect (POP)
+    all green, some still unconfirmed,
+      no --accept-green                    -> pause again (always exits)
   top frame status in ("pending",
     "awaiting-manual-impl"),
     verification == "manual"                -> MANUAL_CRITERION (no test
                                                involved at all - see below)
   top frame status == "pending"            -> WRITE_TEST
   top frame status == "test-written",
-    missing test_file/test_name            -> WRITE_TEST (retry)
-  top frame status == "test-written"       -> re-run its scoped test:
-    green                                  -> mark done, re-detect (POP)
-    red                                    -> AWAIT_IMPL (always pauses)
+    missing test_files/test_names          -> WRITE_TEST (retry)
+  top frame status == "test-written"       -> re-run every scoped test
+                                               (recheck_test_frame):
+    any still red                          -> AWAIT_IMPL (always pauses)
+    all green, nothing unconfirmed         -> mark done, re-detect (POP)
+    all green, something unconfirmed       -> becomes green-unconfirmed
+                                               (see above)
   top frame status == "done"               -> POP
 
-A freshly-written test that comes back green immediately is trusted
-(marked done without pausing) only when the criterion is origin="ticket"
-(the ticket's own initial criteria - one criterion's implementation can
-legitimately satisfy a sibling as a side effect). For any other origin
-(validate-missed/review - pushed *because* an independent check already
-judged the criterion unsatisfied), an immediate green is untrusted by
-default and becomes "green-unconfirmed" instead: much more likely a weak
-test than the gap having genuinely disappeared, and auto-trusting it
-here is what turns into a boundless validate -> false-green -> pop ->
-re-validate loop, silently burning AI calls under --continuous with no
-human ever seeing it. --accept-green explicitly confirms one is
-legitimate and moves on.
+A test that comes back green immediately, the very first time WRITE_TEST
+writes it, is trusted unconditionally only when the criterion is
+origin="ticket" (the ticket's own initial criteria - one criterion's
+implementation can legitimately satisfy a sibling as a side effect). For
+any other origin (validate-missed/review - pushed *because* an
+independent check already judged the criterion unsatisfied), that test
+is untrusted by default and recorded in frame.unconfirmed_tests: much
+more likely a weak test than the gap having genuinely disappeared, and
+auto-trusting it here is what turns into a boundless validate ->
+false-green -> pop -> re-validate loop, silently burning AI calls under
+--continuous with no human ever seeing it. This check happens exactly
+once, at the moment a test is first observed (do_write_test) - if other
+tests in the same group are still red, the group proceeds to AWAIT_IMPL
+regardless (real work remains either way); the unconfirmed name(s) only
+ever actually block popping once every test in the group is green.
+frame.unconfirmed_tests only ever shrinks after that first observation
+(a name is dropped once observed red - real implementation happened, so
+it's no longer an untested free pass) - --accept-green explicitly
+confirms whatever's still in it and moves on.
 
 A frame tagged verification="manual" (documentation, config, CI changes
 - anything narrow-plan.prompt.md's Step 4 judged as having no meaningful
@@ -138,13 +157,37 @@ GREEN_UNCONFIRMED_STATUS = "green-unconfirmed"
 MANUAL_PENDING_STATUS = "awaiting-manual-impl"
 
 
-def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.CompletedProcess | None = None) -> None:
+def do_await_impl(
+    frame: "lib.CriterionFrame", test_results: list[tuple[str, str, subprocess.CompletedProcess]]
+) -> None:
+    """
+    test_results: one (file, name, CompletedProcess) tuple per test in
+    the frame's group, same order as test_files/test_names - the caller
+    (do_write_test or recheck_test_frame) already ran these itself, so
+    this only renders what's already known, never re-runs anything.
+    Almost always a single red entry (the common N=1 case); more than
+    one only for a criterion needing multiple tracked tests (see
+    test-criterion.prompt.md's Step 3).
+    """
     render.print_line()
-    render.print_line("-- Test written. Implement now:")
-    render.print_line(f"   {frame.test_file} :: {frame.test_name}")
+    red = [(f, n, r) for f, n, r in test_results if r.returncode != 0]
+    green = [(f, n, r) for f, n, r in test_results if r.returncode == 0]
+    if len(test_results) == 1:
+        render.print_line("-- Test written. Implement now:")
+    else:
+        render.print_line(
+            f"-- {len(red)} of {len(test_results)} test(s) still to implement:"
+        )
+    for f, n, _ in red:
+        render.print_line(f"   {f} :: {n}")
+    if green:
+        render.print_line("   Already passing (no action needed on these):")
+        for f, n, _ in green:
+            tag = " - unconfirmed, weak-test risk" if n in frame.unconfirmed_tests else ""
+            render.print_line(f"     {f} :: {n}{tag}")
     render.print_line(f"   Criterion: {frame.criterion}")
-    if test_result is not None:
-        output = ((test_result.stdout or "") + (test_result.stderr or "")).strip()
+    for f, n, r in red:
+        output = ((r.stdout or "") + (r.stderr or "")).strip()
         if output:
             # test_filter_cmd's default isn't scoped to a single test
             # binary/file (it's a name filter applied across every test
@@ -155,31 +198,49 @@ def do_await_impl(frame: "lib.CriterionFrame", test_result: subprocess.Completed
             # matched nothing.
             signal = lib.extract_test_output_signal(output, lib.get_toolchain().test_output_signal_pattern)
             render.print_line()
-            render.print_line("-- Red test output (why it currently fails):")
+            label = f" for {n}" if len(test_results) > 1 else ""
+            render.print_line(f"-- Red test output{label} (why it currently fails):")
             render.print_line(signal[-RED_CHECK_OUTPUT_TAIL_CHARS:])
     render.print_line(f"-- Token usage: {ai_client.usage}")
     sys.exit(0)
 
 
 def do_await_green_unconfirmed(frame: "lib.CriterionFrame") -> None:
+    """
+    Every test in frame.test_names is currently green, but frame.
+    unconfirmed_tests (a non-empty subset, possibly all of them) was
+    never actually confirmed legitimate - see recheck_test_frame/
+    do_write_test for how a test lands here. Lists every test, tagging
+    which specific one(s) are the actual concern, since a mixed group
+    can have some already-trusted tests (origin="ticket", or a
+    previously-red test since fixed by real implementation) alongside
+    still-unconfirmed ones.
+    """
     render.print_line()
-    render.print_line("-- Test passed immediately, without any changes - unconfirmed:")
-    render.print_line(f"   {frame.test_file} :: {frame.test_name}")
+    unconfirmed = set(frame.unconfirmed_tests)
+    plural = len(unconfirmed) != 1
+    render.print_line(
+        f"-- Test(s) passed, but {'one has' if not plural else 'some have'} "
+        f"not been confirmed legitimate:"
+    )
+    for file_path, name in zip(frame.test_files, frame.test_names):
+        tag = " - UNCONFIRMED (passed without any implementation)" if name in unconfirmed else " - confirmed"
+        render.print_line(f"   {file_path} :: {name}{tag}")
     render.print_line(f"   Criterion: {frame.criterion}")
     render.print_line(f"   Origin: {frame.origin}")
     render.print_line()
     render.print_line(
         f"   This criterion came from {frame.origin!r}, not the ticket's initial "
         f"criteria - it exists specifically because an earlier check just judged "
-        f"it unsatisfied. A test passing this easily is much more likely a weak "
-        f"test (not exercising the described behavior) than the gap genuinely "
-        f"having disappeared. Either:"
+        f"it unsatisfied. The UNCONFIRMED test(s) above passed this easily, which "
+        f"is much more likely a weak test (not exercising the described behavior) "
+        f"than the gap genuinely having disappeared. Either:"
     )
-    render.print_line("     - inspect the test and fix it if it's not testing the right thing,")
+    render.print_line("     - inspect the unconfirmed test(s) and fix them if they're not testing the right thing,")
     render.print_line("       then run 'next_step' again (a now-red test resumes the normal flow), or")
     render.print_line(
         "     - if you're confident the behaviour really is already present, run "
-        "'next_step --accept-green' to accept it and move on."
+        "'next_step --accept-green' to accept every unconfirmed test above and move on."
     )
     render.print_line(f"-- Token usage: {ai_client.usage}")
     sys.exit(0)
@@ -241,34 +302,44 @@ def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual:
 
 def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
     """
-    Writes (or retries writing) frame's test, gated on compile success.
-    A red test is always a pause point (do_await_impl, never returns).
+    Writes (or retries writing) frame's test(s), gated on compile
+    success. Almost always exactly one test; more than one only when
+    the criterion needed genuinely separate tests (test-criterion.
+    prompt.md's Step 3). At least one test still red is always a pause
+    point (do_await_impl, never returns) - real work remains regardless
+    of how many siblings are already green.
 
-    A green test's handling depends on origin:
-      - origin="ticket" (the ticket's own initial criteria): trusted -
-        marks the frame done and returns, so the caller's phase-detection
-        loop re-dispatches it straight to POP without a separate
-        invocation. Legitimate here because one criterion's
+    Each test's green-at-write-time handling depends on origin:
+      - origin="ticket" (the ticket's own initial criteria): trusted
+        unconditionally. Legitimate here because one criterion's
         implementation can easily satisfy a sibling criterion as a side
         effect within the same initial pass.
       - any other origin (validate-missed/review - pushed *because* an
         independent check already judged this unsatisfied): NOT trusted.
-        An immediate green here is much more likely a weak test than the
+        A test passing this easily is much more likely weak than the
         gap having genuinely disappeared - see GREEN_UNCONFIRMED_STATUS's
         module-level comment for why auto-trusting it created a boundless
-        loop. Pauses at do_await_green_unconfirmed instead (always exits,
-        including under --continuous).
+        loop. Recorded in frame.unconfirmed_tests rather than gating
+        anything immediately if other tests in the group are still red
+        (there's real work either way); only actually pauses here if
+        EVERY test in the group is already green with none of them
+        trusted (see the branches below). This origin check happens
+        exactly once, right here, at the moment each test is first
+        observed - never re-applied on a later resume (recheck_test_frame
+        trusts any test that goes red-then-green after this point, since
+        that's necessarily real implementation work, not an untested
+        free pass).
 
-    Once the test compiles (before the red/green dispatch above), an
+    Once every test compiles (before any red/green dispatch), an
     independent, advisory-only test-quality review runs unconditionally
     (see run_test_quality_review) - never gates anything here, just
     printed immediately and logged if it flags a concern, so it's still
-    visible even on a path that doesn't pause (origin="ticket" green-
-    and-done).
+    visible even on a path that doesn't pause (origin="ticket", every
+    test already green-and-done).
     """
-    file_path, test_name, compile_result = lib.run_test_for_criterion_with_compile_retry(
+    file_paths, test_names, compile_result = lib.run_test_for_criterion_with_compile_retry(
         frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
-        existing_test_ref=frame.existing_test_ref,
+        existing_test_refs=frame.existing_test_refs,
     )
     if compile_result is None or compile_result.returncode != 0:
         exit_code = compile_result.returncode if compile_result is not None else "unknown"
@@ -281,10 +352,11 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
 
     # Advisory-only, never gates anything below - printed immediately so
     # it's visible even if this criterion turns out not to pause at all
-    # (origin="ticket" green-and-done, under --continuous or otherwise).
+    # (origin="ticket", every test green-and-done, under --continuous or
+    # otherwise).
     flagged = lib.run_test_quality_review(
-        frame.criterion, frame.plan_context, file_path, test_name,
-        frame.existing_test_ref, model, ticket_id=frame.ticket,
+        frame.criterion, frame.plan_context, file_paths, test_names,
+        frame.existing_test_refs, model, ticket_id=frame.ticket,
     )
     if flagged:
         lib.log_event(
@@ -295,31 +367,95 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
         render.print_line("-- Test-quality review flagged a concern (advisory, not blocking):")
         render.print_line(flagged)
 
+    frame.test_files = file_paths
+    frame.test_names = test_names
+
     # quiet=True: a red result here is the expected outcome, not a real
     # error, and do_await_impl below prints its own filtered version of
     # this exact output - logging the raw dump at ERROR too would just
     # be the same content twice, with the noisier copy first.
-    red_result = lib.run_scoped_test(test_name, commands, "red check", quiet=True)
-    if red_result.returncode == 0:
-        if frame.origin == "ticket":
-            log.info(
-                "-- Test passed without implementation - this criterion's "
-                "gap didn't reproduce."
-            )
-            frame.status = "done"
-            lib.save_stack(stack)
-            return
-        frame.test_file = file_path
-        frame.test_name = test_name
+    results = lib.run_scoped_tests(test_names, commands, "red check", quiet=True)
+    test_results = list(zip(file_paths, test_names, results))
+    red_names = [n for n, r in zip(test_names, results) if r.returncode != 0]
+    green_names = [n for n, r in zip(test_names, results) if r.returncode == 0]
+    # Ticket-origin green is always trusted, so nothing from it is ever
+    # "unconfirmed" - every other origin's green needs confirmation.
+    unconfirmed = [] if frame.origin == "ticket" else green_names
+
+    if not red_names and not unconfirmed:
+        # Every test is green, and none needed confirmation (only
+        # possible for origin="ticket" - see above).
+        log.info(
+            "-- Test(s) passed without implementation - this criterion's "
+            "gap didn't reproduce."
+        )
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+
+    if not red_names and unconfirmed:
+        # Every test is green, but at least one needs confirmation.
         frame.status = GREEN_UNCONFIRMED_STATUS
+        frame.unconfirmed_tests = unconfirmed
         lib.save_stack(stack)
         do_await_green_unconfirmed(frame)
+        return
 
-    frame.test_file = file_path
-    frame.test_name = test_name
+    # At least one test is still red - real work remains regardless of
+    # how many siblings are already (trusted or unconfirmed) green.
     frame.status = "test-written"
+    frame.unconfirmed_tests = unconfirmed
     lib.save_stack(stack)
-    do_await_impl(frame, red_result)
+    do_await_impl(frame, test_results)
+
+
+def recheck_test_frame(
+    stack: list, frame: "lib.CriterionFrame", commands: dict, accept_green: bool
+) -> None:
+    """
+    Re-verifies a frame already past its initial WRITE_TEST look (status
+    "test-written" or GREEN_UNCONFIRMED_STATUS) by re-running every test
+    in its group fresh - status is a hint, never a trust boundary, same
+    principle as every other phase. Shared by both of step()'s resume
+    branches (see below) since the logic converges regardless of which
+    one the frame arrived from: origin-based trust was already decided
+    once, at write time (do_write_test); this only ever shrinks
+    frame.unconfirmed_tests (dropping any name now found red - it's no
+    longer a suspiciously-easy green, it's just a normal red test again),
+    never re-derives it from origin.
+    """
+    results = lib.run_scoped_tests(frame.test_names, commands, "phase check", quiet=True)
+    test_results = list(zip(frame.test_files, frame.test_names, results))
+    red_names = [n for n, r in zip(frame.test_names, results) if r.returncode != 0]
+    frame.unconfirmed_tests = [n for n in frame.unconfirmed_tests if n not in red_names]
+
+    if red_names:
+        frame.status = "test-written"
+        lib.save_stack(stack)
+        do_await_impl(frame, test_results)
+        return
+
+    # Every test is green now.
+    if not frame.unconfirmed_tests:
+        frame.status = "done"
+        lib.save_stack(stack)
+        return
+
+    if accept_green:
+        log.info(
+            "-- --accept-green: accepting %s as satisfied despite origin=%r "
+            "(unconfirmed test(s): %s).",
+            frame.criterion, frame.origin, ", ".join(frame.unconfirmed_tests),
+        )
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+
+    frame.status = GREEN_UNCONFIRMED_STATUS
+    lib.save_stack(stack)
+    do_await_green_unconfirmed(frame)
 
 
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: dict, config_path: Path) -> None:
@@ -392,12 +528,12 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
                 ticket=ticket_id,
                 criterion=criterion,
                 plan_context=lib.extract_plan_context_for_criterion(criterion, gap_plan_content),
-                test_file=None,
-                test_name=None,
+                test_files=None,
+                test_names=None,
                 status="pending",
                 origin="validate-missed",
                 verification=lib.extract_verification_mode(criterion),
-                existing_test_ref=lib.extract_existing_test_ref(criterion),
+                existing_test_refs=lib.extract_existing_test_refs(criterion),
             )
             for criterion in remaining
         ]
@@ -482,8 +618,8 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
             ticket=ticket_id,
             criterion=f"- [ ] {finding}",
             plan_context=finding,
-            test_file=None,
-            test_name=None,
+            test_files=None,
+            test_names=None,
             status="pending",
             origin="review",
         )
@@ -531,23 +667,10 @@ def step(
     if frame.status == GREEN_UNCONFIRMED_STATUS:
         # Always re-verify real state rather than trusting the stored
         # status (same principle as every other phase) - the human may
-        # have fixed the test in the meantime, in which case it's now
-        # properly red and this becomes a normal AWAIT_IMPL case.
-        result = lib.run_scoped_test(frame.test_name, commands, "green-unconfirmed re-check", quiet=True)
-        if result.returncode != 0:
-            frame.status = "test-written"
-            lib.save_stack(stack)
-            do_await_impl(frame, result)
-            return
-        if accept_green:
-            log.info(
-                "-- --accept-green: accepting %s as satisfied despite origin=%r.",
-                frame.criterion, frame.origin,
-            )
-            frame.status = "done"
-            lib.save_stack(stack)
-            return
-        do_await_green_unconfirmed(frame)
+        # have fixed the test(s) in the meantime, in which case this
+        # becomes a normal AWAIT_IMPL case. Shared with the "test-written"
+        # resume branch below - see recheck_test_frame.
+        recheck_test_frame(stack, frame, commands, accept_green)
         return
 
     if frame.verification == "manual" and frame.status in ("pending", MANUAL_PENDING_STATUS):
@@ -559,16 +682,11 @@ def step(
         return
 
     if frame.status == "test-written":
-        if frame.test_file is None or frame.test_name is None:
-            log.warning("-- Frame is test-written but missing test_file/test_name - retrying WRITE_TEST.")
+        if not frame.test_files or not frame.test_names:
+            log.warning("-- Frame is test-written but missing test_files/test_names - retrying WRITE_TEST.")
             do_write_test(stack, frame, model, commands)
             return
-        result = lib.run_scoped_test(frame.test_name, commands, "phase check", quiet=True)
-        if result.returncode == 0:
-            frame.status = "done"
-            lib.save_stack(stack)
-            return
-        do_await_impl(frame, result)
+        recheck_test_frame(stack, frame, commands, accept_green)
         return
 
     # frame.status == "done" - shouldn't normally be seen fresh off disk
@@ -607,10 +725,10 @@ def main() -> None:
         action="store_true",
         help="Accept the top frame as satisfied if it's currently paused "
              "in the 'green-unconfirmed' state (a validate-missed/review "
-             "criterion whose test passed immediately, without any "
-             "changes - see the pause message for why that's untrusted by "
-             "default). Has no effect if the top frame isn't in that "
-             "state. Use this only after confirming the behaviour really "
+             "criterion whose test(s) passed immediately, without any "
+             "changes - see the pause message for exactly which one(s) and "
+             "why that's untrusted by default). Has no effect if the top "
+             "frame isn't in that state. Use this only after confirming the behaviour really "
              "is already present - not as a way to silence the warning.",
     )
     parser.add_argument(

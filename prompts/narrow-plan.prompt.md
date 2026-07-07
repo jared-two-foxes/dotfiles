@@ -100,14 +100,16 @@ For each acceptance criterion:
 - If no test covers a criterion and it can't be confirmed by reading the
   code either, mark it FAIL - "implemented but unverified" is not a pass.
 - A FAIL can mean two different things, and it's worth distinguishing
-  which: "no test/code covers this at all" versus "a specific existing
-  test currently asserts the *old* behavior, and this criterion wants it
-  changed." For the second case, cite that test's exact file and
-  fully-qualified name as your evidence (the same form the codebase's
-  test runner would use) - not just that it exists, but which one. This
-  becomes the `existing_test:` tag in Step 4/Final answer, and is what
-  lets the downstream test-writer modify that specific test instead of
-  adding a new, possibly-contradictory one alongside it.
+  which: "no test/code covers this at all" versus "one or more specific
+  existing tests currently assert the *old* behavior, and this criterion
+  wants it changed." For the second case, cite each such test's exact
+  file and fully-qualified name as your evidence (the same form the
+  codebase's test runner would use) - not just that it exists, but which
+  one(s); this is occasionally more than one test if the old behavior is
+  asserted from more than one place. This becomes the (repeatable)
+  `existing_test:` tag in Step 4/Final answer, and is what lets the
+  downstream test-writer modify those specific test(s) instead of adding
+  a new, possibly-contradictory one alongside them.
 
 ## Step 3 - Narrow the plan
 
@@ -145,15 +147,18 @@ Final answer format below for exactly where.
   documentation half be covered by code review at ticket-validation
   time, rather than inventing a third category.
 
-If a criterion is tagged `test` and Step 2 found a *specific* existing
-test that currently asserts the behavior this criterion wants changed
-(not just "some test exists somewhere in this area"), additionally tag
-it `existing_test: <file>::<test_name>` using the exact reference you
-cited as evidence. Omit this tag entirely otherwise - it never appears
-on a `manual` criterion (there's no test to point at), and never on a
-`test` criterion that needs genuinely new coverage. Never guess at a
-name to fill this in; an omitted tag correctly tells the test-writer to
-write a new test, same as always.
+If a criterion is tagged `test` and Step 2 found one or more *specific*
+existing tests that currently assert the behavior this criterion wants
+changed (not just "some test exists somewhere in this area"),
+additionally tag it with one `existing_test: <file>::<test_name>` clause
+per such test using the exact reference(s) you cited as evidence - the
+tag is repeatable within the same trailing comment when more than one
+existing test needs to change (`existing_test: a::t1; existing_test:
+b::t2`), rare but possible. Omit the tag entirely otherwise - it never
+appears on a `manual` criterion (there's no test to point at), and never
+on a `test` criterion that needs genuinely new coverage. Never guess at
+a name to fill this in; an omitted tag correctly tells the test-writer
+to write a new test, same as always.
 
 ## Final answer
 

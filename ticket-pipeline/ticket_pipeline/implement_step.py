@@ -186,6 +186,47 @@ def verify_test_unchanged(
         )
 
 
+def snapshot_tests(test_files: list[str], test_names: list[str]) -> dict[str, str | None]:
+    """
+    original_block per test_name (keyed by name - TEST_WITNESS parsing
+    already requires names to be unique within a frame, since
+    run_scoped_test's own filter has to unambiguously target one test).
+    A None value means that specific test's tamper check will be
+    skipped (see verify_test_unchanged) - almost always a single entry,
+    more than one only for a criterion tracking multiple tests.
+    """
+    snapshots: dict[str, str | None] = {}
+    for test_file, test_name in zip(test_files, test_names):
+        original_content = (
+            Path(test_file).read_text(encoding="utf-8") if Path(test_file).is_file() else None
+        )
+        original_block = (
+            _extract_function_block(original_content, test_name)
+            if original_content is not None else None
+        )
+        if original_block is None:
+            log.warning(
+                "-- Could not extract %s's source from %s for the tamper check "
+                "(non-brace language, or unexpected layout) - the byte-for-byte "
+                "verification will be skipped for this test.",
+                test_name, test_file,
+            )
+        snapshots[test_name] = original_block
+    return snapshots
+
+
+def verify_tests_unchanged(
+    test_files: list[str], test_names: list[str], snapshots: dict[str, str | None], criterion: str
+) -> None:
+    """Loops verify_test_unchanged over every test in the group - a fix
+    attempt aimed at one still-red test is just as capable of tampering
+    with (or accidentally regressing, though that's the green-check
+    gate's job to catch) an already-passing sibling as a first attempt
+    is, so every test gets the same protection every attempt."""
+    for test_file, test_name in zip(test_files, test_names):
+        verify_test_unchanged(test_file, test_name, snapshots.get(test_name), criterion)
+
+
 # ---------------------------------------------------------------------------
 # Prompt builders. Same shape as pipeline_lib's build_test_criterion_* pair:
 # a fresh prompt for attempt 1, a fix prompt threading error output back
@@ -194,9 +235,11 @@ def verify_test_unchanged(
 
 
 def build_implement_criterion_prompt(
-    criterion: str, plan_context: str, test_file: str, test_name: str
+    criterion: str, plan_context: str, test_files: list[str], test_names: list[str]
 ) -> str:
     instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_PROMPT_FILE)
+    plural = len(test_names) != 1
+    test_list = "\n".join(f"- {f} :: {n}" for f, n in zip(test_files, test_names))
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the relevant Implementation Plan context for this "
@@ -204,21 +247,24 @@ def build_implement_criterion_prompt(
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"This implementation is for exactly this one acceptance "
         f"criterion, and only this one:\n\n{criterion}\n\n"
-        f"The failing test that proves it (must be made to pass without "
-        f"modifying it): {test_file} :: {test_name}"
+        f"The failing test{'s' if plural else ''} that prove{'' if plural else 's'} it "
+        f"(must all be made to pass without modifying {'them' if plural else 'it'}):\n{test_list}"
     )
 
 
 def build_implement_criterion_fix_prompt(
     criterion: str,
     plan_context: str,
-    test_file: str,
-    test_name: str,
+    test_files: list[str],
+    test_names: list[str],
+    still_red: list[str],
     changed_so_far: list[str],
     failure_kind: str,
     error_output: str,
 ) -> str:
     instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_PROMPT_FILE)
+    plural = len(test_names) != 1
+    test_list = "\n".join(f"- {f} :: {n}" for f, n in zip(test_files, test_names))
     changed_list = "\n".join(f"- {p}" for p in changed_so_far) or "- (none recorded)"
     if failure_kind == "compile":
         failure_desc = (
@@ -228,11 +274,20 @@ def build_implement_criterion_fix_prompt(
             "proves that approach can't work."
         )
     else:
+        still_red_list = "\n".join(f"- {n}" for n in still_red)
         failure_desc = (
-            "and it compiles, but the named test still fails. Read the test "
-            "output below to understand the gap between what the test expects "
-            "and what the implementation does, then make the smallest "
-            "targeted fix. Do not weaken or modify the test to make it pass."
+            f"and it compiles, but {'the test' if len(still_red) == 1 else 'these tests'} "
+            f"still fail:\n{still_red_list}\n\n"
+            + (
+                "Every test named above under \"failing test(s)\" must end up passing "
+                "- including any not listed as still failing, which already pass and "
+                "must not be broken while you fix the rest. "
+                if plural else ""
+            )
+            + "Read the test output below to understand the gap between what "
+            "the still-failing test(s) expect and what the implementation does, "
+            "then make the smallest targeted fix. Do not weaken or modify any "
+            "test to make it pass."
         )
     return (
         f"{instructions}\n\n---\n\n"
@@ -241,8 +296,8 @@ def build_implement_criterion_fix_prompt(
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"You already attempted an implementation for exactly this one "
         f"acceptance criterion, and only this one:\n\n{criterion}\n\n"
-        f"The failing test that proves it (must be made to pass without "
-        f"modifying it): {test_file} :: {test_name}\n\n"
+        f"The failing test{'s' if plural else ''} that prove{'' if plural else 's'} it "
+        f"(must all be made to pass without modifying {'them' if plural else 'it'}):\n{test_list}\n\n"
         f"Files changed in the previous attempt (read these first to see "
         f"what was tried):\n{changed_list}\n\n"
         f"{failure_desc}\n\n"
@@ -383,40 +438,32 @@ def run_implement_with_refine(
     max_attempts: int,
 ) -> list[str]:
     """
-    Implement the frame's criterion against its named failing test,
-    gated on build + scoped-test-green, feeding failures back to the
+    Implement the frame's criterion against its named failing test(s),
+    gated on build + every test green, feeding failures back to the
     Implementor for a fix attempt - up to max_attempts attempts *total*
     (the initial implement plus every refine counts against one budget).
     Returns the deduplicated list of changed files on success; dies via
     die_with_log on exhausted attempts, a tampered test, or an AI
-    failure, leaving the stack untouched in every case.
+    failure, leaving the stack untouched in every case. Almost always
+    one test; more than one only when the criterion tracks a genuinely
+    separate group (see test-criterion.prompt.md's Step 3) - every gate
+    below applies to the whole group, not just whichever test(s) started
+    red, since a fix aimed at one could otherwise silently regress an
+    already-passing sibling with nothing to catch it.
     """
-    test_file, test_name = frame.test_file, frame.test_name
-
-    original_content = (
-        Path(test_file).read_text(encoding="utf-8") if Path(test_file).is_file() else None
-    )
-    original_block = (
-        _extract_function_block(original_content, test_name)
-        if original_content is not None else None
-    )
-    if original_block is None:
-        log.warning(
-            "-- Could not extract the named test's source from %s for the "
-            "tamper check (non-brace language, or unexpected layout) - the "
-            "byte-for-byte verification will be skipped this run.",
-            test_file,
-        )
+    test_files, test_names = frame.test_files, frame.test_names
+    snapshots = snapshot_tests(test_files, test_names)
 
     all_changed: list[str] = []
     failure_kind: str | None = None
     last_error: str | None = None
     last_result: subprocess.CompletedProcess | None = None
+    still_red: list[str] = list(test_names)
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
             prompt = build_implement_criterion_prompt(
-                frame.criterion, frame.plan_context, test_file, test_name
+                frame.criterion, frame.plan_context, test_files, test_names
             )
         else:
             log.warning(
@@ -425,7 +472,7 @@ def run_implement_with_refine(
                 attempt - 1, max_attempts,
             )
             prompt = build_implement_criterion_fix_prompt(
-                frame.criterion, frame.plan_context, test_file, test_name,
+                frame.criterion, frame.plan_context, test_files, test_names, still_red,
                 sorted(set(all_changed)), failure_kind, last_error,
             )
 
@@ -459,9 +506,10 @@ def run_implement_with_refine(
             )
         all_changed.extend(attempt_changed)
 
-        # Tamper check after EVERY attempt - a refine attempt is just as
-        # capable of "fixing" the test as a first attempt is.
-        verify_test_unchanged(test_file, test_name, original_block, frame.criterion)
+        # Tamper check after EVERY attempt, over every test in the group
+        # - a refine attempt aimed at one test is just as capable of
+        # "fixing" a sibling test as a first attempt is.
+        verify_tests_unchanged(test_files, test_names, snapshots, frame.criterion)
         lib.render_step_output(result.text)
 
         build_result = lib.run_command(
@@ -478,27 +526,31 @@ def run_implement_with_refine(
             )
             continue
 
-        green_result = lib.run_scoped_test(
-            test_name, commands, f"green check (attempt {attempt}/{max_attempts})"
+        green_results = lib.run_scoped_tests(
+            test_names, commands, f"green check (attempt {attempt}/{max_attempts})"
         )
-        if green_result.returncode == 0:
+        still_red = [n for n, r in zip(test_names, green_results) if r.returncode != 0]
+        if not still_red:
             return sorted(set(all_changed))
 
         failure_kind = "test-red"
-        last_error = (green_result.stdout or "") + (green_result.stderr or "")
-        last_result = green_result
+        last_error = "\n\n".join(
+            f"{n}:\n" + (r.stdout or "") + (r.stderr or "")
+            for n, r in zip(test_names, green_results) if r.returncode != 0
+        )
+        last_result = next(r for n, r in zip(test_names, green_results) if n in still_red)
         lib.log_event(
             "implement-criterion", "retry",
-            error=f"test still red (attempt {attempt}/{max_attempts})",
+            error=f"{len(still_red)} test(s) still red (attempt {attempt}/{max_attempts})",
             criterion=frame.criterion,
         )
 
     exit_code = last_result.returncode if last_result is not None else "unknown"
-    what = "Code does not compile" if failure_kind == "compile" else "Test still fails"
+    what = "Code does not compile" if failure_kind == "compile" else f"{len(still_red)} test(s) still fail"
     lib.die_with_log(
         "implement-criterion",
         f"{what} after {max_attempts} attempt(s) (exit {exit_code}). See output "
-        f"above. The frame is untouched - the test is still red and 'next_step' "
+        f"above. The frame is untouched - the test(s) are still red and 'next_step' "
         f"still reports AWAIT_IMPL, so you can implement by hand (or re-run "
         f"implement_step, perhaps with a different --model).",
         criterion=frame.criterion,
@@ -586,33 +638,44 @@ def main() -> None:
         render.print_line(f"-- Token usage: {ai_client.usage}")
         return
 
-    if frame.status != "test-written" or frame.test_file is None or frame.test_name is None:
+    if frame.status != "test-written" or not frame.test_files or not frame.test_names:
         render.print_line(
             f"-- Top frame is not awaiting implementation (status: {frame.status}"
-            f"{'' if frame.test_file else ', no test recorded'}). "
+            f"{'' if frame.test_files else ', no test recorded'}). "
             f"Run 'next_step' to advance it to AWAIT_IMPL first."
         )
         sys.exit(1)
 
-    red_result = lib.run_scoped_test(frame.test_name, commands, "pre-implement red check")
-    if red_result.returncode == 0:
+    red_results = lib.run_scoped_tests(frame.test_names, commands, "pre-implement red check")
+    still_red = [n for n, r in zip(frame.test_names, red_results) if r.returncode != 0]
+    if not still_red:
         render.print_line(
-            f"-- {frame.test_file} :: {frame.test_name} is already green. "
+            f"-- All {len(frame.test_names)} test(s) already green. "
             f"Nothing to implement. Run 'next_step' to pop this criterion."
         )
         sys.exit(0)
 
     # ── Implement ───────────────────────────────────────────────────────────
     render.print_line()
-    render.print_line("-- Implementing:")
-    render.print_line(f"   {frame.test_file} :: {frame.test_name}")
+    if len(frame.test_names) == 1:
+        render.print_line("-- Implementing:")
+    else:
+        render.print_line(f"-- Implementing ({len(still_red)} of {len(frame.test_names)} still red):")
+    for f, n in zip(frame.test_files, frame.test_names):
+        tag = "" if n in still_red else " (already passing)"
+        render.print_line(f"   {f} :: {n}{tag}")
     render.print_line(f"   Criterion: {frame.criterion}")
 
     changed_files = run_implement_with_refine(frame, args.model, commands, args.max_attempts)
 
     render.print_line()
     render.print_line(f"-- Implemented: {frame.criterion}")
-    render.print_line(f"   Test now green: {frame.test_file} :: {frame.test_name}")
+    if len(frame.test_names) == 1:
+        render.print_line(f"   Test now green: {frame.test_files[0]} :: {frame.test_names[0]}")
+    else:
+        render.print_line(f"   All {len(frame.test_names)} test(s) now green:")
+        for f, n in zip(frame.test_files, frame.test_names):
+            render.print_line(f"     {f} :: {n}")
     render.print_line(f"   Files changed ({len(changed_files)}): {', '.join(changed_files)}")
     render.print_line("-- Run 'next_step' to pop this criterion and continue.")
     render.print_line(f"-- Token usage: {ai_client.usage}")
