@@ -17,26 +17,15 @@ dependencies = [
 ]
 
 [project.scripts]
-push_ticket = "ticket_pipeline.push_ticket:main"
-next_step = "ticket_pipeline.next_step:main"
-implement_step = "ticket_pipeline.implement_step:main"
-review-ticket = "ticket_pipeline.review_ticket:main"
-propose-ticket-edit = "ticket_pipeline.propose_ticket_edit:main"
-explore-ticket = "ticket_pipeline.explore_ticket:main"
-split-ticket = "ticket_pipeline.split_ticket:main"
-create-child-tickets = "ticket_pipeline.create_child_tickets:main"
-update-ticket = "ticket_pipeline.update_ticket:main"
-list-models = "ticket_pipeline.list_models:main"
-prep-ticket = "ticket_pipeline.prep_ticket:main"
-reset-pipeline = "ticket_pipeline.reset_pipeline:main"
-copilot_login = "ticket_pipeline.copilot_login:main"
-fetch_ticket = "ticket_pipeline.lib.fetch_ticket:main"
+scaffold = "ticket_pipeline.cli:main"
 
-# bench/bench_block are deliberately NOT console-script entries - they're
-# situational benchmarking tools (comparing models/prompts empirically),
-# not part of everyday ticket workflow, so they shouldn't clutter the
-# standard command surface. Still fully part of the package; run them
-# via `python -m ticket_pipeline.bench` / `...bench_block` when needed.
+# Every script (push_ticket, review-ticket, next_step, ..., plus
+# bench/bench_block) is reachable as `scaffold <name>` via cli.py's
+# dispatcher rather than its own console-script entry - one command to
+# remember instead of fourteen. bench/bench_block are grouped under
+# `scaffold`'s "Advanced" section since they're situational benchmarking
+# tools, not everyday ticket workflow; still directly runnable via
+# `python -m ticket_pipeline.bench` / `...bench_block` if preferred.
 
 [build-system]
 requires = ["setuptools>=68"]

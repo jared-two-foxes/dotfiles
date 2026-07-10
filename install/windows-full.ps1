@@ -350,9 +350,10 @@ Write-Host "
 # ticket-pipeline/ is a real Python project (see its pyproject.toml),
 # not a flat script directory - no longer symlinked into ~/bin (the
 # "drop portable executables here" folder, see env.ps1): an editable
-# install is what makes push_ticket, review-ticket, etc. runnable as
-# bare commands now, via console-script shims pip puts on PATH (see
-# env.ps1's PATH entry for the pip user Scripts directory), not via a
+# install is what makes `scaffold` (the single dispatcher command for
+# push_ticket, review-ticket, etc. - see ticket_pipeline/cli.py) runnable
+# as a bare command now, via the console-script shim pip puts on PATH
+# (see env.ps1's PATH entry for the pip user Scripts directory), not via a
 # copy or symlink into ~/bin. This must stay an editable (-e) install:
 # pipeline_lib.PROMPTS_DIR and bench.py's fixtures dir are resolved
 # relative to the source tree at import time (see the note in
