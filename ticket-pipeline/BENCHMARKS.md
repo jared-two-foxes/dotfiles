@@ -118,13 +118,15 @@ were captured against.
 ### Usage
 
 ```
-python -m ticket_pipeline.bench --block plan --models gpt-5.4-mini,deepseek-v4-pro --trials 10 --concurrency 8
-python -m ticket_pipeline.bench --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
-python -m ticket_pipeline.bench --block test-criterion --models gpt-5.4-mini,kimi-k2.6 --trials 3
+scaffold bench --block plan --models gpt-5.4-mini,deepseek-v4-pro --trials 10 --concurrency 8
+scaffold bench --block narrow --models glm-5,gpt-5.1 --trials 3 --plan-fixture both
+scaffold bench --block test-criterion --models gpt-5.4-mini,kimi-k2.6 --trials 3
 ```
 
-(`bench`/`bench_block` are deliberately not console-script commands - they're
-situational benchmarking tools, run via `python -m` rather than a bare command.)
+(`bench`/`bench_block` are grouped under `scaffold`'s "Advanced" section rather
+than the everyday pipeline commands - they're situational benchmarking tools.
+Still directly runnable via `python -m ticket_pipeline.bench`/`...bench_block`
+if preferred.)
 
 Results stream to stdout and to a `results.jsonl` (`--out` to name it, else
 timestamped). Always inspect the per-trial `reason` strings, not just the

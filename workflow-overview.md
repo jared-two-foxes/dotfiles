@@ -22,25 +22,25 @@ bucket.
 ## The shape of the whole thing
 
 ```
-prep-ticket          (AI, loop)         "is this ticket's wording accurate?"
+scaffold prep-ticket     (AI, loop)         "is this ticket's wording accurate?"
       |
-explore-ticket       (AI, interactive)  "is this ticket's scope complete?"
+scaffold explore-ticket  (AI, interactive)  "is this ticket's scope complete?"
       |
-push_ticket          (mixed)            "seed the work queue"
+scaffold push-ticket     (mixed)            "seed the work queue"
       |
       v
-  +-------------------------------------------+
-  |   next_step   (run repeatedly)             |
+  +--------------------------------------------+
+  |   scaffold next-step   (run repeatedly)    |
   |   - write a test, or make a manual change  |
   |   - pause for a human, or hand off to      |
-  |     implement_step                         |
+  |     scaffold implement-step                |
   |   - detect green, pop, repeat              |
-  +-------------------------------------------+
+  +--------------------------------------------+
       |
       v  (once every criterion for the ticket is popped)
 TICKET_VALIDATE      (mixed)            "does the whole ticket hold up?"
       |
-   APPROVED -> done          CHANGES REQUESTED -> new frames -> back into next_step
+   APPROVED -> done          CHANGES REQUESTED -> new frames -> back into scaffold next-step
 ```
 
 Only one file survives across every invocation of every script below:
@@ -49,7 +49,7 @@ Only one file survives across every invocation of every script below:
 
 ---
 
-## Stage 0 - `prep-ticket <id>` (entry point)
+## Stage 0 - `scaffold prep-ticket <id>` (entry point)
 
 **Purpose:** catch a ticket whose wording is stale, wrong, or already
 satisfied by existing code, before anyone plans or implements against
@@ -57,9 +57,9 @@ it.
 
 | Step | Nature | What happens |
 |---|---|---|
-| `review-ticket` | **[AI]**, read-only | Fetches the ticket from Linear, checks its claims against the actual codebase (does the thing it says is missing actually exist already? does it reference something that changed?). Verdict: `clear` or flagged concerns. |
-| `propose-ticket-edit` | **[AI]** | If not clear, rewrites the ticket text to resolve the reviewer's concerns. Can also conclude "no remaining work" if every criterion turns out already satisfied. |
-| loop control | **[Mechanical]** | `prep-ticket` re-runs review against the proposed edit, up to `--max-iterations`, until a `clear` verdict or a "no remaining work" result. |
+| `scaffold review-ticket` | **[AI]**, read-only | Fetches the ticket from Linear, checks its claims against the actual codebase (does the thing it says is missing actually exist already? does it reference something that changed?). Verdict: `clear` or flagged concerns. |
+| `scaffold propose-ticket-edit` | **[AI]** | If not clear, rewrites the ticket text to resolve the reviewer's concerns. Can also conclude "no remaining work" if every criterion turns out already satisfied. |
+| loop control | **[Mechanical]** | `scaffold prep-ticket` re-runs review against the proposed edit, up to `--max-iterations`, until a `clear` verdict or a "no remaining work" result. |
 
 **Never touches Linear or `.ticket.md`** - output is a local working
 file (`.ticket-proposed-{id}.md`), fed forward by hand.
@@ -69,7 +69,7 @@ file (`.ticket-proposed-{id}.md`), fed forward by hand.
 
 ---
 
-## Stage 1 - `explore-ticket <id>` (interactive)
+## Stage 1 - `scaffold explore-ticket <id>` (interactive)
 
 **Purpose:** the one step in this whole pipeline where a human is
 actually expected to be present and typing. Turns a vague ticket into
@@ -82,12 +82,12 @@ one with a complete, precise set of acceptance criteria.
 Output is a proposed, expanded ticket - never written to Linear unless
 you choose to push it there yourself. This deliberately runs **after**
 review (wording is trustworthy first) and **before** the complexity/split
-check in `push_ticket` (so a ticket that only grows more precise here,
+check in `scaffold push-ticket` (so a ticket that only grows more precise here,
 not more numerous, doesn't falsely trip a "needs splitting" signal).
 
 ---
 
-## Stage 2 - `push_ticket <id>` (seed the work queue)
+## Stage 2 - `scaffold push-ticket <id>` (seed the work queue)
 
 **Purpose:** turn one ticket into a stack of `CriterionFrame` entries -
 one per acceptance criterion still not satisfied by the codebase - or,
@@ -99,7 +99,7 @@ Runs once per ticket (and once per child, if it splits), in this order:
 |---|---|---|
 | Fetch | **[Mechanical]** | Pulls the ticket text from Linear via GraphQL. |
 | Complexity check | **[Mechanical]** pre-check, escalates to **[AI]** only if ambiguous | Counts acceptance criteria and checks for conjunction phrases ("and", "as well as") mechanically first. Clearly simple -> skip AI entirely. Clearly complex, or ambiguous -> an AI pass (`split-ticket` prompt) judges whether/how to split, using cohesion (do these criteria share the same code) as its test, not just count. |
-| Split (if triggered) | **[Mechanical]** | If a split is recommended, real Linear sub-issues are created (`create_child_tickets.py`, a GraphQL mutation) - `--dry-run` previews without creating anything. The parent gets a "validating" sentinel (nothing left for it to implement directly); each child recurses through this exact same fetch -> split-check -> plan+narrow sequence. |
+| Split (if triggered) | **[Mechanical]** | If a split is recommended, real Linear sub-issues are created (`scaffold create-child-tickets`, a GraphQL mutation) - `--dry-run` previews without creating anything. The parent gets a "validating" sentinel (nothing left for it to implement directly); each child recurses through this exact same fetch -> split-check -> plan+narrow sequence. |
 | Plan | **[AI]** | Generates a full TDD plan (`.tdd-plan.md`) from the ticket - acceptance criteria plus an implementation-plan sketch. |
 | Narrow | **[AI]** | Re-reads the actual current codebase and narrows the plan down to only the criteria **not yet satisfied** (`.gap-plan.md`). Also classifies each retained criterion: `verify: test` (a red/green test can hold it) or `verify: manual` (docs/config/CI - no meaningful test), and, if a criterion is really about changing behavior an *existing* test already asserts, tags exactly which test (`existing_test: file::name`) instead of leaving it to be discovered later. |
 | Seed the stack | **[Mechanical]** | One `CriterionFrame` per remaining criterion, written to `.criteria-stack.json` in one atomic write (including every recursively-split child's frames, correctly ordered). |
@@ -111,7 +111,7 @@ ticket is mid-flight - resolved via `--force` to abandon it or
 
 ---
 
-## Stage 3 - `next_step` (run repeatedly until no work remains)
+## Stage 3 - `scaffold next-step` (run repeatedly until no work remains)
 
 The main loop. Every invocation looks at the top of the stack, re-checks
 real state (never trusts the stored `status` blindly), and advances
@@ -130,7 +130,7 @@ decision point.
 
 **Outcome branches** (still within `WRITE_TEST`):
 - Red, as expected -> pause: **[Human]** implements, or hands off to
-  `implement_step` (Stage 4).
+  `scaffold implement-step` (Stage 4).
 - Green immediately, and this criterion came from the ticket's own
   original criteria -> trusted as a side-effect of a sibling
   criterion, mark done, continue (**[Mechanical]**).
@@ -145,7 +145,7 @@ decision point.
 | Step | Nature | What happens |
 |---|---|---|
 | Mechanical floor check | **[Mechanical]** | For a `verification: manual` criterion (docs/config/CI), there's no test to re-run. Instead: does the file this criterion names (parsed from its own wording) actually show up as changed in `git diff`/untracked files? |
-| Dispatch | **[Mechanical]** / **[Human]** | Match found -> trusted immediately, mark done. No match -> pause for a human to make the change (or run `implement_step`'s Level 2, Stage 4b), then re-check; `--accept-manual` overrides when no specific file could even be identified. |
+| Dispatch | **[Mechanical]** / **[Human]** | Match found -> trusted immediately, mark done. No match -> pause for a human to make the change (or run `scaffold implement-step`'s Level 2, Stage 4b), then re-check; `--accept-manual` overrides when no specific file could even be identified. |
 
 ### 3c. Pop and continue
 
@@ -156,12 +156,12 @@ decision point.
 
 ---
 
-## Stage 4 - `implement_step` (optional AI implementation)
+## Stage 4 - `scaffold implement-step` (optional AI implementation)
 
 Never required - a human can always implement by hand and let
-`next_step` detect green. When invoked, it re-checks every precondition
-itself before spending anything, and never touches the stack (`next_step`
-still owns every status transition).
+`scaffold next-step` detect green. When invoked, it re-checks every
+precondition itself before spending anything, and never touches the
+stack (`scaffold next-step` still owns every status transition).
 
 ### 4a. Level 1 - test-targeted implementation (the common case)
 
@@ -189,8 +189,8 @@ config, CI - anything `narrow` judged as having no meaningful red/green).
 | Build gate | **[Mechanical]** | Same bounded retry shape as Level 1, but that's the *only* gate - there is no test-specific check here at all. |
 
 Whether the criterion is actually satisfied is still entirely
-`next_step`'s job (Stage 3b's mechanical floor check) - `implement_step`
-never makes that call itself.
+`scaffold next-step`'s job (Stage 3b's mechanical floor check) -
+`scaffold implement-step` never makes that call itself.
 
 ---
 
@@ -200,8 +200,8 @@ never makes that call itself.
 doesn't guarantee the *ticket* as a whole still holds together.
 
 Pushes a durable "validating" sentinel frame first (**[Mechanical]**),
-so a crash partway through resumes validation on the next `next_step`
-call instead of silently skipping it.
+so a crash partway through resumes validation on the next
+`scaffold next-step` call instead of silently skipping it.
 
 | Step | Nature | What happens |
 |---|---|---|
@@ -227,14 +227,17 @@ call instead of silently skipping it.
 | `propose-ticket-edit` | propose-ticket-edit | Rewrite ticket to resolve review concerns |
 | `explore-ticket` | explore-ticket | Interactive context-gathering with a human |
 | `split-ticket` (ambiguous case only) | split-ticket | Judge whether/how to split an overly broad ticket |
-| `push_ticket` plan step | plan | Generate the full TDD plan from a ticket |
-| `push_ticket` narrow step | narrow-plan | Narrow to unsatisfied criteria; tag `verify:`/`existing_test:` |
-| `next_step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one |
-| `next_step` WRITE_TEST (advisory) | review-test-quality | Judge whether the test just (written/modified) is meaningful - never blocks |
-| `implement_step` Level 1 | implement-criterion | Make a named failing test pass |
-| `implement_step` Level 2 | implement-criterion-direct | Directly implement a no-test (manual) criterion |
-| `next_step` TICKET_VALIDATE | narrow-plan (again) | Safety-net re-check for missed criteria |
-| `next_step` TICKET_VALIDATE | review-singlepass | Whole-ticket code review, APPROVED/CHANGES REQUESTED |
+| `push-ticket` plan step | plan | Generate the full TDD plan from a ticket |
+| `push-ticket` narrow step | narrow-plan | Narrow to unsatisfied criteria; tag `verify:`/`existing_test:` |
+| `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one |
+| `next-step` WRITE_TEST (advisory) | review-test-quality | Judge whether the test just (written/modified) is meaningful - never blocks |
+| `implement-step` Level 1 | implement-criterion | Make a named failing test pass |
+| `implement-step` Level 2 | implement-criterion-direct | Directly implement a no-test (manual) criterion |
+| `next-step` TICKET_VALIDATE | narrow-plan (again) | Safety-net re-check for missed criteria |
+| `next-step` TICKET_VALIDATE | review-singlepass | Whole-ticket code review, APPROVED/CHANGES REQUESTED |
+
+All of the above run as `scaffold <script>` (e.g. `scaffold push-ticket`,
+`scaffold next-step`) - see `scaffold --help` for the full command list.
 
 Everything else - fetching from Linear, creating sub-issues, compiling,
 running tests, linting, git diffs, snapshot/tamper comparisons, stack
@@ -244,8 +247,8 @@ read/write - is deterministic code with no model in the loop.
 
 | Pause | Trigger | Resolved by |
 |---|---|---|
-| `explore-ticket`'s questions | Always, by design | Answering at the terminal |
-| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `implement_step` |
-| `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `next_step --accept-green` |
-| `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `next_step --accept-manual` |
+| `scaffold explore-ticket`'s questions | Always, by design | Answering at the terminal |
+| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `scaffold implement-step` |
+| `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `scaffold next-step --accept-green` |
+| `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `scaffold next-step --accept-manual` |
 | Stack clobber | Pushing a ticket while a different one is mid-flight | `--force` or `--prepend` |

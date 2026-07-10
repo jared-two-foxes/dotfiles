@@ -11,11 +11,12 @@ if (Test-Path $UserBin) {
 }
 
 # `pip install --user` (see install/*.ps1's editable install of
-# ticket-pipeline/pyproject.toml's ticket_pipeline package) puts
-# console-script shims - push_ticket, review-ticket, etc. - in this per-Python-version
-# Scripts directory, not on PATH by default. Globbed rather than
-# invoking `python -m site --user-base` to avoid a subprocess spawn on
-# every shell start.
+# ticket-pipeline/pyproject.toml's ticket_pipeline package) puts the
+# `scaffold` console-script shim (dispatches to push_ticket, review-ticket,
+# etc. - see ticket_pipeline/cli.py) in this per-Python-version Scripts
+# directory, not on PATH by default. Globbed rather than invoking
+# `python -m site --user-base` to avoid a subprocess spawn on every shell
+# start.
 Get-ChildItem -Path (Join-Path $env:APPDATA 'Python') -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
     ForEach-Object {
         $pyUserScripts = Join-Path $_.FullName 'Scripts'
