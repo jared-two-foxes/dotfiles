@@ -19,7 +19,7 @@ from ticket_pipeline.lib import repo_context
 
 
 class TicketEvidenceTokenTests(unittest.TestCase):
-    def test_extracts_code_like_tokens_and_filters_commands(self):
+    def test_extracts_code_like_tokens(self):
         ticket = """
         ## Acceptance Criteria
         - [ ] `POSTMARK_SIGNING_SECRET` env var is parsed into
@@ -34,18 +34,7 @@ class TicketEvidenceTokenTests(unittest.TestCase):
         self.assertIn("libs/app/src/email_config.rs", tokens)
         self.assertIn("EmailConfig.postmark_signing_secret", tokens)
         self.assertIn("postmark_signing_secret", tokens)
-        self.assertNotIn("cargo test -p app", tokens)
-        self.assertNotIn("cargo", tokens)
-        self.assertNotIn("test", tokens)
-
-    def test_extract_caps_searched_tokens(self):
-        ticket = " ".join(f"TOKEN_{i}" for i in range(20))
-
-        tokens = repo_context.extract_ticket_evidence_tokens(ticket, max_tokens=12)
-
-        self.assertEqual(12, len(tokens))
-        self.assertEqual("TOKEN_0", tokens[0])
-        self.assertEqual("TOKEN_11", tokens[-1])
+        self.assertIn("cargo test -p app", tokens)
 
 
 class TicketEvidenceSeedTests(unittest.TestCase):
@@ -82,26 +71,6 @@ class TicketEvidenceSeedTests(unittest.TestCase):
         self.assertIn("(no matches", rendered)
         self.assertNotIn("target/ignored.rs", rendered)
         self.assertNotIn("MissingSymbol", rendered)
-
-    def test_render_respects_character_budget(self):
-        entries = [
-            repo_context.TicketEvidenceEntry(
-                token=f"TOKEN_{i}",
-                kind="env",
-                result="x" * 80,
-                has_matches=True,
-            )
-            for i in range(5)
-        ]
-        seed = repo_context.TicketEvidenceSeed(
-            entries=entries,
-            searched_tokens=[entry.token for entry in entries],
-        )
-
-        rendered = repo_context.render_ticket_evidence_seed_block(seed, max_chars=220)
-
-        self.assertIn("ticket evidence seed truncated", rendered)
-        self.assertLessEqual(len(rendered), 320)
 
 
 class PlanNarrowPromptTests(unittest.TestCase):

@@ -643,13 +643,6 @@ REFERENCED_FILENAME_RE = re.compile(r"`([\w-]+\.[A-Za-z]{1,5})`")
 # means by a short filename like "lib.rs".
 _PREFETCH_SEARCH_PRUNE = {".git", "target", "node_modules", "dist", "build", ".venv"}
 
-# Caps keep a pathological ticket (lots of backtick-quoted paths, or one
-# huge file) from blowing up the prompt - this is meant to save the
-# model a handful of read_file turns on the files it's overwhelmingly
-# likely to want, not to front-load the whole repo.
-PREFETCH_MAX_FILES = 12
-PREFETCH_MAX_CHARS_PER_FILE = 8_000
-
 
 def _resolve_bare_filename(name: str) -> str | None:
     """
@@ -672,11 +665,8 @@ def extract_referenced_paths(text: str) -> list[str]:
     """
     Pulls candidate file paths out of `text` (a ticket body) - full
     paths via REFERENCED_PATH_RE kept as-is, bare filenames via
-    REFERENCED_FILENAME_RE resolved against the repo tree - then keeps
-    only the ones that actually exist as files (a ticket mentioning a
-    path that doesn't exist, e.g. a file it wants created, is exactly
-    the kind of false positive this filters out). Order-preserving,
-    deduped.
+    REFERENCED_FILENAME_RE resolved against the repo tree. Order-
+    preserving, deduped.
     """
     seen: set[str] = set()
     paths: list[str] = []
@@ -685,8 +675,7 @@ def extract_referenced_paths(text: str) -> list[str]:
         if candidate in seen:
             continue
         seen.add(candidate)
-        if Path(candidate).is_file():
-            paths.append(candidate)
+        paths.append(candidate)
     for match in REFERENCED_FILENAME_RE.finditer(text):
         name = match.group(1)
         if name in seen:
@@ -698,15 +687,14 @@ def extract_referenced_paths(text: str) -> list[str]:
     return paths
 
 
-def prefetch_referenced_files(text: str, max_files: int = PREFETCH_MAX_FILES) -> tuple[str, set[str]]:
+def prefetch_referenced_files(text: str) -> tuple[str, set[str]]:
     """
-    Reads the first `max_files` real files referenced by backtick-quoted
-    paths in `text` and renders them as a prompt block, so a model
-    reviewing/planning against the ticket starts with the files it's
-    overwhelmingly likely to ask for already in context - saving the
-    read_file turns (and the variance in whether/when a weaker model
-    gets around to asking) the same way build_plan_prompt's ticket/
-    repo-context embedding does.
+    Reads the real files referenced by backtick-quoted paths in `text`
+    and renders them as a prompt block, so a model reviewing/planning
+    against the ticket starts with the files it's overwhelmingly likely
+    to ask for already in context - saving the read_file turns (and the
+    variance in whether/when a weaker model gets around to asking) the
+    same way build_plan_prompt's ticket/repo-context embedding does.
 
     Returns (block, paths) - paths is meant for make_executor's
     preloaded_paths, so a model that still calls read_file on one of
@@ -715,29 +703,28 @@ def prefetch_referenced_files(text: str, max_files: int = PREFETCH_MAX_FILES) ->
     callers can unconditionally interpolate it without an empty-block
     check at each call site.
     """
-    paths = extract_referenced_paths(text)[:max_files]
+    paths = extract_referenced_paths(text)
     if not paths:
         return "", set()
 
     sections = []
+    read_paths: set[str] = set()
     for path in paths:
         try:
             content = Path(path).read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if len(content) > PREFETCH_MAX_CHARS_PER_FILE:
-            content = content[:PREFETCH_MAX_CHARS_PER_FILE] + "\n... (truncated - read_file for the rest)"
         sections.append(f"### {path}\n```\n{content}\n```")
+        read_paths.add(path)
 
     if not sections:
         return "", set()
 
     block = (
         "Here are files the ticket references by path, prefetched so you "
-        "don't need to read_file them again unless you need a part that "
-        "was truncated below:\n\n" + "\n\n".join(sections)
+        "don't need to read_file them again:\n\n" + "\n\n".join(sections)
     )
-    return block, set(paths)
+    return block, read_paths
 
 
 # ---------------------------------------------------------------------------

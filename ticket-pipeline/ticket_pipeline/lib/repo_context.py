@@ -45,15 +45,6 @@ MODULE_ROOT_CANDIDATES = ("src", "lib", "libs")
 # carry different content (general vs. tool-specific instructions).
 CONVENTION_DOC_CANDIDATES = ("AGENTS.md", "CLAUDE.md", ".cursorrules", "CONTRIBUTING.md")
 
-# Unlike the tree (naturally bounded by depth), a convention doc has no
-# inherent size limit - cap it so one large file can't silently eat an
-# unbounded amount of every prompt's budget.
-CONVENTION_DOC_MAX_CHARS = 4000
-
-TICKET_EVIDENCE_MAX_TOKENS = 12
-TICKET_EVIDENCE_MATCHES_PER_TOKEN = 8
-TICKET_EVIDENCE_MAX_CHARS = 6000
-
 BACKTICK_TOKEN_RE = re.compile(r"`([^`\n]+)`")
 ENV_VAR_RE = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b")
 DOTTED_SYMBOL_RE = re.compile(
@@ -61,43 +52,6 @@ DOTTED_SYMBOL_RE = re.compile(
 )
 PASCAL_SYMBOL_RE = re.compile(r"\b[A-Z][A-Za-z0-9]*[a-z][A-Za-z0-9]*\b")
 SNAKE_SYMBOL_RE = re.compile(r"\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b")
-
-NOISY_TICKET_TOKENS = {
-    "AC",
-    "Acceptance",
-    "Criteria",
-    "Default",
-    "Definition",
-    "DoD",
-    "Done",
-    "Description",
-    "Edge",
-    "Field",
-    "Files",
-    "High",
-    "Labels",
-    "Medium",
-    "Missing",
-    "None",
-    "Option",
-    "Priority",
-    "Requirements",
-    "Some",
-    "State",
-    "String",
-    "Summary",
-    "Todo",
-    "URL",
-    "Update",
-    "Updated",
-    "cargo",
-    "clippy",
-    "fmt",
-    "test",
-    "tests",
-}
-
-NOISY_BACKTICK_PREFIXES = ("cargo ", "npm ", "npx ", "bazel ", "ctest ", "fmt ", "clippy ")
 
 PATH_SUFFIXES = (
     ".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".svelte", ".toml",
@@ -147,18 +101,7 @@ def _is_path_like(token: str) -> bool:
 
 def _clean_ticket_token(token: str) -> str | None:
     token = token.strip().strip(".,:;()[]{}")
-    if not token:
-        return None
-    lowered = token.lower()
-    if token in NOISY_TICKET_TOKENS or lowered in NOISY_TICKET_TOKENS:
-        return None
-    if any(lowered.startswith(prefix) for prefix in NOISY_BACKTICK_PREFIXES):
-        return None
-    if " " in token and not _is_path_like(token):
-        return None
-    if len(token) < 3 and not token.isupper():
-        return None
-    return token
+    return token or None
 
 
 def _ticket_token_kind(token: str) -> str:
@@ -173,15 +116,11 @@ def _ticket_token_kind(token: str) -> str:
     return "symbol"
 
 
-def extract_ticket_evidence_tokens(
-    ticket_content: str,
-    max_tokens: int = TICKET_EVIDENCE_MAX_TOKENS,
-) -> list[str]:
+def extract_ticket_evidence_tokens(ticket_content: str) -> list[str]:
     """
-    Pull high-signal code/search tokens out of ticket prose, preserving
-    ticket order and staying deliberately mechanical. This is only an
-    orientation accelerator for Planner-Narrower, not a semantic parse
-    of the ticket.
+    Pull code/search tokens out of ticket prose, preserving ticket order
+    and staying deliberately mechanical. This is only an orientation
+    accelerator for Planner-Narrower, not a semantic parse of the ticket.
     """
     token_candidates: list[str] = []
     token_candidates.extend(BACKTICK_TOKEN_RE.findall(ticket_content))
@@ -198,8 +137,6 @@ def extract_ticket_evidence_tokens(
             continue
         seen.add(token)
         tokens.append(token)
-        if len(tokens) >= max_tokens:
-            break
     return tokens
 
 
@@ -248,9 +185,6 @@ def _gather_convention_docs(root: Path) -> list[tuple[str, str]]:
         if not path.is_file():
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
-        if len(content) > CONVENTION_DOC_MAX_CHARS:
-            omitted = len(content) - CONVENTION_DOC_MAX_CHARS
-            content = content[:CONVENTION_DOC_MAX_CHARS] + f"\n... (truncated, {omitted} chars omitted)"
         docs.append((filename, content))
     return docs
 
@@ -281,12 +215,7 @@ def gather_ticket_evidence_seed(
     with _pushd(root):
         for token in tokens:
             kind = _ticket_token_kind(token)
-            result = tools.search_files(
-                token,
-                ".",
-                regex=False,
-                max_results=TICKET_EVIDENCE_MATCHES_PER_TOKEN,
-            )
+            result = tools.search_files(token, ".", regex=False)
             has_matches = not result.startswith("(no matches ")
             if has_matches or kind in {"env", "path"}:
                 entries.append(TicketEvidenceEntry(token, kind, result, has_matches))
@@ -312,10 +241,7 @@ def render_repo_context_block(ctx: RepoContext, depth: int = DEFAULT_TREE_DEPTH)
     return block
 
 
-def render_ticket_evidence_seed_block(
-    seed: TicketEvidenceSeed,
-    max_chars: int = TICKET_EVIDENCE_MAX_CHARS,
-) -> str:
+def render_ticket_evidence_seed_block(seed: TicketEvidenceSeed) -> str:
     if not seed.searched_tokens:
         return (
             "## Ticket Evidence Seed\n"
@@ -336,16 +262,7 @@ def render_ticket_evidence_seed_block(
         "marking any criterion PASS.\n"
     )
     blocks: list[str] = [header]
-    truncated = False
     for entry in seed.entries:
-        block = f"\n### `{entry.token}` ({entry.kind})\n{entry.result}\n"
-        current_len = sum(len(part) for part in blocks)
-        if current_len + len(block) > max_chars:
-            truncated = True
-            break
-        blocks.append(block)
+        blocks.append(f"\n### `{entry.token}` ({entry.kind})\n{entry.result}\n")
 
-    rendered = "".join(blocks).rstrip()
-    if truncated:
-        rendered += "\n\n... (ticket evidence seed truncated to stay within prompt budget)"
-    return rendered
+    return "".join(blocks).rstrip()
