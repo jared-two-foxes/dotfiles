@@ -1,0 +1,6 @@
+{
+  "defaultProvider": "ollama-cloud",
+  "defaultModel": "glm-5.2",
+  "defaultThinkingLevel": "medium",
+  "packages": ["npm:pi-ollama-cloud"]
+}

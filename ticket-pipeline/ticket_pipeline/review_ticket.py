@@ -52,6 +52,7 @@ Usage:
 """
 
 import argparse
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -60,6 +61,12 @@ from .lib import ai_client, pipeline_lib as lib, render, tools, verbosity
 log = verbosity.get_logger(__name__)
 
 DEFAULT_MODEL = "opencode:gpt-5.4-mini"
+
+VERDICT_LINE_RE = re.compile(r"(^###\s*Verdict\s*\n+)(\S+)", re.MULTILINE)
+
+# Forced regardless of what the AI review step itself concluded - see
+# apply_mechanical_grounding.
+GROUNDING_OVERRIDE_VERDICT = "needs-attention"
 
 REVIEW_PROMPT_FILE = lib.PROMPTS_DIR / "review-ticket.prompt.md"
 
@@ -140,6 +147,66 @@ def run_review_step(ticket_content: str, model: str) -> str:
     return result.text
 
 
+def apply_mechanical_grounding(ticket_id: str, ticket_content: str, report: str) -> str:
+    """
+    Runs the same mechanical grounding check every stack-frame call site
+    uses (lib.verify_criterion_grounding) against the ticket's own
+    acceptance-criteria bullets (lib.extract_acceptance_criteria - a
+    no-op, returning report unchanged, if the raw ticket has no
+    "## Acceptance Criteria" heading to check), and forces the verdict to
+    GROUNDING_OVERRIDE_VERDICT if any fail - regardless of what the AI
+    review step itself concluded.
+
+    This exists because the AI step alone has already been observed to
+    miss exactly this failure: SA-454's raw ticket text claimed invoices
+    should map to an `Outstanding` status that was never a real
+    InvoiceStatus variant, and review-ticket's AI step returned "clear"
+    anyway, despite having codebase read access. prep-ticket's loop
+    treats "clear" as done - a soft AI judgment call is not a reliable
+    backstop for a fact a grep resolves in milliseconds, so this doesn't
+    ask the model to try harder, it checks independently in Python and
+    overrules the verdict if the two disagree.
+
+    Appends a "### Mechanical Grounding" section (distinct from the AI's
+    own "### Concerns", which this never edits) and rewrites the
+    "### Verdict" line in place - prep_ticket.py's loop only reads that
+    line via VERDICT_RE, so a note alone wouldn't keep the loop going.
+    Each failure is also recorded to lib.DECLINED_CRITERIA_FILE (origin
+    "review-ticket") for visibility alongside every other grounding
+    checkpoint, even though the ledger's is_declined skip won't
+    necessarily match this exact wording again later - Narrower commonly
+    rewords a criterion between the raw ticket and the gap plan it
+    produces, so push_ticket's own grounding check (origin="ticket")
+    still re-verifies independently rather than trusting this pass alone.
+    """
+    criteria = lib.extract_acceptance_criteria(ticket_content)
+    failures: list[tuple[str, list[str]]] = []
+    for criterion in criteria:
+        reasons = lib.verify_criterion_grounding(criterion, lib.extract_existing_test_refs(criterion))
+        if reasons:
+            failures.append((criterion, reasons))
+            lib.record_declined(ticket_id, criterion, "review-ticket", reasons)
+    if not failures:
+        return report
+
+    section_lines = [
+        "",
+        "### Mechanical Grounding",
+        "The following acceptance criteria reference terms that don't appear anywhere",
+        "in the tracked codebase - checked mechanically, not by the AI review step above:",
+        "",
+    ]
+    for criterion, reasons in failures:
+        section_lines.append(f"- {criterion}")
+        for reason in reasons:
+            section_lines.append(f"  - {reason}")
+    report_with_section = report.rstrip() + "\n" + "\n".join(section_lines) + "\n"
+
+    return VERDICT_LINE_RE.sub(
+        r"\g<1>" + GROUNDING_OVERRIDE_VERDICT, report_with_section, count=1,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch a Linear ticket and report concerns about its quality before planning against it.",
@@ -177,6 +244,7 @@ def main() -> None:
     else:
         ticket_content = lib.fetch_ticket_text(args.ticket_id)
     report = run_review_step(ticket_content, args.model)
+    report = apply_mechanical_grounding(args.ticket_id, ticket_content, report)
     saved_path = save_review(args.ticket_id, ticket_content, report)
 
     render.print_line()

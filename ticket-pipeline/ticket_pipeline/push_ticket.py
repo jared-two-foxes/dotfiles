@@ -122,9 +122,36 @@ DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 VERDICT_RE = re.compile(r"^###\s*Verdict\s*\n+(\S+)", re.MULTILINE)
 
 
+def print_declined_criteria(newly_declined: list[tuple["lib.CriterionFrame", list[str]]]) -> None:
+    """
+    Same shape as next_step.py's helper of the same name - prints one
+    loud block per criterion a mechanical grounding check just rejected
+    (lib.filter_grounded_frames), which has already recorded each one to
+    lib.DECLINED_CRITERIA_FILE as a side effect. Duplicated rather than
+    imported: push_ticket.py and next_step.py are separate CLI entry
+    points that each own their own main()/local helpers, sharing only
+    through pipeline_lib, same as every other small piece of console
+    formatting in this pipeline.
+    """
+    if not newly_declined:
+        return
+    render.print_line()
+    noun = "criterion" if len(newly_declined) == 1 else "criteria"
+    render.print_line(f"-- {len(newly_declined)} {noun} failed mechanical grounding - NOT pushed:")
+    for frame, reasons in newly_declined:
+        render.print_line(f"   {frame.criterion}")
+        for reason in reasons:
+            render.print_line(f"     - {reason}")
+    render.print_line(
+        f"-- Not resolved automatically. Fix the ticket wording, or if this is a false "
+        f"positive, review and clear the entry from {lib.DECLINED_CRITERIA_FILE}."
+    )
+
+
 def resolve_ticket_frames(
     ticket_id: str,
     model: str,
+    step_models: dict[str, str],
     ticket_file_in: Path | None,
     threshold: int | None,
     force_split_ai: bool,
@@ -205,7 +232,7 @@ def resolve_ticket_frames(
 
         child_frames: list[lib.CriterionFrame] = []
         for child in result.created:
-            resolved = resolve_ticket_frames(child["id"], model, None, threshold, force_split_ai, dry_run)
+            resolved = resolve_ticket_frames(child["id"], model, step_models, None, threshold, force_split_ai, dry_run)
             if resolved is None:
                 return None
             child_frames += resolved
@@ -228,7 +255,7 @@ def resolve_ticket_frames(
     # content already there and doesn't re-fetch.
     lib.remove_scratch_files((lib.TICKET_FILE, lib.PLAN_FILE, lib.GAP_PLAN_FILE))
     lib.TICKET_FILE.write_text(ticket_content, encoding="utf-8")
-    lib.walk(lib.build_planning_blocks(ticket_id, model, ticket_file_in=lib.TICKET_FILE))
+    lib.walk(lib.build_planning_blocks(ticket_id, model, step_models=step_models, ticket_file_in=lib.TICKET_FILE))
     gap_plan_content = lib.GAP_PLAN_FILE.read_text(encoding="utf-8")
 
     criteria = lib.extract_acceptance_criteria(gap_plan_content)
@@ -236,7 +263,7 @@ def resolve_ticket_frames(
         render.print_line(f"-- {ticket_id}: no gap found. All acceptance criteria already satisfied.")
         return []
 
-    return [
+    candidate_frames = [
         lib.CriterionFrame(
             ticket=ticket_id,
             criterion=criterion,
@@ -250,6 +277,14 @@ def resolve_ticket_frames(
         )
         for criterion in criteria
     ]
+    frames, newly_declined, skipped_count = lib.filter_grounded_frames(candidate_frames)
+    print_declined_criteria(newly_declined)
+    if skipped_count:
+        render.print_line(
+            f"-- {ticket_id}: skipped {skipped_count} criteria already in "
+            f"{lib.DECLINED_CRITERIA_FILE} (previously declined)."
+        )
+    return frames
 
 
 def main() -> None:
@@ -262,7 +297,7 @@ def main() -> None:
     parser.add_argument("ticket_id", help="Linear ticket ID, e.g. NEB-42")
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
+        default=None,
         help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
     )
     parser.add_argument(
@@ -346,7 +381,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     verbosity.setup_logging(args.log_level)
-    model = args.model
+    model, step_models = lib.resolve_step_models(lib.PIPELINE_CONFIG_FILE, args.model)
     ticket_id = args.ticket_id
 
     # ── Guard: runs before any file is touched ─────────────────────────────
@@ -423,7 +458,7 @@ def main() -> None:
             render.print_line("-- No gap found. All acceptance criteria already satisfied. Nothing pushed.")
             render.print_line(f"-- Token usage: {ai_client.usage}")
             return
-        frames = [
+        candidate_frames = [
             lib.CriterionFrame(
                 ticket=ticket_id,
                 criterion=criterion,
@@ -437,9 +472,23 @@ def main() -> None:
             )
             for criterion in criteria
         ]
+        frames, newly_declined, skipped_count = lib.filter_grounded_frames(candidate_frames)
+        print_declined_criteria(newly_declined)
+        if skipped_count:
+            render.print_line(
+                f"-- Skipped {skipped_count} criteria already in {lib.DECLINED_CRITERIA_FILE} "
+                f"(previously declined)."
+            )
+        if not frames:
+            render.print_line(
+                f"-- 0 of {len(criteria)} pushed - all were previously declined or failed "
+                f"mechanical grounding this run. See {lib.DECLINED_CRITERIA_FILE}."
+            )
+            render.print_line(f"-- Token usage: {ai_client.usage}")
+            return
     else:
         frames = resolve_ticket_frames(
-            ticket_id, model, args.ticket_file_in, args.split_threshold, args.force_split_ai, args.dry_run,
+            ticket_id, model, step_models, args.ticket_file_in, args.split_threshold, args.force_split_ai, args.dry_run,
         )
         if frames is None:
             render.print_line(f"-- Token usage: {ai_client.usage}")

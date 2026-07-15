@@ -89,6 +89,13 @@ PIPELINE_LOG_FILE = Path(".pipeline-log.jsonl")
 # of truth - see CriterionFrame/load_stack/save_stack below.
 CRITERIA_STACK_FILE = Path(".criteria-stack.json")
 
+# Ledger of criteria a mechanical grounding check rejected before they
+# ever became a stack frame - see verify_criterion_grounding/
+# filter_grounded_frames. Append-only, never read back into the stack
+# itself; its existence is what makes a decline sticky across repeated
+# next_step/push_ticket calls (see DeclinedCriterion/is_declined).
+DECLINED_CRITERIA_FILE = Path(".declined-criteria.json")
+
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
@@ -104,6 +111,46 @@ AUTO_PREAMBLE = (
     "in the ticket. For each one, state the question and then answer it with your "
     "best inference from the ticket context. Then produce the full TDD plan.\n\n"
 )
+
+DEFAULT_MODEL = "opencode:gpt-5.4-mini" # ultimate fallback for unlested steps
+
+DEFAULT_STEP_MODELS: dict[str, str] = {
+    "review": "opencode:claude-sonnet-4-6",
+    "plan": "opencode:claude-sonnet-4-6",
+    "narrow": "opencode:claude-sonnet-4-6",
+}
+
+USER_CONFIG_FILE = Path.home() / ".config" / "scaffold.toml"
+
+def resolve_step_models(
+    project_config_path: Path, cli_model: str | None
+) -> tuple[str, dict[str, str]]:
+    """
+    Resolves per-step model overrides across three config levels plus
+    the CLI flag. Returns (fallback_model, step_models) where step_models
+    is a merged dict of per-step overrides and fallback_model is used for
+    any step not in step_models.
+
+    Precedence (highest wins):
+      1. --model CLI flag  → cli_model for ALL steps, step_models = {}
+      2. project .dev-pipeline.toml [step_models]
+      3. user ~/.config/scaffold.toml [step_models]
+      4. DEFAULT_STEP_MODELS (app-level per-step defaults)
+      5. DEFAULT_MODEL (ultimate fallback for unlisted steps)
+    """
+    if cli_model is not None:
+       return cli_model, {}
+
+    # Start with app-level defaults (lowest config priority)
+    step_models = dict(DEFAULT_STEP_MODELS)
+
+    # Merge user-level overrides
+    step_models.update(load_step_models(USER_CONFIG_FILE))
+
+    # Merge project-level overrides (highest config priority)
+    step_models.update(load_step_models(project_config_path))
+
+    return DEFAULT_MODEL, step_models
 
 # Per-toolchain defaults (rust/cargo, bazel, cmake/ctest, sveltekit/npm,
 # generic typescript/npm), used only if no project-local config file is
@@ -476,7 +523,7 @@ def walk(blocks: list[Block]) -> None:
             die_with_log(block.name, f"{block.name} ran but its postcondition still isn't satisfied.")
 
 
-def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | None = None) -> list[Block]:
+def build_planning_blocks(ticket_id: str, model: str, step_models: dict[str, str] | None = None, ticket_file_in: Path | None = None) -> list[Block]:
     """
     The fetch -> plan -> narrow Block list used by push_ticket.py to seed
     the stack, and by next_step.py's TICKET_VALIDATE phase to re-fetch
@@ -492,6 +539,10 @@ def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | Non
     that's still this pipeline's one canonical ticket-state file; this
     only changes where its content originally comes from.
     """
+    step_models = step_models or {}
+    plan_model = step_models.get("plan", model)
+    narrow_model = step_models.get("narrow", model)
+
     def fetch_ticket_content() -> str:
         if ticket_file_in is not None:
             if not ticket_file_in.is_file():
@@ -508,7 +559,7 @@ def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | Non
         Block(
             name="planner",
             check=lambda: PLAN_FILE.is_file() and "## Acceptance Criteria" in PLAN_FILE.read_text(encoding="utf-8"),
-            run=lambda: run_plan_step(TICKET_FILE.read_text(encoding="utf-8"), model, ticket_id=ticket_id),
+            run=lambda: run_plan_step(TICKET_FILE.read_text(encoding="utf-8"), plan_model, ticket_id=ticket_id),
         ),
         Block(
             name="narrower",
@@ -516,7 +567,7 @@ def build_planning_blocks(ticket_id: str, model: str, ticket_file_in: Path | Non
             run=lambda: run_narrow_step(
                 TICKET_FILE.read_text(encoding="utf-8"),
                 PLAN_FILE.read_text(encoding="utf-8"),
-                model,
+                narrow_model,
                 ticket_id=ticket_id,
             ),
         ),
@@ -549,13 +600,15 @@ def load_pipeline_config(config_path: Path) -> dict:
     with config_path.open("rb") as f:
         data = tomllib.load(f)
 
-    unknown = set(data) - set(toolchain.commands)
+    unknown = set(data) - set(toolchain.commands) - {"step_models"}
     if unknown:
         die(
             f"{config_path}: unknown key(s) {sorted(unknown)}. "
             f"Allowed: {sorted(toolchain.commands)}"
         )
     for key, value in data.items():
+        if key not in toolchain.commands:
+            continue
         if not isinstance(value, str) or not value.strip():
             die(f"{config_path}: '{key}' must be a non-empty string")
         commands[key] = value
@@ -1359,6 +1412,269 @@ def ensure_validating_sentinel(ticket_id: str) -> None:
     )])
 
 
+# ---------------------------------------------------------------------------
+# Declined-criteria ledger - .declined-criteria.json records every
+# criterion a mechanical grounding check has rejected (see
+# verify_criterion_grounding/filter_grounded_frames below), so a
+# criterion Narrower or a reviewer regenerates identically on a later run
+# doesn't need a human to re-notice and re-diagnose the same already-
+# rejected claim. Append-only and never read back into the stack itself -
+# resolving a false positive is manual (edit or delete the offending
+# entry), the same recovery-by-editing-the-state-file precedent as
+# deleting .criteria-stack.json directly to abandon an in-progress
+# ticket.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DeclinedCriterion:
+    ticket: str
+    criterion: str        # verbatim, same text a CriterionFrame would carry
+    origin: str             # "ticket" | "validate-missed" | "review"
+    reasons: list[str]      # from verify_criterion_grounding
+    ts: str                   # ISO timestamp, for a human skimming the file
+
+
+def load_declined() -> list[DeclinedCriterion]:
+    """
+    Read .declined-criteria.json. Returns [] if the file does not exist
+    or is empty. Same hard-stop-on-corruption stance as load_stack - a
+    malformed ledger is worth a human's attention, not a silent reset.
+    """
+    if not DECLINED_CRITERIA_FILE.is_file():
+        return []
+    text = DECLINED_CRITERIA_FILE.read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as e:
+        die_with_log("grounding", f"{DECLINED_CRITERIA_FILE} is not valid JSON: {e}")
+    try:
+        return [DeclinedCriterion(**entry) for entry in raw]
+    except TypeError as e:
+        die_with_log("grounding", f"{DECLINED_CRITERIA_FILE} does not match the expected schema: {e}")
+
+
+def is_declined(ticket: str, criterion: str) -> bool:
+    """
+    Exact string match on (ticket, criterion) - deliberately not fuzzy. A
+    criterion Narrower rewords slightly between runs won't match a prior
+    decline and will be re-checked from scratch by
+    verify_criterion_grounding; fuzzy matching would risk conflating two
+    genuinely different criteria that happen to share wording, which is
+    worse than occasionally re-flagging the same underlying fact twice.
+    """
+    return any(d.ticket == ticket and d.criterion == criterion for d in load_declined())
+
+
+def record_declined(ticket: str, criterion: str, origin: str, reasons: list[str]) -> None:
+    """
+    Appends one entry and saves. Never overwrites or dedupes existing
+    entries - the ledger is a record of what's been flagged and when, not
+    live state like the stack, so there's no "current" entry to replace.
+    """
+    entries = load_declined()
+    entries.append(DeclinedCriterion(
+        ticket=ticket, criterion=criterion, origin=origin, reasons=reasons,
+        ts=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    ))
+    DECLINED_CRITERIA_FILE.write_text(
+        json.dumps([asdict(e) for e in entries], indent=2) + "\n", encoding="utf-8"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mechanical criterion grounding - a non-AI, non-interactive check that a
+# freshly-generated criterion's own factual claims (a referenced existing
+# test, a bare symbol-shaped term) actually hold against the codebase,
+# before that criterion becomes a stack frame and starts costing further
+# AI cycles. See criterion-grounding-plan.md for the full design and the
+# SA-454 case this was built to catch: a criterion claiming QuickBooks
+# invoices should map to an `Outstanding` status that was never a real
+# InvoiceStatus variant - traced back to the raw ticket text itself, not
+# something Narrower invented independently, and missed by review-ticket
+# too. Applied to every real criterion regardless of origin (see
+# GROUNDING_CHECKED_ORIGINS/filter_grounded_frames) - originally scoped
+# to validate-missed/review only, widened after that finding showed the
+# same hallucination can arrive via the raw ticket text and flow straight
+# into an origin="ticket" frame with nobody having actually grounded it
+# against the codebase first.
+# ---------------------------------------------------------------------------
+
+GROUNDING_CANDIDATE_RE = re.compile(r"\b[A-Z][a-zA-Z0-9]{2,}\b")
+
+# Deliberately near-empty - grown from real false positives observed in
+# practice, not populated speculatively (see criterion-grounding-plan.md's
+# Constraints). Case-sensitive, matched as whole words.
+GROUNDING_STOPLIST: frozenset[str] = frozenset()
+
+
+def extract_grounding_candidates(criterion: str) -> list[str]:
+    """
+    Pulls "claim tokens" - bare capitalized words that read as symbol
+    references (a status/variant/type name) rather than prose - out of a
+    criterion's visible text only (before its trailing HTML comment; the
+    comment is Narrower's own reasoning about the gap, not itself a claim
+    to verify).
+
+    Deliberately not backtick-aware: this codebase's own gap-plan
+    convention nests backticks without escaping (the whole criterion is
+    backtick-wrapped, and individual terms inside it are too), so a naive
+    `` `([^`]+)` `` regex pairs the wrong spans - verified directly
+    against the SA-454 criterion, where it captures prose fragments ("to",
+    ", and") instead of the terms ("Outstanding", "Paid"). Scanning the
+    raw text for bare capitalized words, treating backticks as ordinary
+    characters, sidesteps the nesting problem entirely.
+
+    The first token is always dropped (sentence-initial capitalization,
+    not a symbol claim), duplicates are deduped preserving order, and
+    anything in GROUNDING_STOPLIST is dropped.
+    """
+    visible = criterion.split(" <!--", 1)[0]
+    matches = GROUNDING_CANDIDATE_RE.findall(visible)
+    if not matches:
+        return []
+    seen: set[str] = {matches[0]}
+    candidates = []
+    for token in matches[1:]:
+        if token in seen or token in GROUNDING_STOPLIST:
+            continue
+        seen.add(token)
+        candidates.append(token)
+    return candidates
+
+
+def check_symbol_grounding(candidates: list[str]) -> list[str]:
+    """
+    For each candidate token, runs `git grep -q -F -w -- <token>` (fixed
+    string, whole word, tracked files only - the default git grep scope,
+    no --untracked) from the repo root. Returns the subset with zero
+    matches anywhere in tracked source.
+
+    Case-sensitive and tracked-only are both deliberate, not incidental:
+    a real symbol would need to appear capitalized as such somewhere - a
+    lenient, case-insensitive search would also match the common-English
+    reading of the same word in prose/comments and defeat the point.
+    Tracked-only also means this can never be fooled by the very
+    criterion text it's checking: this pipeline's own scratch files
+    (.gap-plan.md, .criteria-stack.json, etc.) are untracked (see
+    _SCAFFOLDING_PATHS), so git grep never finds a candidate there.
+
+    A `git grep` exit code other than 0 (found) or 1 (not found) - e.g.
+    128 outside a git working tree - is treated as inconclusive, not a
+    hallucination signal, and is never flagged: this check exists to
+    catch a fabricated claim, not to misreport an environment problem as
+    one.
+    """
+    ungrounded = []
+    for token in candidates:
+        result = subprocess.run(
+            ["git", "grep", "-q", "-F", "-w", "--", token],
+            capture_output=True, check=False,
+        )
+        if result.returncode == 1:
+            ungrounded.append(token)
+        elif result.returncode not in (0, 1):
+            log.debug(
+                "-- git grep errored checking grounding candidate %r (exit %d) - not flagging it.",
+                token, result.returncode,
+            )
+    return ungrounded
+
+
+def verify_existing_test_refs_resolve(existing_test_refs: list[str]) -> list[str]:
+    """
+    For each "file::name" ref, confirms the file exists and that `name`
+    (the part after the last "::") appears somewhere in it as a whole
+    word - a plain text search, not full AST parsing, language-agnostic
+    on purpose (unlike implement_step.py's brace-counting
+    _extract_function_block, this only needs to know the name exists
+    *somewhere* plausible, not extract its full body). Returns one
+    human-readable reason per ref that doesn't resolve.
+    """
+    unresolved = []
+    for ref in existing_test_refs:
+        if "::" not in ref:
+            unresolved.append(f"existing_test ref '{ref}' is not in 'file::name' shape")
+            continue
+        file_part, _, name = ref.rpartition("::")
+        path = Path(file_part)
+        if not path.is_file():
+            unresolved.append(f"existing_test ref '{ref}': file does not exist")
+            continue
+        try:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            unresolved.append(f"existing_test ref '{ref}': could not read file ({e})")
+            continue
+        if not re.search(r"\b" + re.escape(name) + r"\b", content):
+            unresolved.append(f"existing_test ref '{ref}': no symbol named '{name}' found in {file_part}")
+    return unresolved
+
+
+def verify_criterion_grounding(criterion: str, existing_test_refs: list[str]) -> list[str]:
+    """
+    Combines both mechanical grounding checks (see module comment above)
+    into the reasons a criterion fails grounding. Empty list means
+    grounded - safe to build a real stack frame from.
+    """
+    reasons = list(verify_existing_test_refs_resolve(existing_test_refs))
+    candidates = extract_grounding_candidates(criterion)
+    ungrounded = check_symbol_grounding(candidates)
+    reasons += [
+        f"claims `{token}` but no tracked file contains that token" for token in ungrounded
+    ]
+    return reasons
+
+
+# Frame origins that are real acceptance criteria, checked by
+# filter_grounded_frames below. VALIDATING_ORIGIN ("ticket-validate") is
+# deliberately excluded - it's a control-flow sentinel, not a claim about
+# the codebase, and its criterion text ("(ticket validation pending)")
+# has no symbol-shaped tokens to check anyway.
+GROUNDING_CHECKED_ORIGINS = frozenset({"ticket", "validate-missed", "review"})
+
+
+def filter_grounded_frames(
+    frames: list[CriterionFrame],
+) -> tuple[list[CriterionFrame], list[tuple[CriterionFrame, list[str]]], int]:
+    """
+    The shared gate every frame-construction call site (push_ticket's two
+    paths, next_step's validate-missed and review-findings paths) runs
+    candidate frames through before any of them becomes real, AI-costing
+    work on the stack. Never blocks and never makes an AI call - see the
+    module comment above.
+
+    Returns (to_push, newly_declined, skipped_count):
+      - to_push: frames that passed grounding, or whose origin isn't
+        checked at all (VALIDATING_ORIGIN), in input order.
+      - newly_declined: (frame, reasons) pairs that failed grounding on
+        this call - already recorded to DECLINED_CRITERIA_FILE as a side
+        effect; the caller is responsible only for printing them.
+      - skipped_count: how many input frames were already in the ledger
+        from a prior call (is_declined) and were skipped without
+        re-running grounding at all.
+    """
+    to_push: list[CriterionFrame] = []
+    newly_declined: list[tuple[CriterionFrame, list[str]]] = []
+    skipped_count = 0
+    for frame in frames:
+        if frame.origin not in GROUNDING_CHECKED_ORIGINS:
+            to_push.append(frame)
+            continue
+        if is_declined(frame.ticket, frame.criterion):
+            skipped_count += 1
+            continue
+        reasons = verify_criterion_grounding(frame.criterion, frame.existing_test_refs)
+        if reasons:
+            record_declined(frame.ticket, frame.criterion, frame.origin, reasons)
+            newly_declined.append((frame, reasons))
+        else:
+            to_push.append(frame)
+    return to_push, newly_declined, skipped_count
+
+
 def extract_plan_context_for_criterion(criterion: str, gap_plan_text: str) -> str:
     """
     Extract the Implementation Plan entries relevant to `criterion`, for
@@ -1437,7 +1753,8 @@ def extract_review_findings(review_text: str) -> list[str]:
 def run_scoped_test(
     qualified_test_name: str, commands: dict, label: str, quiet: bool = False
 ) -> subprocess.CompletedProcess:
-    command_str = commands["test_filter_cmd"].format(filter=qualified_test_name)
+    clean_name = qualified_test_name.strip().strip("`")
+    command_str = commands["test_filter_cmd"].format(filter=clean_name)
     return run_command(command_str, label, quiet=quiet)
 
 
@@ -1520,7 +1837,7 @@ def run_lint_gate(commands: dict) -> None:
 _SCAFFOLDING_PATHS = frozenset(
     str(p) for p in (
         TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE,
-        PIPELINE_LOG_FILE, CRITERIA_STACK_FILE,
+        PIPELINE_LOG_FILE, CRITERIA_STACK_FILE, DECLINED_CRITERIA_FILE,
     )
 )
 
@@ -1558,7 +1875,7 @@ def git_diff_for_file(path: str) -> str:
     modified an existing test rather than writing a new one (see
     run_test_quality_review). Returns "" on any failure (not a tracked
     file yet, git error, etc.) rather than raising - this is advisory
-    input to an advisory-only reviewer, never worth failing a run over.
+    input to the test-quality reviewer, never worth failing a run over.
     """
     try:
         result = subprocess.run(
@@ -1584,6 +1901,22 @@ def load_smoke_cmd(config_path: Path) -> str | None:
     value = data.get("smoke_cmd")
     return value if isinstance(value, str) and value.strip() else None
 
+def load_step_models(config_path: Path) -> dict[str, str]:
+    """
+    Per-step model overrides from .dev-pipeline.toml's [step_models]
+    table. Keys are step names (review, plan, narrow); values are model
+    IDs. Missing keys fall back to the --model default. Only used when
+    --model is NOT passed on the command line — a CLI model override
+    takes precedence over this table for all steps.
+    """
+    if not config_path.exists():
+        return {}
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    table = data.get("step_models", {})
+    if not isinstance(table, dict):
+        return {}
+    return {k: v for k, v in table.items() if isinstance(v, str) and v.strip()}
 
 def run_smoke_gate(smoke_cmd: str | None) -> None:
     """
@@ -1610,6 +1943,14 @@ def run_smoke_gate(smoke_cmd: str | None) -> None:
 # extract_plan_context_for_criterion below), not the full gap plan - the
 # caller (push_ticket.py, at frame-build time) does the scoping once, so
 # this layer doesn't need to strip anything out of a full plan itself.
+#
+# run_test_for_criterion_with_full_retry is the WRITE_TEST phase's current
+# entry point: a single three-gate loop (compile -> red/green -> quality
+# review) sharing one bounded attempt budget, with the quality review
+# gating on both red and green tests and falling back to advisory on
+# budget exhaustion. run_test_for_criterion_with_compile_retry is the
+# older compile-gate-only variant (kept for bench, which calls the plain
+# run_test_for_criterion instead).
 # ---------------------------------------------------------------------------
 
 TEST_WITNESS_RE = re.compile(r"TEST_WITNESS:\s*(.+?)\s*::\s*(.+)$", re.MULTILINE)
@@ -1626,7 +1967,7 @@ def _parse_test_witnesses(text: str) -> list[tuple[str, str]]:
     only change is capturing every match instead of just the first.
     """
     return [
-        (file_path.strip(), test_name.strip())
+        (file_path.strip().strip("`"), test_name.strip().strip("`"))
         for file_path, test_name in TEST_WITNESS_RE.findall(text)
     ]
 
@@ -1710,6 +2051,50 @@ def build_test_criterion_fix_prompt(
         f"criterion must remain covered exactly as before; only the "
         f"compile error should be fixed.\n\n"
         f"Compile error:\n\n```\n{error_output}\n```"
+    )
+
+
+def build_test_criterion_quality_fix_prompt(
+    criterion: str,
+    plan_context: str,
+    file_paths: list[str],
+    test_names: list[str],
+    quality_concern: str,
+    test_was_green: bool,
+) -> str:
+    instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
+    file_list = ", ".join(file_paths)
+    green_note = (
+        "Your test passed immediately (green) when run against the current "
+        "code, but the reviewer says it doesn't actually exercise the "
+        "criterion. This could mean the test is tautological or trivially "
+        "satisfiable, or that the criterion is genuinely already satisfied - "
+        "either way, amend the test to genuinely verify the behaviour "
+        "described. If the behaviour truly is already implemented, the "
+        "amended test should still pass, but by actually exercising the real "
+        "code path - not by asserting a value the test itself set."
+        if test_was_green else
+        "Your test is red (good - it detects a real gap), but the reviewer "
+        "says it doesn't properly cover the criterion. Amend it to actually "
+        "exercise the behaviour described."
+    )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"You already wrote (a) test(s) for exactly this one acceptance "
+        f"criterion, and only this one:\n\n{criterion}\n\n"
+        f"but an independent quality reviewer flagged "
+        f"{'it' if len(file_paths) == 1 else 'them'} as not properly "
+        f"covering the criterion's behaviour. {green_note}\n\n"
+        f"Do not weaken, skip, or remove any test, and do not implement "
+        f"the production behaviour. The criterion must remain covered "
+        f"exactly; only the quality concern should be addressed.\n\n"
+        f"read_file {file_list} and fix {'it' if len(file_paths) == 1 else 'them'} "
+        f"with write_file so the suite still compiles and the criterion is "
+        f"genuinely exercised.\n\n"
+        f"Reviewer's concern:\n\n{quality_concern}"
     )
 
 
@@ -1815,12 +2200,214 @@ def run_test_for_criterion_with_compile_retry(
     return file_paths, test_names, compile_result
 
 
+def _run_tester_step(
+    prompt: str, model: str, ticket_id: str | None, criterion: str
+) -> tuple[list[str], list[str]]:
+    """
+    Shared "run the Tester once on this prompt, parse its TEST_WITNESS
+    lines" core used by both run_test_for_criterion_with_compile_retry
+    and run_test_for_criterion_with_full_retry. Returns parallel
+    (file_paths, test_names) lists in witness order; dies on a tool/AI
+    failure, a run that wrote no files, or a run with no witness line -
+    same fail-fast contract every Tester call already had, factored out
+    only to keep the two retry loops from duplicating ~25 lines.
+    """
+    test_files: list[str] = []
+
+    def attempt_step():
+        test_files.clear()
+        return run_with_tools(
+            prompt,
+            tools.READ_WRITE_TOOLS,
+            tools.make_executor(written_paths=test_files),
+            "test-criterion",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        )
+
+    try:
+        result = run_ai_step_with_retry(
+            attempt_step, "test-criterion", criterion=criterion, ticket=ticket_id
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
+    if not test_files:
+        die_with_log(
+            "test-criterion", "Tester finished without writing any test files.",
+            criterion=criterion, ticket=ticket_id,
+        )
+    render_step_output(result.text)
+    witnesses = _parse_test_witnesses(result.text)
+    if not witnesses:
+        die_with_log(
+            "test-criterion",
+            "Tester's final answer did not include a TEST_WITNESS line (see output above).",
+            criterion=criterion, ticket=ticket_id,
+        )
+    return [w[0] for w in witnesses], [w[1] for w in witnesses]
+
+
+def run_test_for_criterion_with_full_retry(
+    criterion: str,
+    plan_context: str,
+    model: str,
+    commands: dict,
+    max_attempts: int = 5,
+    ticket_id: str | None = None,
+    existing_test_refs: list[str] | None = None,
+) -> tuple[
+    list[str],
+    list[str],
+    list[subprocess.CompletedProcess],
+    subprocess.CompletedProcess | None,
+    str | None,
+]:
+    """
+    The WRITE_TEST phase's unified loop: gates a freshly-written test on
+    three checks in sequence, sharing one bounded attempt budget across
+    all of them:
+
+      Gate 1 - compile (test_compile_cmd). On failure, feed the compile
+               error back to the Tester via build_test_criterion_fix_prompt.
+      Gate 2 - run the scoped tests (run_scoped_tests) to observe
+               red/green. Observation only here; the caller
+               (do_write_test) dispatches on the returned results.
+      Gate 3 - quality review (run_test_quality_review), run on *both*
+               red and green tests. On FLAGGED, feed the reviewer's
+               concern back to the Tester via
+               build_test_criterion_quality_fix_prompt (telling it
+               whether the flagged test was red or green).
+
+    A clean pass on all three exits the loop early. If the budget is
+    exhausted, the outcome depends on which gate is still failing:
+    compile still failing is fatal (the caller dies on the returned
+    compile_result, same as run_test_for_criterion_with_compile_retry
+    always did); quality still flagged falls back to advisory - the
+    concern is returned to the caller to print and log, and the test is
+    accepted. A failed quality-review AI call degrades to None inside
+    run_test_quality_review, which this loop treats as "gate passed" -
+    better to proceed than die on an infrastructure failure in a side
+    channel.
+
+    Returns (file_paths, test_names, test_results, compile_result,
+    quality_concern):
+      - file_paths/test_names: parallel lists in witness order.
+      - test_results: one CompletedProcess per test from the last
+        iteration that reached Gate 2 (what do_write_test needs for
+        red/green dispatch). Empty if compile never succeeded.
+      - compile_result: the last compile gate's CompletedProcess (None
+        only if the loop never ran a compile gate). Caller checks
+        returncode != 0 for the fatal path.
+      - quality_concern: None if the quality review passed (or was
+        never reached due to compile failure); the flagged concern
+        string if the loop exhausted with quality still flagged
+        (advisory fallback).
+
+    existing_test_refs affects only the attempt-1 prompt (same as the
+    compile-retry variant); fix prompts already say "read_file {files}
+    and fix them" regardless of new vs. modified.
+    """
+    file_paths: list[str] = []
+    test_names: list[str] = []
+    failure_kind: str | None = None  # "compile" | "quality-red" | "quality-green"
+    last_error: str | None = None    # compile error OR quality concern text
+    compile_result: subprocess.CompletedProcess | None = None
+    test_results: list[subprocess.CompletedProcess] = []
+    quality_concern: str | None = None
+
+    for attempt in range(1, max_attempts + 1):
+        # -- Select prompt ------------------------------------------------
+        if attempt == 1:
+            prompt = build_test_criterion_prompt(criterion, plan_context, existing_test_refs)
+        elif failure_kind == "compile":
+            log.warning(
+                "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
+                attempt - 1, max_attempts,
+            )
+            prompt = build_test_criterion_fix_prompt(criterion, plan_context, file_paths, last_error)
+        elif failure_kind in ("quality-red", "quality-green"):
+            log.warning(
+                "-- Test-quality review flagged (attempt %d/%d). Feeding the concern back to Tester.",
+                attempt - 1, max_attempts,
+            )
+            prompt = build_test_criterion_quality_fix_prompt(
+                criterion, plan_context, file_paths, test_names,
+                last_error, test_was_green=(failure_kind == "quality-green"),
+            )
+
+        # -- Run Tester ---------------------------------------------------
+        file_paths, test_names = _run_tester_step(prompt, model, ticket_id, criterion)
+
+        # -- Gate 1: compile ---------------------------------------------
+        compile_result = run_command(
+            commands["test_compile_cmd"], f"test compile gate (attempt {attempt}/{max_attempts})"
+        )
+        if compile_result.returncode != 0:
+            failure_kind = "compile"
+            last_error = (compile_result.stdout or "") + (compile_result.stderr or "")
+            log_event(
+                "test-criterion", "retry",
+                error=f"compile failed (attempt {attempt}/{max_attempts})",
+                criterion=criterion, ticket=ticket_id,
+            )
+            continue
+
+        # -- Gate 2: run scoped tests ------------------------------------
+        test_results = run_scoped_tests(
+            test_names, commands, f"red check (attempt {attempt}/{max_attempts})", quiet=True
+        )
+
+        # -- Gate 3: quality review --------------------------------------
+        test_red_green = [r.returncode != 0 for r in test_results]
+        concern = run_test_quality_review(
+            criterion, plan_context, file_paths, test_names,
+            existing_test_refs or [], model, ticket_id=ticket_id,
+            test_red_green=test_red_green,
+        )
+        if concern:
+            any_red = any(test_red_green)
+            failure_kind = "quality-red" if any_red else "quality-green"
+            last_error = concern
+            quality_concern = concern
+            log_event(
+                "review-test-quality", "flagged", error=concern,
+                criterion=criterion, ticket=ticket_id,
+            )
+            render.print_line()
+            render.print_line(
+                f"-- Test-quality review flagged (attempt {attempt}/{max_attempts}, "
+                f"test is {'red' if any_red else 'green'}):"
+            )
+            render.print_line(concern)
+            continue
+
+        # -- All gates passed --------------------------------------------
+        quality_concern = None
+        return file_paths, test_names, test_results, compile_result, quality_concern
+
+    # -- Budget exhausted -----------------------------------------------
+    if compile_result is not None and compile_result.returncode != 0:
+        # Compile never succeeded - fatal. Hand the caller the last
+        # failing compile_result to die on; no test_results to dispatch.
+        return file_paths, test_names, [], compile_result, quality_concern
+
+    # Compile succeeded but quality still flagged - advisory fallback.
+    # test_results holds the last iteration's results for dispatch.
+    if quality_concern:
+        log.warning(
+            "-- Test-quality review still flagged after %d attempts (advisory, proceeding): %s",
+            max_attempts, quality_concern,
+        )
+    return file_paths, test_names, test_results, compile_result, quality_concern
+
+
 def build_test_quality_review_prompt(
     criterion: str,
     plan_context: str,
     test_files: list[str],
     test_names: list[str],
     existing_test_refs: list[str],
+    test_red_green: list[bool] | None = None,
 ) -> str:
     instructions = load_prompt_body(TEST_QUALITY_REVIEW_PROMPT_FILE)
     # Correlate each written/modified test against the hint list by
@@ -1828,7 +2415,7 @@ def build_test_quality_review_prompt(
     # witness output and the existing_test_refs hints already share the
     # same "file::name" shape.
     sections = []
-    for test_file, test_name in zip(test_files, test_names):
+    for idx, (test_file, test_name) in enumerate(zip(test_files, test_names)):
         ref_match = next(
             (ref for ref in existing_test_refs if ref == f"{test_file}::{test_name}"), None
         )
@@ -1846,7 +2433,16 @@ def build_test_quality_review_prompt(
             )
         else:
             modification_note = "This is a newly-written test."
-        sections.append(f"- {test_file} :: {test_name}\n  {modification_note}")
+        result_note = ""
+        if test_red_green is not None and idx < len(test_red_green):
+            is_red = test_red_green[idx]
+            result_note = (
+                "\n  Actual result: RED (failed when run against current code)"
+                if is_red else
+                "\n  Actual result: GREEN (passed when run against current code "
+                "- this test is not detecting any gap in the current implementation)"
+            )
+        sections.append(f"- {test_file} :: {test_name}\n  {modification_note}{result_note}")
     tests_block = "\n".join(sections)
     return (
         f"{instructions}\n\n---\n\n"
@@ -1866,26 +2462,37 @@ def run_test_quality_review(
     existing_test_refs: list[str],
     model: str,
     ticket_id: str | None = None,
+    test_red_green: list[bool] | None = None,
 ) -> str | None:
     """
-    Advisory-only: reviews the test(s) Tester just wrote or modified for
-    this criterion (almost always one; see test-criterion.prompt.md's
-    Step 3 for when it's more), returning a flagged-concern string, or
-    None if the reviewer found no concerns across any of them. Unlike
-    every other AI-calling step in this module, a failure here (AIError,
-    an unparseable verdict) is NEVER fatal - this whole function is a
-    side channel that must not take the pipeline down with it, so any
-    failure degrades to a single logged warning and a None return
-    (treated the same as "no concerns") rather than die_with_log. The
-    caller (next_step.py's do_write_test) surfaces a non-None result
-    alongside its normal pause message; it never gates anything on the
-    result.
+    Reviews the test(s) Tester just wrote or modified for this criterion
+    (almost always one; see test-criterion.prompt.md's Step 3 for when
+    it's more), returning a flagged-concern string, or None if the
+    reviewer found no concerns across any of them. Unlike every other
+    AI-calling step in this module, a failure here (AIError, an
+    unparseable verdict) is NEVER fatal - this whole function is a side
+    channel that must not take the pipeline down with it, so any failure
+    degrades to a single logged warning and a None return (treated the
+    same as "no concerns") rather than die_with_log. The caller
+    (next_step.py's do_write_test, via
+    run_test_for_criterion_with_full_retry) feeds a non-None result back
+    to the Tester for a bounded amendment attempt; a None return means
+    "quality gate passed, proceed," and a failed AI call degrading to
+    None means the loop proceeds without a quality check for that
+    attempt - better to proceed than to die on an infrastructure
+    failure in a side channel.
+
+    test_red_green (parallel to test_names; True = red, False = green)
+    gives the reviewer each test's actual run result as grounded
+    evidence rather than speculation; omitted (None) for backward compat
+    with any caller that didn't run the tests first.
     """
     try:
         result = run_ai_step_with_retry(
             lambda: run_with_tools(
                 build_test_quality_review_prompt(
-                    criterion, plan_context, test_files, test_names, existing_test_refs
+                    criterion, plan_context, test_files, test_names,
+                    existing_test_refs, test_red_green=test_red_green,
                 ),
                 tools.READ_ONLY_TOOLS,
                 tools.make_executor(allow_write=False),

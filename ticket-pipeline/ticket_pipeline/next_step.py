@@ -46,6 +46,16 @@ general N-test case; N=1 behaves exactly as it always has.
                                                (see above)
   top frame status == "done"               -> POP
 
+WRITE_TEST (do_write_test) runs a single unified three-gate loop -
+compile, then red/green, then an independent test-quality review -
+sharing one bounded attempt budget. The quality review is gating inside
+that loop on both red and green tests: FLAGGED feeds the concern back to
+the Tester for an amendment attempt. If the budget exhausts with
+quality still flagged, the concern falls back to advisory (printed and
+logged, test accepted) rather than killing the run; compile still
+failing at exhaustion stays fatal, as before. The origin-based
+green-trust check (below) is orthogonal to the quality gate.
+
 A test that comes back green immediately, the very first time WRITE_TEST
 writes it, is trusted unconditionally only when the criterion is
 origin="ticket" (the ticket's own initial criteria - one criterion's
@@ -302,12 +312,22 @@ def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual:
 
 def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
     """
-    Writes (or retries writing) frame's test(s), gated on compile
-    success. Almost always exactly one test; more than one only when
-    the criterion needed genuinely separate tests (test-criterion.
+    Writes (or retries writing) frame's test(s) through the unified
+    three-gate loop (lib.run_test_for_criterion_with_full_retry):
+    compile -> red/green -> test-quality review, sharing one bounded
+    attempt budget. Almost always exactly one test; more than one only
+    when the criterion needed genuinely separate tests (test-criterion.
     prompt.md's Step 3). At least one test still red is always a pause
     point (do_await_impl, never returns) - real work remains regardless
     of how many siblings are already green.
+
+    The quality review is *gating* inside that loop: if it flags, the
+    Tester gets the concern fed back and amends the test, up to the
+    shared budget. If the budget exhausts with quality still flagged,
+    the concern falls back to advisory here (printed + logged, test
+    accepted) rather than killing the run - and it runs on green tests
+    too, so a weak test that passes trivially gets a chance to be
+    amended before bubbling up as green-unconfirmed.
 
     Each test's green-at-write-time handling depends on origin:
       - origin="ticket" (the ticket's own initial criteria): trusted
@@ -328,18 +348,14 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
         observed - never re-applied on a later resume (recheck_test_frame
         trusts any test that goes red-then-green after this point, since
         that's necessarily real implementation work, not an untested
-        free pass).
-
-    Once every test compiles (before any red/green dispatch), an
-    independent, advisory-only test-quality review runs unconditionally
-    (see run_test_quality_review) - never gates anything here, just
-    printed immediately and logged if it flags a concern, so it's still
-    visible even on a path that doesn't pause (origin="ticket", every
-    test already green-and-done).
+        free pass). Orthogonal to the quality gate: a green test the
+        quality loop accepted can still be unconfirmed by origin.
     """
-    file_paths, test_names, compile_result = lib.run_test_for_criterion_with_compile_retry(
-        frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
-        existing_test_refs=frame.existing_test_refs,
+    file_paths, test_names, test_results, compile_result, quality_concern = (
+        lib.run_test_for_criterion_with_full_retry(
+            frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
+            existing_test_refs=frame.existing_test_refs,
+        )
     )
     if compile_result is None or compile_result.returncode != 0:
         exit_code = compile_result.returncode if compile_result is not None else "unknown"
@@ -350,34 +366,28 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
             ticket=frame.ticket,
         )
 
-    # Advisory-only, never gates anything below - printed immediately so
-    # it's visible even if this criterion turns out not to pause at all
-    # (origin="ticket", every test green-and-done, under --continuous or
-    # otherwise).
-    flagged = lib.run_test_quality_review(
-        frame.criterion, frame.plan_context, file_paths, test_names,
-        frame.existing_test_refs, model, ticket_id=frame.ticket,
-    )
-    if flagged:
+    # Advisory fallback: the quality gate is gating inside the loop, so
+    # reaching here with a non-None concern means the budget exhausted
+    # with quality still flagged. Printed so it's visible even on a path
+    # that doesn't pause (origin="ticket", every test green-and-done).
+    if quality_concern:
         lib.log_event(
-            "review-test-quality", "flagged", error=flagged,
+            "review-test-quality", "flagged-advisory-fallback", error=quality_concern,
             criterion=frame.criterion, ticket=frame.ticket,
         )
         render.print_line()
-        render.print_line("-- Test-quality review flagged a concern (advisory, not blocking):")
-        render.print_line(flagged)
+        render.print_line("-- Test-quality review still flagged after retries (advisory, not blocking):")
+        render.print_line(quality_concern)
 
     frame.test_files = file_paths
     frame.test_names = test_names
 
-    # quiet=True: a red result here is the expected outcome, not a real
-    # error, and do_await_impl below prints its own filtered version of
-    # this exact output - logging the raw dump at ERROR too would just
-    # be the same content twice, with the noisier copy first.
-    results = lib.run_scoped_tests(test_names, commands, "red check", quiet=True)
-    test_results = list(zip(file_paths, test_names, results))
-    red_names = [n for n, r in zip(test_names, results) if r.returncode != 0]
-    green_names = [n for n, r in zip(test_names, results) if r.returncode == 0]
+    # test_results is already populated by the loop (its last Gate 2
+    # run). do_await_impl below prints its own filtered version of the
+    # red output, so the loop ran those scoped tests quiet=True.
+    test_results_zipped = list(zip(file_paths, test_names, test_results))
+    red_names = [n for n, r in zip(test_names, test_results) if r.returncode != 0]
+    green_names = [n for n, r in zip(test_names, test_results) if r.returncode == 0]
     # Ticket-origin green is always trusted, so nothing from it is ever
     # "unconfirmed" - every other origin's green needs confirmation.
     unconfirmed = [] if frame.origin == "ticket" else green_names
@@ -407,7 +417,7 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
     frame.status = "test-written"
     frame.unconfirmed_tests = unconfirmed
     lib.save_stack(stack)
-    do_await_impl(frame, test_results)
+    do_await_impl(frame, test_results_zipped)
 
 
 def recheck_test_frame(
@@ -458,7 +468,7 @@ def recheck_test_frame(
     do_await_green_unconfirmed(frame)
 
 
-def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: dict, config_path: Path) -> None:
+def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path) -> None:
     just_popped_ticket = frame.ticket
     just_popped_criterion = frame.criterion
     lib.pop_frame()
@@ -468,7 +478,7 @@ def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: 
     render.print_line(f"-- Criterion done: {just_popped_criterion}")
 
     if not new_stack or new_stack[0].ticket != just_popped_ticket:
-        do_ticket_validate(just_popped_ticket, model, commands, config_path)
+        do_ticket_validate(just_popped_ticket, model, step_models, commands, config_path)
         return
 
     if not continuous:
@@ -479,7 +489,7 @@ def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, commands: 
     # straight into the new top frame's WRITE_TEST phase.
 
 
-def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: Path) -> None:
+def do_ticket_validate(ticket_id: str, model: str, step_models: dict[str, str], commands: dict, config_path: Path) -> None:
     """
     Full ticket-validation gate, run once a ticket's per-criterion
     frames are all popped: fresh re-fetch + re-narrow (safety net for
@@ -501,6 +511,9 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     ticket's "still needs validating" fact having vanished the moment
     its last real criterion was popped.
     """
+    plan_model = step_models.get("plan", model)
+    narrow_model = step_models.get("narrow", model)
+    review_model = step_models.get("review", model)
     lib.ensure_validating_sentinel(ticket_id)
 
     render.print_line()
@@ -512,9 +525,9 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     if lib.PLAN_FILE.is_file():
         plan_text = lib.PLAN_FILE.read_text(encoding="utf-8")
     else:
-        plan_text = lib.run_plan_step(ticket_content, model, ticket_id=ticket_id)
+        plan_text = lib.run_plan_step(ticket_content, plan_model, ticket_id=ticket_id)
 
-    gap_plan_content = lib.run_narrow_step(ticket_content, plan_text, model, ticket_id=ticket_id)
+    gap_plan_content = lib.run_narrow_step(ticket_content, plan_text, narrow_model, ticket_id=ticket_id)
     remaining = lib.extract_acceptance_criteria(gap_plan_content)
     if remaining:
         log.warning(
@@ -523,7 +536,7 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
             "criteria instead of failing.",
             len(remaining),
         )
-        missed_frames = [
+        candidate_frames = [
             lib.CriterionFrame(
                 ticket=ticket_id,
                 criterion=criterion,
@@ -537,15 +550,33 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
             )
             for criterion in remaining
         ]
-        lib.push_frames(missed_frames)
+        missed_frames, newly_declined, skipped_count = lib.filter_grounded_frames(candidate_frames)
+        if missed_frames:
+            lib.push_frames(missed_frames)
         render.print_line()
         render.print_line(
             f"-- Ticket validation's re-narrow found {len(remaining)} criteria the "
-            f"per-criterion gates missed. Pushed as new criteria. Run 'next_step' "
-            f"to begin addressing them."
+            f"per-criterion gates missed."
         )
-        for missed in missed_frames:
-            render.print_line(f"   {missed.criterion}")
+        if missed_frames:
+            render.print_line(
+                f"-- Pushed {len(missed_frames)} as new criteria. Run 'next_step' to "
+                f"begin addressing them."
+            )
+            for missed in missed_frames:
+                render.print_line(f"   {missed.criterion}")
+        print_declined_criteria(newly_declined)
+        if skipped_count:
+            render.print_line(
+                f"-- Skipped {skipped_count} criteria already in {lib.DECLINED_CRITERIA_FILE} "
+                f"(previously declined)."
+            )
+        if not missed_frames:
+            render.print_line(
+                f"-- 0 of {len(remaining)} pushed - all were previously declined or failed "
+                f"mechanical grounding this run. Ticket validation cannot proceed until this "
+                f"is resolved by a human - see {lib.DECLINED_CRITERIA_FILE}."
+            )
         render.print_line(f"-- Token usage: {ai_client.usage}")
         sys.exit(0)
 
@@ -578,7 +609,7 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     # for the reviewer. plan_text is the actual full ticket scope the
     # implementation was supposed to satisfy, same as the legacy
     # validate-and-review.py's review gate always used.
-    verdict, review_text = lib.run_review_gate(changed_files, plan_text, model, ticket_id=ticket_id)
+    verdict, review_text = lib.run_review_gate(changed_files, plan_text, review_model, ticket_id=ticket_id)
 
     if verdict == "APPROVED":
         # Validation is genuinely done now - remove the sentinel
@@ -603,6 +634,29 @@ def do_ticket_validate(ticket_id: str, model: str, commands: dict, config_path: 
     do_push_review_findings(ticket_id, review_text)
 
 
+def print_declined_criteria(newly_declined: list[tuple["lib.CriterionFrame", list[str]]]) -> None:
+    """
+    Prints one loud block per criterion a mechanical grounding check just
+    rejected (lib.filter_grounded_frames) - never silent, even though the
+    run itself never blocks on it. Each entry has already been recorded
+    to lib.DECLINED_CRITERIA_FILE by filter_grounded_frames as a side
+    effect; this only makes the rejection visible in this run's output.
+    """
+    if not newly_declined:
+        return
+    render.print_line()
+    noun = "criterion" if len(newly_declined) == 1 else "criteria"
+    render.print_line(f"-- {len(newly_declined)} {noun} failed mechanical grounding - NOT pushed:")
+    for frame, reasons in newly_declined:
+        render.print_line(f"   {frame.criterion}")
+        for reason in reasons:
+            render.print_line(f"     - {reason}")
+    render.print_line(
+        f"-- Not resolved automatically. Fix the ticket/gap-plan wording, or if this is a "
+        f"false positive, review and clear the entry from {lib.DECLINED_CRITERIA_FILE}."
+    )
+
+
 def do_push_review_findings(ticket_id: str, review_text: str) -> None:
     findings = lib.extract_review_findings(review_text)
     if not findings:
@@ -613,7 +667,7 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
             "for a failed review.",
             ticket=ticket_id,
         )
-    new_frames = [
+    candidate_frames = [
         lib.CriterionFrame(
             ticket=ticket_id,
             criterion=f"- [ ] {finding}",
@@ -625,20 +679,36 @@ def do_push_review_findings(ticket_id: str, review_text: str) -> None:
         )
         for finding in findings
     ]
-    lib.push_frames(new_frames)
+    new_frames, newly_declined, skipped_count = lib.filter_grounded_frames(candidate_frames)
+    if new_frames:
+        lib.push_frames(new_frames)
     render.print_line()
-    render.print_line(
-        f"-- Review found {len(findings)} issue(s). Pushed as new criteria. "
-        f"Run 'next_step' to begin addressing them."
-    )
-    for new_frame in new_frames:
-        render.print_line(f"   {new_frame.criterion}")
+    render.print_line(f"-- Review found {len(findings)} issue(s).")
+    if new_frames:
+        render.print_line(
+            f"-- Pushed {len(new_frames)} as new criteria. Run 'next_step' to begin "
+            f"addressing them."
+        )
+        for new_frame in new_frames:
+            render.print_line(f"   {new_frame.criterion}")
+    print_declined_criteria(newly_declined)
+    if skipped_count:
+        render.print_line(
+            f"-- Skipped {skipped_count} finding(s) already in {lib.DECLINED_CRITERIA_FILE} "
+            f"(previously declined)."
+        )
+    if not new_frames:
+        render.print_line(
+            f"-- 0 of {len(findings)} pushed - all were previously declined or failed "
+            f"mechanical grounding this run. See {lib.DECLINED_CRITERIA_FILE}."
+        )
     render.print_line(f"-- Token usage: {ai_client.usage}")
     sys.exit(0)
 
 
 def step(
     model: str, commands: dict, continuous: bool, config_path: Path,
+    step_models: dict[str, str] | None = None,
     accept_green: bool = False, accept_manual: bool = False,
 ) -> None:
     """
@@ -647,6 +717,7 @@ def step(
     (a green test cascading into POP, or --continuous advancing into
     the next criterion) - every other path exits the process directly.
     """
+    step_models = step_models or {}
     stack = lib.load_stack()
     if not stack:
         render.print_line("-- No work remaining. Stack is empty.")
@@ -661,7 +732,7 @@ def step(
         # this sentinel behind - re-enter validation directly, no pop
         # needed (there's nothing left to pop; the real criteria are
         # long gone).
-        do_ticket_validate(frame.ticket, model, commands, config_path)
+        do_ticket_validate(frame.ticket, model, step_models, commands, config_path)
         return
 
     if frame.status == GREEN_UNCONFIRMED_STATUS:
@@ -693,7 +764,7 @@ def step(
     # (WRITE_TEST/the phase-check above both cascade into this same step()
     # call rather than persisting a "done" frame across invocations), but
     # handled the same way regardless of how we got here.
-    do_pop(frame, continuous, model, commands, config_path)
+    do_pop(frame, continuous, model, step_models, commands, config_path)
 
 
 def main() -> None:
@@ -705,8 +776,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default=DEFAULT_MODEL,
-        help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}).",
+        default=None,
+        help=f"opencode zen model ID to use (default: {DEFAULT_MODEL}). "
+             f"Overrides [step_models] in .dev-pipeline.toml for all steps",
     )
     parser.add_argument(
         "--config",
@@ -759,9 +831,12 @@ def main() -> None:
     config_path = Path(args.config)
     commands = lib.load_pipeline_config(config_path)
 
+    model, step_models = lib.resolve_step_models(config_path, args.model)
+
     while True:
         step(
-            args.model, commands, args.continuous, config_path,
+            model, commands, args.continuous, config_path,
+            step_models=step_models,
             accept_green=args.accept_green, accept_manual=args.accept_manual,
         )
 

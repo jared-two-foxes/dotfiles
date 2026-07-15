@@ -1,0 +1,24 @@
+services:
+  pi:
+    # Image is selected by bin/pi-docker.ps1 (per-toolchain profile or
+    # per-project .pi/Dockerfile override) and built/tagged before this
+    # `run`. Default keeps a manual `docker compose run` working once the
+    # base image exists (see bin/pi-docker.ps1).
+    image: ${PI_IMAGE:-pi-base:local}
+    container_name: pi
+    stdin_open: true
+    tty: true
+    working_dir: ${CONTAINER_WORKDIR:-/scratch/workspace}
+
+    volumes:
+      - ${WORKSPACE:-/tmp}:${CONTAINER_WORKDIR:-/scratch/workspace}
+      - ../../pi/agent/cache/ollama-cloud-models.json:/root/.pi/agent/cache/ollama-cloud-models.json:ro
+
+    # .env is optional: if the file is absent Compose skips it instead of
+    # aborting, so `docker compose run` still starts (with whatever env the
+    # launcher script exports). The Linear extension mount is gated on a
+    # non-empty LINEAR_API_KEY in .env by bin/pi-docker.ps1, so a missing
+    # .env simply means no Linear tools — not a hard failure.
+    env_file:
+      - path: .env
+        required: false
