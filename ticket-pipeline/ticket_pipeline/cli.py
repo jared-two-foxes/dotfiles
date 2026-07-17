@@ -47,6 +47,10 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
         ),
     }),
     ("Seed & drive the criteria loop", {
+        "status": _Command(
+            "status",
+            "Show where the pipeline is and what to do next (no AI, no tests)",
+        ),
         "push-ticket": _Command(
             "push_ticket",
             "Fetch a ticket, plan+narrow it, and seed .criteria-stack.json",
