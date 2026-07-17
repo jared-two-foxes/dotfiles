@@ -118,7 +118,7 @@ SEARCH_IGNORED_DIR_NAMES = {
     ".git", ".hg", ".svn",
     "node_modules", "target", "dist", "build",
     "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
-    ".venv", "venv",
+    ".venv", "venv", ".tox", "htmlcov", ".eggs",
 }
 
 DEFAULT_SEARCH_MAX_RESULTS = 200

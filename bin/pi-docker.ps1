@@ -40,7 +40,7 @@ if (Test-Path $projectDockerfile) {
     $slug = $slug.Trim('-')
     if (-not $slug) { $slug = 'project' }
     & $buildBase
-    $imageTag = "pi-project-$slug:local"
+    $imageTag = "pi-project-${slug}:local"
     & docker build -t $imageTag -f $projectDockerfile $workspace | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "per-project image build failed ($imageTag)" }
 }
@@ -58,7 +58,7 @@ if (-not $imageTag -and (Test-Path (Join-Path $workspace '.pi/profile'))) {
             Write-Warning "ignoring unknown .pi/profile value '$named'; falling back to auto-detect"
         } else {
             & $buildBase
-            $imageTag = "pi-$named:local"
+            $imageTag = "pi-${named}:local"
             & docker build -t $imageTag (Join-Path $repoRoot "docker/pi/profiles/$named") | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "profile image build failed ($imageTag)" }
         }
@@ -66,23 +66,26 @@ if (-not $imageTag -and (Test-Path (Join-Path $workspace '.pi/profile'))) {
 }
 
 # 3. Marker-file auto-detect (mirrors ticket-pipeline's toolchains.py
-#    priority, minus bazel/cmake which have no profile yet).
+#    priority, minus bazel/cmake which have no profile yet). Python
+#    before TypeScript: a Python project may have a package.json for
+#    docs/linting tooling but is not a Node project.
 if (-not $imageTag) {
     $detected = $null
     if (Test-Path (Join-Path $workspace 'Cargo.toml')) {
         $detected = 'rust'
+    } elseif ((Test-Path (Join-Path $workspace 'pyproject.toml')) -or `
+              (Test-Path (Join-Path $workspace 'setup.py')) -or `
+              (Test-Path (Join-Path $workspace 'setup.cfg')) -or `
+              (Test-Path (Join-Path $workspace 'requirements.txt'))) {
+        $detected = 'python'
     } elseif ((Test-Path (Join-Path $workspace 'svelte.config.js')) -or `
               (Test-Path (Join-Path $workspace 'svelte.config.ts')) -or `
               (Test-Path (Join-Path $workspace 'package.json'))) {
         $detected = 'typescript'
-    } elseif ((Test-Path (Join-Path $workspace 'pyproject.toml')) -or `
-              (Test-Path (Join-Path $workspace 'setup.py')) -or `
-              (Test-Path (Join-Path $workspace 'requirements.txt'))) {
-        $detected = 'python'
     }
     if ($detected) {
         & $buildBase
-        $imageTag = "pi-$detected:local"
+        $imageTag = "pi-${detected}:local"
         & docker build -t $imageTag (Join-Path $repoRoot "docker/pi/profiles/$detected") | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "profile image build failed ($imageTag)" }
     }

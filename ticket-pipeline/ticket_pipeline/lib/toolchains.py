@@ -118,6 +118,38 @@ CMAKE = Toolchain(
     test_output_signal_pattern=r"Failed|Passed|tests passed|% tests passed|FAILED",
 )
 
+# Python projects using pytest. Python has no separate compile step,
+# so test_compile_cmd uses pytest's --collect-only (imports all test
+# modules and collects test items without running them - catches
+# syntax/import/collection errors, the closest analog to `cargo test
+# --no-run` for a dynamic language). build_cmd reuses the same command:
+# for a manual-verification criterion, "does the project's test suite
+# still collect cleanly" is the most useful gate available without a
+# real build step. Ruff covers both formatting and linting; projects
+# using black + flake8 (or others) override via .dev-pipeline.toml.
+# Placed after CMake but before SvelteKit/TypeScript: a pure Python
+# project won't have Cargo.toml/CMakeLists.txt, so it won't collide
+# with those, but it might have a package.json (docs tooling, linting),
+# so it must come before the npm-based toolchains to win correctly.
+PYTHON = Toolchain(
+    name="python (pytest)",
+    marker_files=("pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"),
+    commands={
+        "build_cmd": "python -m pytest --collect-only -q",
+        "test_compile_cmd": "python -m pytest --collect-only -q",
+        "test_cmd": "python -m pytest",
+        "test_filter_cmd": "python -m pytest {filter}",
+        "fmt_fix_cmd": "ruff format .",
+        "clippy_fix_cmd": "ruff check --fix .",
+        "fmt_check_cmd": "ruff format --check .",
+        "clippy_cmd": "ruff check .",
+    },
+    evidence_binary="pytest",
+    # pytest only ever runs tests - like ctest, no subcommand gate needed.
+    evidence_subcommands=None,
+    test_output_signal_pattern=r"FAILED|ERROR|====.*(passed|failed|error)",
+)
+
 # SvelteKit specifically (not generic TypeScript/Node) per the project
 # types this was built for - svelte-check is the natural "does this
 # typecheck" gate, which is more useful evidence than a plain build.
@@ -161,8 +193,10 @@ TYPESCRIPT = Toolchain(
 
 # Priority order for detection - first marker-file match wins. Bazel
 # before Cargo/CMake (monorepo-wrapping, see BAZEL's docstring note);
+# Python before SvelteKit/TypeScript (a Python project may have a
+# package.json for docs/linting tooling but is not a Node project);
 # SvelteKit before generic TypeScript (more specific marker).
-TOOLCHAINS: tuple[Toolchain, ...] = (BAZEL, RUST, CMAKE, SVELTEKIT, TYPESCRIPT)
+TOOLCHAINS: tuple[Toolchain, ...] = (BAZEL, RUST, CMAKE, PYTHON, SVELTEKIT, TYPESCRIPT)
 
 
 def detect_toolchain(root: Path = Path(".")) -> Toolchain | None:

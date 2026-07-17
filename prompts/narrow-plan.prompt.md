@@ -141,6 +141,23 @@ Final answer format below for exactly where.
   that doesn't change what a test suite checks, or anything else where
   writing a "test" would mean asserting a string exists in a file rather
   than actually verifying the criterion's substance.
+- Build configuration — manifest/target declarations, dependency
+  entries, feature flags, build options — is `manual`, not `test`,
+  even though it affects what compiles or builds. "Affects the build"
+  is not the same as "the test runner can observe red/green." The
+  pipeline's scoped test command runs without extra config flags — no
+  `--features` (Cargo), no `--config`/`--define` (Bazel), no env vars
+  or Vite modes (npm/SvelteKit) — so a config-gated test is invisible
+  to the runner, not red. And a test that parses a manifest file to
+  check a declaration is "asserting a string exists in a file." This
+  covers any toolchain's build config: `Cargo.toml` features/deps,
+  Bazel `BUILD`/`MODULE.bazel` targets/deps, CMake `CMakeLists.txt`
+  targets/`find_package`, `pyproject.toml`/`setup.py` deps/build
+  config/optional deps, `package.json` scripts/deps/exports,
+  `tsconfig.json`, `vite.config`/`svelte.config`. Tag it `test` only
+  if the criterion's substance is a runtime behavior observable
+  without the config enabled (e.g. a function's default-path
+  behavior, not the config gate itself).
 - If a criterion is genuinely mixed (e.g. "add the endpoint and document
   it"), that's really two criteria bundled into one - tag it `test`
   (the behavior is what a test can hold you to) and let the

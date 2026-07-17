@@ -69,6 +69,17 @@ adjacent, trivially satisfiable, or tautological? Concretely, watch for:
 - Would this test genuinely fail against today's (pre-implementation)
   code, and for the *right* reason - not a compile error, not an
   unrelated setup bug?
+- A test that fails because a scaffolding stub panics (e.g. `todo!()`,
+  `throw new Error("not implemented")`, `raise NotImplementedError`)
+  is red for the *right* reason - the stub is an intentional
+  placeholder, and its panic proves the test reaches the code path
+  the criterion is about. This is not a "setup bug" concern.
+- Does the test use any platform-specific API (e.g. `std::os::unix`,
+  `std::os::windows` in Rust) without a conditional-compilation gate
+  (`#[cfg(unix)]` / `#[cfg(windows)]`)? If so, flag it - the test
+  won't compile on the host platform (named in the task prompt). This
+  is a concern even if the test appears to exercise the criterion,
+  because a test that doesn't compile on the host can never go green.
 
 The task prompt tells you each test's **actual result** (red or green
 when run against the current code). Use this as grounded evidence, not

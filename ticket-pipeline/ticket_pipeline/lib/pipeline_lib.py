@@ -35,6 +35,7 @@ prompts lives in the repo's legacy-pipeline/ directory for reference.
 import json
 import logging
 import os
+import platform
 import re
 import shlex
 import subprocess
@@ -50,6 +51,7 @@ from typing import Callable
 from . import ai_client
 from .ai_client import AIError, run_with_tools
 from . import fetch_ticket as ticket_source
+from . import render
 from .render import render_markdown
 from . import repo_context
 from . import tools
@@ -96,12 +98,27 @@ CRITERIA_STACK_FILE = Path(".criteria-stack.json")
 # next_step/push_ticket calls (see DeclinedCriterion/is_declined).
 DECLINED_CRITERIA_FILE = Path(".declined-criteria.json")
 
+# Per-ticket git-workflow state (base_branch recorded at push-ticket time,
+# read at TICKET_VALIDATE merge/PR time). A sidecar rather than a frame
+# field because base_branch is per-ticket, not per-criterion - and the
+# sentinel frame that would carry it is popped *before* the merge runs.
+# Gitignored like every other pipeline state file (see
+# ensure_gitignore_entries) so `git reset --hard` never touches it.
+GIT_STATE_FILE = Path(".pipeline-git-state.json")
+
 PLAN_PROMPT_FILE = PROMPTS_DIR / "plan.prompt.md"
 NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
 REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-singlepass.prompt.md"
 TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
 TEST_QUALITY_REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-test-quality.prompt.md"
+
+# Host OS name, injected into every test-criterion and test-quality
+# review prompt so the Tester/Reviewer write tests that compile on the
+# platform actually running the pipeline (see test-criterion.prompt.md's
+# Platform portability rule and review-test-quality.prompt.md's
+# platform-specific-API check).
+_HOST_PLATFORM_NOTE = f"The host platform is {platform.system()} (tests must compile and run on this platform)."
 
 # Always injected. Instructs the planner to self-clarify before planning,
 # since none of these scripts have a path for a human to answer follow-up
@@ -600,11 +617,18 @@ def load_pipeline_config(config_path: Path) -> dict:
     with config_path.open("rb") as f:
         data = tomllib.load(f)
 
-    unknown = set(data) - set(toolchain.commands) - {"step_models"}
+    # Keys outside the toolchain's command table that this module
+    # reads separately (step_models via load_step_models; smoke_cmd via
+    # load_smoke_cmd; the git_workflow.* keys via load_git_config). All
+    # other top-level keys stay unknown-key-rejected so a typo in a
+    # toolchain command name is still caught loudly.
+    _ALLOWED_EXTRA_KEYS = {"step_models", "smoke_cmd"} | set(GitConfig.__annotations__)
+    unknown = set(data) - set(toolchain.commands) - _ALLOWED_EXTRA_KEYS
     if unknown:
         die(
             f"{config_path}: unknown key(s) {sorted(unknown)}. "
-            f"Allowed: {sorted(toolchain.commands)}"
+            f"Allowed: {sorted(toolchain.commands)} plus "
+            f"{sorted(_ALLOWED_EXTRA_KEYS)}"
         )
     for key, value in data.items():
         if key not in toolchain.commands:
@@ -1275,6 +1299,19 @@ class CriterionFrame:
                             # hatch GREEN_UNCONFIRMED_STATUS has always
                             # used, generalized from "the one test" to
                             # "whichever of the N were never confirmed."
+    base_commit: str | None = None  # git-workflow only (git_workflow =
+                            # true in .dev-pipeline.toml). The HEAD SHA
+                            # recorded when this frame first entered
+                            # WRITE_TEST, so reset-criterion can `git
+                            # reset --hard` back to exactly the pre-test
+                            # state. None when git_workflow is off, or
+                            # before WRITE_TEST has run for this frame.
+    commit_sha: str | None = None   # git-workflow only. The SHA of the
+                            # commit next_step created on POP (see
+                            # do_pop's commit-on-pop). None until the
+                            # criterion is popped and committed; stays
+                            # None for criteria that popped with an
+                            # empty diff (nothing to stage).
 
 
 def load_stack() -> list[CriterionFrame]:
@@ -1838,6 +1875,7 @@ _SCAFFOLDING_PATHS = frozenset(
     str(p) for p in (
         TICKET_FILE, PLAN_FILE, UPDATED_PLAN_FILE, GAP_PLAN_FILE,
         PIPELINE_LOG_FILE, CRITERIA_STACK_FILE, DECLINED_CRITERIA_FILE,
+        GIT_STATE_FILE,
     )
 )
 
@@ -1884,6 +1922,460 @@ def git_diff_for_file(path: str) -> str:
     except OSError:
         return ""
     return result.stdout if result.returncode == 0 else ""
+
+
+# ---------------------------------------------------------------------------
+# Git-native workflow (opt-in via .dev-pipeline.toml's git_workflow = true)
+# ---------------------------------------------------------------------------
+#
+# Adds git as a second source of truth alongside the stack: push-ticket
+# creates a ticket/<id> branch; next-step commits each criterion on POP;
+# TICKET_VALIDATE merges (or opens a PR) after approval; reset-criterion
+# rolls one criterion back via `git reset --hard`. All git operations
+# live here in pipeline code (never handed to the model as a shell) -
+# the same "no shell for the model" rule every other subprocess call in
+# this module already follows. Opt-in and off by default, so projects
+# with no git repo or no interest in per-criterion commits are entirely
+# unaffected - every helper below no-ops or refuses cleanly when
+# git_workflow is off.
+#
+# Two tiers of post-validation handoff: Tier 1 (local merge) needs only
+# git. Tier 2 (push + GitHub PR) additionally requires the `gh` CLI,
+# installed and authenticated via `gh auth login`; with `gh` absent it
+# degrades to a pushed-but-un-PR'd branch with a warning (see
+# create_github_pr). Leave pr_on_validate false (the default) to skip
+# Tier 2 entirely.
+#
+# Pipeline state files (.criteria-stack.json, .pipeline-git-state.json,
+# ...) are gitignored (see ensure_gitignore_entries) so a `git reset
+# --hard` from reset-criterion never destroys the stack - the two
+# sources of truth stay orthogonal: the stack is the work *queue*, git
+# is the work *done*.
+
+
+@dataclass
+class GitConfig:
+    """All keys read from .dev-pipeline.toml's top level (no table). Off
+    by default; the whole git-native workflow stays dormant unless
+    `git_workflow = true`.
+
+    Tier 1 (local merge on validate) needs nothing beyond git itself.
+    Tier 2 (push + open a GitHub PR) additionally requires the `gh` CLI
+    to be installed and authenticated (`gh auth login`) - see
+    create_github_pr. With `gh` absent, the branch is still pushed and a
+    warning is logged; the PR must be opened manually. Set
+    `pr_on_validate = false` (the default) to skip Tier 2 entirely.
+    """
+    git_workflow: bool = False
+    base_branch: str | None = None       # merge/PR target; defaults to
+                                          # the branch push-ticket ran on
+    git_merge_on_validate: bool = True   # Tier 1: local merge after
+                                          # validation approves. Only
+                                          # meaningful when git_workflow.
+    forge: str = "none"                   # "none" | "github" (Tier 2).
+                                          # "github" enables PR creation
+                                          # (requires the `gh` CLI).
+    forge_remote: str = "origin"          # remote to push the ticket
+                                          # branch to for a PR
+    pr_on_validate: bool = False          # Tier 2: push + open a PR
+                                          # instead of a local merge.
+                                          # Requires forge = "github"
+                                          # and the `gh` CLI.
+    branch_prefix: str = "ticket/"        # ticket/<id> by default
+
+
+def load_git_config(config_path: Path) -> GitConfig:
+    """
+    Reads the git-workflow keys from .dev-pipeline.toml. Returns the
+    all-default GitConfig (git_workflow = False) if the file is absent,
+    so callers can unconditionally ask `cfg.git_workflow` and branch on
+    it without guarding the load itself. Unknown keys are still
+    load_pipeline_config's problem (it rejects them before any caller
+    reaches here); this only shapes the ones it allows through.
+    """
+    if not config_path.exists():
+        return GitConfig()
+    with config_path.open("rb") as f:
+        data = tomllib.load(f)
+    kwargs: dict = {}
+    for key in GitConfig.__annotations__:
+        if key in data:
+            kwargs[key] = data[key]
+    try:
+        return GitConfig(**kwargs)
+    except TypeError as e:
+        die(f"{config_path}: invalid git-workflow key: {e}")
+
+
+def ticket_branch_name(cfg: GitConfig, ticket_id: str) -> str:
+    """ticket/<id> by default, or <branch_prefix><id> when configured."""
+    return f"{cfg.branch_prefix}{ticket_id}"
+
+
+# --- pipeline-git-state sidecar (.pipeline-git-state.json) ---------------
+# Maps ticket_id -> base_branch, written by push-ticket when it creates
+# the ticket branch, read by TICKET_VALIDATE's merge/PR path. A sidecar
+# (not a frame field) because base_branch is per-ticket and the sentinel
+# frame that would carry it is popped *before* the merge runs.
+
+
+def load_git_state() -> dict[str, str]:
+    if not GIT_STATE_FILE.is_file():
+        return {}
+    text = GIT_STATE_FILE.read_text(encoding="utf-8").strip()
+    if not text:
+        return {}
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    return {k: v for k, v in raw.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def save_git_state(state: dict[str, str]) -> None:
+    tmp = GIT_STATE_FILE.with_name(GIT_STATE_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, GIT_STATE_FILE)
+
+
+def record_git_base_branch(ticket_id: str, base_branch: str) -> None:
+    state = load_git_state()
+    state[ticket_id] = base_branch
+    save_git_state(state)
+
+
+def lookup_git_base_branch(ticket_id: str) -> str | None:
+    return load_git_state().get(ticket_id)
+
+
+def clear_git_base_branch(ticket_id: str) -> None:
+    state = load_git_state()
+    state.pop(ticket_id, None)
+    if state:
+        save_git_state(state)
+    elif GIT_STATE_FILE.is_file():
+        GIT_STATE_FILE.unlink()
+
+
+# --- low-level git helpers (all argv, no shell) --------------------------
+
+
+class GitError(Exception):
+    """Raised by the git helpers for a non-zero exit or a missing repo.
+    Caught by the calling CLI script, which turns it into a die() with
+    context - the helpers themselves stay generic and reusable."""
+
+
+def _git(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, check=False, cwd=cwd
+    )
+
+
+def git_is_repo() -> bool:
+    r = _git("rev-parse", "--is-inside-work-tree")
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def git_current_branch() -> str:
+    r = _git("symbolic-ref", "--short", "HEAD")
+    if r.returncode != 0:
+        # Detached HEAD - fall back to the short SHA.
+        return git_current_head()
+    return r.stdout.strip()
+
+
+def git_current_head() -> str:
+    r = _git("rev-parse", "HEAD")
+    if r.returncode != 0:
+        raise GitError(f"git rev-parse HEAD failed: {r.stderr.strip() or r.stdout.strip()}")
+    return r.stdout.strip()
+
+
+def git_status_porcelain() -> str:
+    r = _git("status", "--porcelain")
+    if r.returncode != 0:
+        raise GitError(f"git status failed: {r.stderr.strip()}")
+    return r.stdout
+
+
+def git_is_dirty() -> bool:
+    return bool(git_status_porcelain().strip())
+
+
+# Paths the pipeline itself may create/modify during a run and that must
+# NOT read as "uncommitted user work" in a dirty-tree guard: the
+# scaffolding state files (git_changed_files already excludes these
+# for the review gate) plus .gitignore, which ensure_gitignore_entries
+# may append to as part of enabling the very workflow that guard serves.
+# A user's real code/test changes still trip the guard; only the
+# pipeline's own bookkeeping files are tolerated.
+_PIPELINE_MANAGED_PATHS = frozenset(_SCAFFOLDING_PATHS) | {".gitignore"}
+
+
+def git_user_is_dirty() -> bool:
+    """True if the worktree has changes outside the pipeline's own
+    managed files (state files + .gitignore). Used by dirty-tree guards
+    (push-ticket's branch creation, reset-workflow's revert) so the
+    pipeline's own .criteria-stack.json / .gitignore touches don't block
+    a reset, while genuine uncommitted user code/test work still does."""
+    porcelain = git_status_porcelain()
+    if not porcelain.strip():
+        return False
+    for line in porcelain.splitlines():
+        # Porcelain format: "XY <path>" (2 status chars, space, path);
+        # untracked is "?? <path>". Renames ("R ...") are rare here and
+        # still have a path at [3:] we don't want to misclassify.
+        path = line[3:].strip().strip('"')
+        if path and path not in _PIPELINE_MANAGED_PATHS:
+            return True
+    return False
+
+
+def git_branch_exists(name: str) -> bool:
+    r = _git("rev-parse", "--verify", "--quiet", name)
+    return r.returncode == 0
+
+
+def git_create_branch(name: str) -> None:
+    r = _git("checkout", "-b", name)
+    if r.returncode != 0:
+        raise GitError(f"git checkout -b {name} failed: {r.stderr.strip()}")
+
+
+def git_checkout(name: str) -> None:
+    r = _git("checkout", name)
+    if r.returncode != 0:
+        raise GitError(f"git checkout {name} failed: {r.stderr.strip()}")
+
+
+def git_add_all() -> None:
+    # Stage tracked changes and new files, respecting .gitignore - the
+    # pipeline's own state files are gitignored (ensure_gitignore_entries)
+    # so they're never staged into a criterion commit.
+    r = _git("add", "--all")
+    if r.returncode != 0:
+        raise GitError(f"git add --all failed: {r.stderr.strip()}")
+
+
+def git_has_staged_changes() -> bool:
+    r = _git("diff", "--cached", "--quiet")
+    return r.returncode != 0  # exit 1 means there are staged changes
+
+
+def git_commit(message: str) -> str | None:
+    """Stage all changes and commit. Returns the new commit SHA, or None
+    if there was nothing to stage (an empty-diff POP - e.g. a sibling
+    criterion's commit already covered this one's changes). Never
+    raises on an empty stage; a real git error does raise."""
+    git_add_all()
+    if not git_has_staged_changes():
+        return None
+    r = _git("commit", "-m", message)
+    if r.returncode != 0:
+        raise GitError(f"git commit failed: {r.stderr.strip()}")
+    return git_current_head()
+
+
+def git_reset_hard(sha: str) -> None:
+    r = _git("reset", "--hard", sha)
+    if r.returncode != 0:
+        raise GitError(f"git reset --hard {sha} failed: {r.stderr.strip()}")
+
+
+def git_merge_no_ff(branch: str) -> None:
+    r = _git("merge", "--no-ff", branch, "-m", f"Merge {branch}")
+    if r.returncode != 0:
+        raise GitError(f"git merge --no-ff {branch} failed: {r.stderr.strip()}")
+
+
+def git_branch_delete(name: str) -> None:
+    r = _git("branch", "-d", name)
+    if r.returncode != 0:
+        # -d refuses an unmerged branch; -D would force. A failed delete
+        # is non-fatal - the branch just sticks around.
+        log.warning("-- git branch -d %s failed (non-fatal): %s", name, r.stderr.strip())
+
+
+def git_push(remote: str, branch: str, force: bool = False) -> None:
+    args = ["push", remote, branch]
+    if force:
+        args.insert(1, "--force")
+    r = _git(*args)
+    if r.returncode != 0:
+        raise GitError(f"git push {remote} {branch} failed: {r.stderr.strip()}")
+
+
+# --- git-native workflow orchestration (called by next_step.py) -----------
+
+
+def criterion_commit_message(cfg: GitConfig, ticket_id: str, criterion: str) -> str:
+    """Build the per-criterion commit message: `ticket/<id>: <summary>`.
+    The summary is the criterion text trimmed to a readable width; the
+    leading `- [ ]` checkbox marker is stripped so the subject line
+    reads as prose, not a todo bullet."""
+    summary = criterion.strip()
+    for prefix in ("- [ ]", "- [x]", "-"):
+        if summary.startswith(prefix):
+            summary = summary[len(prefix):].strip()
+            break
+    if len(summary) > 72:
+        summary = summary[:69] + "..."
+    return f"{cfg.branch_prefix}{ticket_id}: {summary}"
+
+
+def commit_criterion(cfg: GitConfig, ticket_id: str, criterion: str) -> str | None:
+    """Layer 2: stage all changes and commit one criterion's worth of
+    work. Returns the new commit SHA, or None if there was nothing to
+    stage (an empty-diff POP - e.g. a sibling criterion's commit already
+    covered this one's changes, or the human committed manually). Never
+    blocks a POP: a None is logged as a skip, not an error, since the
+    criterion is already verified green - that's the gate, not the
+    commit. Raises GitError only on a real git failure."""
+    message = criterion_commit_message(cfg, ticket_id, criterion)
+    sha = git_commit(message)
+    if sha is None:
+        log.info("-- git_workflow: no changes to commit for this criterion (skipped).")
+    else:
+        log.info("-- git_workflow: committed criterion as %s.", sha[:8])
+    return sha
+
+
+def _gh_available() -> bool:
+    r = subprocess.run(["gh", "--version"], capture_output=True, text=True, check=False)
+    return r.returncode == 0
+
+
+def create_github_pr(
+    cfg: GitConfig, ticket_id: str, branch: str, base: str,
+    title: str | None, body: str | None,
+) -> None:
+    """Layer 3 Tier 2: push the ticket branch and open a GitHub PR via
+    the `gh` CLI - the simplest robust path, reusing whatever auth `gh`
+    already has (run `gh auth login` once) rather than managing a token
+    here.
+
+    Prerequisite: the `gh` CLI installed and authenticated. With `gh`
+    absent the branch is *still pushed* (the `git push` runs before the
+    `gh` check) and a warning is logged prompting a manual PR - a
+    non-fatal degradation, never a crash. To avoid the push-without-PR
+    state entirely, either install `gh` or leave `pr_on_validate`
+    false (the default) and rely on Tier 1's local merge.
+    """
+    git_push(cfg.forge_remote, branch)
+    render.print_line(f"-- git_workflow: pushed {branch} to {cfg.forge_remote}.")
+    if not _gh_available():
+        log.warning(
+            "-- git_workflow: `gh` CLI not found - branch pushed but no PR "
+            "created. Install gh or open the PR manually."
+        )
+        return
+    args = ["pr", "create", "--base", base, "--head", branch]
+    if title:
+        args += ["--title", title]
+    if body:
+        args += ["--body", body]
+    r = subprocess.run(args, capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        log.warning(
+            "-- git_workflow: gh pr create failed (non-fatal): %s. Branch "
+            "is pushed; open the PR manually.",
+            (r.stderr or r.stdout).strip(),
+        )
+    else:
+        render.print_line(f"-- git_workflow: opened PR - {r.stdout.strip()}")
+
+
+def post_validate_git(
+    cfg: GitConfig, ticket_id: str, *, title: str | None = None, body: str | None = None,
+) -> None:
+    """Layer 3: after TICKET_VALIDATE approves, merge the ticket branch
+    back to its base (Tier 1) or push + open a PR (Tier 2). No-op when
+    git_workflow is off. Leaves the working tree on the base branch on a
+    local merge, or on the ticket branch after a PR (review happens on
+    the remote). Clears the per-ticket base_branch sidecar once the
+    branch is merged locally - a PR keeps it so a later local merge of
+    the same branch still knows where to land.
+
+    Tier 1 (git_merge_on_validate, default) needs only git. Tier 2
+    (pr_on_validate = true + forge = "github") needs the `gh` CLI; with
+    `gh` missing it degrades to a pushed branch + warning (see
+    create_github_pr), never a crash."""
+    if not cfg.git_workflow:
+        return
+    branch = ticket_branch_name(cfg, ticket_id)
+    if not git_branch_exists(branch):
+        log.info("-- git_workflow: ticket branch %s not found - nothing to merge.", branch)
+        return
+    base = lookup_git_base_branch(ticket_id) or cfg.base_branch or git_current_branch()
+
+    if cfg.pr_on_validate and cfg.forge == "github":
+        try:
+            create_github_pr(cfg, ticket_id, branch, base, title, body)
+        except GitError as e:
+            log.warning("-- git_workflow: PR creation failed (non-fatal): %s", e)
+        return
+
+    if not cfg.git_merge_on_validate:
+        log.info(
+            "-- git_workflow: git_merge_on_validate is off - leaving %s "
+            "unmerged. Merge it manually into %s when ready.",
+            branch, base,
+        )
+        return
+
+    try:
+        git_checkout(base)
+        git_merge_no_ff(branch)
+        render.print_line(f"-- git_workflow: merged {branch} into {base}.")
+        git_branch_delete(branch)
+        clear_git_base_branch(ticket_id)
+    except GitError as e:
+        # A merge conflict or checkout failure is non-fatal to the
+        # validation verdict itself (the work is done and approved) -
+        # surface it loudly and leave the branch for a manual merge.
+        log.warning(
+            "-- git_workflow: post-validate merge failed (non-fatal): %s. "
+            "Branch %s is intact; merge it into %s manually.",
+            e, branch, base,
+        )
+
+
+# --- .gitignore management -------------------------------------------------
+# Ensures the pipeline's own state files are gitignored so a `git reset
+# --hard` (reset-criterion) or `git add --all` (commit-on-POP) never
+# touches or captures them. Idempotent: only appends entries that aren't
+# already present, and creates .gitignore if it doesn't exist.
+
+_GITIGNORE_ENTRIES = (
+    str(CRITERIA_STACK_FILE),
+    str(GIT_STATE_FILE),
+    str(DECLINED_CRITERIA_FILE),
+    str(PIPELINE_LOG_FILE),
+    str(TICKET_FILE),
+    str(PLAN_FILE),
+    str(UPDATED_PLAN_FILE),
+    str(GAP_PLAN_FILE),
+)
+
+
+def ensure_gitignore_entries() -> None:
+    """Append any missing pipeline-state entries to .gitignore. Creates
+    the file with a header if it doesn't exist. No-op when not in a git
+    repo (no .git directory in cwd) - nothing to ignore from."""
+    if not Path(".git").exists():
+        return
+    gitignore = Path(".gitignore")
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    missing = [e for e in _GITIGNORE_ENTRIES if e not in existing]
+    if not missing:
+        return
+    block = "\n# --- ticket-pipeline state (git-native workflow) ---------\n" + "\n".join(missing) + "\n"
+    with gitignore.open("a", encoding="utf-8") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write(block)
+    log.info("-- Added %d pipeline-state entr(y/ies) to .gitignore.", len(missing))
 
 
 def load_smoke_cmd(config_path: Path) -> str | None:
@@ -1990,7 +2482,7 @@ def build_test_criterion_prompt(
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"Write a failing test for exactly this one acceptance criterion, "
         f"and only this one:\n\n{criterion}"
-        f"{existing_test_section}"
+        f"{existing_test_section}\n\n{_HOST_PLATFORM_NOTE}"
     )
 
 
@@ -2014,12 +2506,12 @@ def run_test_for_criterion(
         result = run_ai_step_with_retry(attempt, "test-criterion", criterion=criterion, ticket=ticket_id)
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
+    render_step_output(result.text)
     if not test_files:
         die_with_log(
             "test-criterion", "Tester finished without writing any test files.",
             criterion=criterion, ticket=ticket_id,
         )
-    render_step_output(result.text)
     witnesses = _parse_test_witnesses(result.text)
     if not witnesses:
         die_with_log(
@@ -2050,7 +2542,7 @@ def build_test_criterion_fix_prompt(
         f"implement the production behaviour they're testing for. The "
         f"criterion must remain covered exactly as before; only the "
         f"compile error should be fixed.\n\n"
-        f"Compile error:\n\n```\n{error_output}\n```"
+        f"Compile error:\n\n```\n{error_output}\n```\n\n{_HOST_PLATFORM_NOTE}"
     )
 
 
@@ -2094,7 +2586,7 @@ def build_test_criterion_quality_fix_prompt(
         f"read_file {file_list} and fix {'it' if len(file_paths) == 1 else 'them'} "
         f"with write_file so the suite still compiles and the criterion is "
         f"genuinely exercised.\n\n"
-        f"Reviewer's concern:\n\n{quality_concern}"
+        f"Reviewer's concern:\n\n{quality_concern}\n\n{_HOST_PLATFORM_NOTE}"
     )
 
 
@@ -2165,12 +2657,12 @@ def run_test_for_criterion_with_compile_retry(
             )
         except (AIError, tools.PipelineAbort) as e:
             die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
+        render_step_output(result.text)
         if not test_files:
             die_with_log(
                 "test-criterion", "Tester finished without writing any test files.",
                 criterion=criterion, ticket=ticket_id,
             )
-        render_step_output(result.text)
         witnesses = _parse_test_witnesses(result.text)
         if not witnesses:
             die_with_log(
@@ -2231,12 +2723,12 @@ def _run_tester_step(
         )
     except (AIError, tools.PipelineAbort) as e:
         die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
+    render_step_output(result.text)
     if not test_files:
         die_with_log(
             "test-criterion", "Tester finished without writing any test files.",
             criterion=criterion, ticket=ticket_id,
         )
-    render_step_output(result.text)
     witnesses = _parse_test_witnesses(result.text)
     if not witnesses:
         die_with_log(
@@ -2450,7 +2942,7 @@ def build_test_quality_review_prompt(
         f"criterion, extracted from the gap plan - already complete and "
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
         f"Acceptance criterion this test is for:\n\n{criterion}\n\n"
-        f"The test(s) to review:\n{tests_block}"
+        f"The test(s) to review:\n{tests_block}\n\n{_HOST_PLATFORM_NOTE}"
     )
 
 

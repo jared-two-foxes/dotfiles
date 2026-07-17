@@ -278,7 +278,7 @@ def do_await_manual_impl(frame: "lib.CriterionFrame", paths: list[str]) -> None:
     sys.exit(0)
 
 
-def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual: bool) -> None:
+def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual: bool, git_cfg: "lib.GitConfig | None" = None) -> None:
     """
     Handles a verification="manual" frame - a criterion that isn't
     expressible as a red/green test (documentation, config, CI changes -
@@ -299,6 +299,15 @@ def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual:
     same escape-hatch shape as --accept-green, rather than ever silently
     trusting a criterion this pipeline has no way to verify.
     """
+    # Manual criteria skip WRITE_TEST, so record base_commit here instead
+    # (same purpose as do_write_test's recording) - reset-criterion works
+    # on manual criteria too.
+    if git_cfg is not None and git_cfg.git_workflow and frame.base_commit is None:
+        try:
+            frame.base_commit = lib.git_current_head()
+            lib.save_stack(stack)
+        except lib.GitError as e:
+            log.warning("-- git_workflow: could not record base_commit (non-fatal): %s", e)
     paths = lib.extract_referenced_paths(f"{frame.criterion}\n{frame.plan_context}")
     mechanically_confirmed = bool(paths) and bool(set(paths) & set(lib.git_changed_files()))
     if mechanically_confirmed or accept_manual:
@@ -310,7 +319,7 @@ def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual:
     do_await_manual_impl(frame, paths)
 
 
-def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict) -> None:
+def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict, git_cfg: "lib.GitConfig | None" = None) -> None:
     """
     Writes (or retries writing) frame's test(s) through the unified
     three-gate loop (lib.run_test_for_criterion_with_full_retry):
@@ -351,6 +360,17 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
         free pass). Orthogonal to the quality gate: a green test the
         quality loop accepted can still be unconfirmed by origin.
     """
+    # Layer 2: record the pre-WRITE_TEST HEAD as this frame's base_commit
+    # the first time it enters test writing, so reset-criterion can `git
+    # reset --hard` back to exactly this point. Only recorded when
+    # git_workflow is on and not already set (a retry re-entering
+    # WRITE_TEST keeps the original base, not a moved-forward one).
+    if git_cfg is not None and git_cfg.git_workflow and frame.base_commit is None:
+        try:
+            frame.base_commit = lib.git_current_head()
+            lib.save_stack(stack)
+        except lib.GitError as e:
+            log.warning("-- git_workflow: could not record base_commit (non-fatal): %s", e)
     file_paths, test_names, test_results, compile_result, quality_concern = (
         lib.run_test_for_criterion_with_full_retry(
             frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
@@ -468,9 +488,28 @@ def recheck_test_frame(
     do_await_green_unconfirmed(frame)
 
 
-def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path) -> None:
+def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
     just_popped_ticket = frame.ticket
     just_popped_criterion = frame.criterion
+    # Layer 2: commit this criterion's worth of work *before* popping the
+    # frame, while its criterion text is still in hand for the commit
+    # message. A None (empty diff) is a logged skip, never a blocker -
+    # the criterion is already verified green, that's the gate, not the
+    # commit. A real git error is also non-fatal here: the POP still
+    # happens so the stack advances; the uncommitted changes just ride
+    # along into the next criterion's commit.
+    if git_cfg is not None and git_cfg.git_workflow:
+        try:
+            sha = lib.commit_criterion(git_cfg, just_popped_ticket, just_popped_criterion)
+            if sha is not None:
+                frame.commit_sha = sha
+                lib.log_event(
+                    "git-workflow", "criterion-committed",
+                    ticket=just_popped_ticket, criterion=just_popped_criterion,
+                    commit_sha=sha,
+                )
+        except lib.GitError as e:
+            log.warning("-- git_workflow: commit-on-POP failed (non-fatal): %s", e)
     lib.pop_frame()
     new_stack = lib.load_stack()
 
@@ -478,7 +517,7 @@ def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_model
     render.print_line(f"-- Criterion done: {just_popped_criterion}")
 
     if not new_stack or new_stack[0].ticket != just_popped_ticket:
-        do_ticket_validate(just_popped_ticket, model, step_models, commands, config_path)
+        do_ticket_validate(just_popped_ticket, model, step_models, commands, config_path, git_cfg)
         return
 
     if not continuous:
@@ -489,7 +528,7 @@ def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_model
     # straight into the new top frame's WRITE_TEST phase.
 
 
-def do_ticket_validate(ticket_id: str, model: str, step_models: dict[str, str], commands: dict, config_path: Path) -> None:
+def do_ticket_validate(ticket_id: str, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
     """
     Full ticket-validation gate, run once a ticket's per-criterion
     frames are all popped: fresh re-fetch + re-narrow (safety net for
@@ -628,6 +667,18 @@ def do_ticket_validate(ticket_id: str, model: str, step_models: dict[str, str], 
         render.print_line("   Code review: APPROVED")
         render.print_line()
         render.print_line(f"-- {ticket_id} fully validated. Success.")
+        # Layer 3: merge the ticket branch back to its base (Tier 1) or
+        # push + open a PR (Tier 2). Runs after the sentinel is popped so
+        # a failure here can't leave a stale "still needs validating"
+        # marker. Non-fatal: the verdict is already APPROVED, so a merge
+        # conflict or push failure is surfaced as a warning, not a die.
+        if git_cfg is not None:
+            lib.post_validate_git(
+                git_cfg, ticket_id,
+                title=f"{ticket_id}: validated",
+                body=f"Ticket {ticket_id} passed the pipeline's full validation gate "
+                     f"(lint, test suite, smoke, code review).",
+            )
         render.print_line(f"-- Token usage: {ai_client.usage}")
         sys.exit(0)
 
@@ -710,6 +761,7 @@ def step(
     model: str, commands: dict, continuous: bool, config_path: Path,
     step_models: dict[str, str] | None = None,
     accept_green: bool = False, accept_manual: bool = False,
+    git_cfg: "lib.GitConfig | None" = None,
 ) -> None:
     """
     One pass of phase detection + dispatch. Returns normally only when
@@ -732,7 +784,7 @@ def step(
         # this sentinel behind - re-enter validation directly, no pop
         # needed (there's nothing left to pop; the real criteria are
         # long gone).
-        do_ticket_validate(frame.ticket, model, step_models, commands, config_path)
+        do_ticket_validate(frame.ticket, model, step_models, commands, config_path, git_cfg)
         return
 
     if frame.status == GREEN_UNCONFIRMED_STATUS:
@@ -745,17 +797,17 @@ def step(
         return
 
     if frame.verification == "manual" and frame.status in ("pending", MANUAL_PENDING_STATUS):
-        do_manual_criterion(stack, frame, accept_manual)
+        do_manual_criterion(stack, frame, accept_manual, git_cfg)
         return
 
     if frame.status == "pending":
-        do_write_test(stack, frame, model, commands)
+        do_write_test(stack, frame, model, commands, git_cfg)
         return
 
     if frame.status == "test-written":
         if not frame.test_files or not frame.test_names:
             log.warning("-- Frame is test-written but missing test_files/test_names - retrying WRITE_TEST.")
-            do_write_test(stack, frame, model, commands)
+            do_write_test(stack, frame, model, commands, git_cfg)
             return
         recheck_test_frame(stack, frame, commands, accept_green)
         return
@@ -764,7 +816,7 @@ def step(
     # (WRITE_TEST/the phase-check above both cascade into this same step()
     # call rather than persisting a "done" frame across invocations), but
     # handled the same way regardless of how we got here.
-    do_pop(frame, continuous, model, step_models, commands, config_path)
+    do_pop(frame, continuous, model, step_models, commands, config_path, git_cfg)
 
 
 def main() -> None:
@@ -832,12 +884,14 @@ def main() -> None:
     commands = lib.load_pipeline_config(config_path)
 
     model, step_models = lib.resolve_step_models(config_path, args.model)
+    git_cfg = lib.load_git_config(config_path)
 
     while True:
         step(
             model, commands, args.continuous, config_path,
             step_models=step_models,
             accept_green=args.accept_green, accept_manual=args.accept_manual,
+            git_cfg=git_cfg,
         )
 
 

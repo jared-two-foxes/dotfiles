@@ -398,6 +398,7 @@ def run_implement_direct_with_refine(
             )
         except (AIError, tools.PipelineAbort) as e:
             lib.die_with_log("implement-criterion-direct", str(e), criterion=frame.criterion)
+        lib.render_step_output(result.text)
         if not attempt_changed:
             lib.die_with_log(
                 "implement-criterion-direct",
@@ -405,7 +406,6 @@ def run_implement_direct_with_refine(
                 criterion=frame.criterion,
             )
         all_changed.extend(attempt_changed)
-        lib.render_step_output(result.text)
 
         build_result = lib.run_command(
             commands["build_cmd"], f"build gate (attempt {attempt}/{max_attempts})"
@@ -498,6 +498,7 @@ def run_implement_with_refine(
             )
         except (AIError, tools.PipelineAbort) as e:
             lib.die_with_log("implement-criterion", str(e), criterion=frame.criterion)
+        lib.render_step_output(result.text)
         if not attempt_changed:
             lib.die_with_log(
                 "implement-criterion",
@@ -510,7 +511,6 @@ def run_implement_with_refine(
         # - a refine attempt aimed at one test is just as capable of
         # "fixing" a sibling test as a first attempt is.
         verify_tests_unchanged(test_files, test_names, snapshots, frame.criterion)
-        lib.render_step_output(result.text)
 
         build_result = lib.run_command(
             commands["build_cmd"], f"build gate (attempt {attempt}/{max_attempts})"

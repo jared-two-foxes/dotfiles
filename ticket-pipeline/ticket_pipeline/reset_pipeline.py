@@ -65,6 +65,7 @@ FIXED_SCRATCH_FILES = (
     lib.PLAN_FILE,
     lib.UPDATED_PLAN_FILE,
     lib.GAP_PLAN_FILE,
+    lib.GIT_STATE_FILE,
 )
 
 # Per-ticket working files with a predictable *default* name - each

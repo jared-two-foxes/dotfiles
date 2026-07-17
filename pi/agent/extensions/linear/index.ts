@@ -1,34 +1,57 @@
 /**
  * Linear ticket tools for pi.
  *
- * Registers two tools against the Linear GraphQL API:
+ * Registers four tools against the Linear GraphQL API:
  *
- *   linear_get_ticket    — fetch an issue by its human-readable identifier
- *                          (e.g. SA-42) and return it as formatted markdown.
- *                          Read-only. Mirrors ticket-pipeline's
- *                          fetch_ticket.py (same query and rendering).
+ *   linear_get_ticket     -- fetch an issue by its human-readable identifier
+ *                           (e.g. SA-42) and return it as formatted markdown.
+ *                           Read-only. Mirrors ticket-pipeline's
+ *                           fetch_ticket.py (same query and rendering).
  *
- *   linear_update_ticket — mutate the title and/or description of an existing
- *                          issue via the issueUpdate mutation. The one write
- *                          path against Linear in this extension, mirroring
- *                          ticket-pipeline's update_ticket.py: it first
- *                          resolves the issue's internal UUID from the
- *                          identifier (issueUpdate takes the UUID, not the
- *                          human-readable id), then applies the mutation.
- *                          Only the title/description are editable here —
- *                          Linear-managed metadata (state, priority,
- *                          assignee, labels) is intentionally not exposed,
- *                          same convention as update-ticket.py.
+ *   linear_update_ticket  -- mutate the title and/or description of an existing
+ *                           issue via the issueUpdate mutation. One write
+ *                           path against Linear in this extension, mirroring
+ *                           ticket-pipeline's update_ticket.py: it first
+ *                           resolves the issue's internal UUID from the
+ *                           identifier (issueUpdate takes the UUID, not the
+ *                           human-readable id), then applies the mutation.
+ *                           Only the title/description are editable here --
+ *                           Linear-managed metadata (state, priority,
+ *                           assignee, labels) is intentionally not exposed,
+ *                           same convention as update-ticket.py.
  *
- * API key resolution (same order for both tools):
- *   1. LINEAR_API_KEY env var  →  lets docker/compose inject the key via
+ *   linear_list_teams     -- list every team the authenticated user can see,
+ *                           returning each team's UUID, display name and key.
+ *                           Read-only. Used to resolve a team *name* the user
+ *                           supplies (e.g. "Engineering") into the team's
+ *                           internal UUID that issueCreate requires, without
+ *                           the user needing to know the UUID.
+ *
+ *   linear_create_ticket  -- create a new Linear issue via the issueCreate
+ *                           mutation, mirroring ticket-pipeline's
+ *                           create_ticket(). The second write path. The
+ *                           description must include a "## Acceptance
+ *                           Criteria" section with "- [ ] ..." checkbox
+ *                           bullets so the ticket is immediately consumable
+ *                           by the scaffold TDD pipeline (push-ticket /
+ *                           next-step) without further enrichment. To create
+ *                           a parent + children, create the parent first
+ *                           (omit parent_id), then each child with the
+ *                           parent's human-readable identifier as parent_id;
+ *                           the tool resolves that to the parent's internal
+ *                           UUID via a fetch first (same pattern as
+ *                           linear_update_ticket's pre-fetch).
+ *
+ * API key resolution (same order for all tools):
+ *   1. LINEAR_API_KEY env var  ->  lets docker/compose inject the key via
  *      env_file without touching the image or auth store
- *   2. ~/.pi/agent/auth.json  →  "linear" entry (pi's native auth store)
- *   3. ~/.secrets/linear-key  →  plain-text file (ticket-pipeline's location)
+ *   2. ~/.pi/agent/auth.json  ->  "linear" entry (pi's native auth store)
+ *   3. ~/.secrets/linear-key  ->  plain-text file (ticket-pipeline's location)
  *
- * Note: pi's SYSTEM.md still describes the companion agent as read-only.
- * linear_update_ticket is an opt-in write path the user must explicitly
- * invoke; it does not change the read-only posture of the get tool.
+ * Note: pi's SYSTEM.md describes the companion agent as read-only by
+ * default. linear_update_ticket and linear_create_ticket are opt-in write
+ * paths the user must explicitly invoke; they do not change the read-only
+ * posture of the get/list tools.
  */
 
 import { homedir } from "node:os";
@@ -36,13 +59,13 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 
-// Type-only — erased at runtime by jiti, no package resolution needed.
+// Type-only -- erased at runtime by jiti, no package resolution needed.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // --- API key ---
 
 function getApiKey(): string | undefined {
-  // 1. Env var — primary source for the docker pi instance, where compose's
+  // 1. Env var -- primary source for the docker pi instance, where compose's
   //    env_file injects LINEAR_API_KEY without baking a secret into the
   //    image or needing an auth.json mount.
   const envKey = process.env.LINEAR_API_KEY;
@@ -55,7 +78,7 @@ function getApiKey(): string | undefined {
     try {
       const auth = JSON.parse(readFileSync(authPath, "utf-8"));
       if (auth["linear"]?.key) return auth["linear"].key;
-    } catch { /* malformed auth.json — fall through */ }
+    } catch { /* malformed auth.json -- fall through */ }
   }
 
   // 3. Fall back to the ticket-pipeline's key location.
@@ -63,7 +86,7 @@ function getApiKey(): string | undefined {
   if (existsSync(secretsPath)) {
     try {
       return readFileSync(secretsPath, "utf-8").trim();
-    } catch { /* unreadable — fall through */ }
+    } catch { /* unreadable -- fall through */ }
   }
 
   return undefined;
@@ -104,11 +127,42 @@ const UPDATE_MUTATION = `
   }
 `;
 
+// Lists every team the authenticated user can access. Used to resolve a
+// team name the user supplies into the team's internal UUID, which
+// issueCreate's `teamId` field requires. Mirrors the `teams` query from
+// Linear's API docs.
+const TEAMS_QUERY = `
+  query Teams {
+    teams {
+      nodes {
+        id
+        name
+        key
+      }
+    }
+  }
+`;
+
+// Creates a new issue. Mirrors fetch_ticket.py's create_ticket() mutation
+// exactly: `teamId` is the team's internal UUID (from TEAMS_QUERY), and
+// `parentId`, if given, is the parent issue's internal UUID (not its
+// human-readable identifier) -- linear_create_ticket resolves that from the
+// parent identifier via TICKET_QUERY before the mutation, same pre-fetch
+// pattern as linear_update_ticket.
+const CREATE_MUTATION = `
+  mutation IssueCreate($input: IssueCreateInput!) {
+    issueCreate(input: $input) {
+      success
+      issue { id identifier title url }
+    }
+  }
+`;
+
 const PRIORITY_LABELS: Record<number, string> = {
   0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low",
 };
 
-/** Shared POST-and-parse for every Linear GraphQL call — query and mutation
+/** Shared POST-and-parse for every Linear GraphQL call -- query and mutation
  *  alike, since both are just a query string + variables over the same
  *  endpoint with the same auth header. Linear uses the raw API key as the
  *  Authorization header value (not "Bearer <key>"). Same as fetch_ticket.py. */
@@ -165,6 +219,17 @@ function renderTicket(issue: any): string {
     lines.push("", "## Description", "", issue.description);
   }
   return lines.join("\n");
+}
+
+function renderTeams(teams: any[]): string {
+  if (!teams.length) return "No Linear teams accessible to this API key.";
+  const rows = teams.map((t: any) =>
+    `| ${t.key ?? "—"} | ${t.name} | ${t.id} |`);
+  return [
+    "| Key | Name | Team ID (UUID) |",
+    "|-----|------|----------------|",
+    ...rows,
+  ].join("\n");
 }
 
 // --- Extension entry point ---
@@ -338,6 +403,183 @@ export default function (pi: ExtensionAPI) {
               `Updated ${updated.identifier} (${updated.url ?? issue.url ?? "—"}).\n` +
               `   title: ${updated.title}\n` +
               `   updated: ${updated.updatedAt?.slice(0, 10) ?? "—"}`,
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Linear API request failed: ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "linear_list_teams",
+    label: "Linear List Teams",
+    description:
+      "List all Linear teams accessible to the authenticated user, " +
+      "returning each team's UUID, display name, and key (e.g. ENG, SA). " +
+      "Read-only. Use to resolve a team name to its internal UUID before " +
+      "creating tickets (linear_create_ticket's team_id requires the UUID, " +
+      "not the name), or to help the user identify which team a new ticket " +
+      "should belong to.",
+    parameters: Type.Object({}),
+    async execute(_toolCallId, _params, signal) {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              "Error: No Linear API key found. Set the LINEAR_API_KEY " +
+              "env var, or add a \"linear\" entry to ~/.pi/agent/auth.json, " +
+              "or create ~/.secrets/linear-key.",
+          }],
+          isError: true,
+        };
+      }
+
+      try {
+        const data = await linearGraphQL(TEAMS_QUERY, {}, apiKey, signal);
+        const teams = data.data?.teams?.nodes ?? [];
+        return {
+          content: [{
+            type: "text" as const,
+            text: renderTeams(teams),
+          }],
+        };
+      } catch (err) {
+        return {
+          content: [{
+            type: "text" as const,
+            text: `Linear API request failed: ` +
+                  `${err instanceof Error ? err.message : String(err)}`,
+          }],
+          isError: true,
+        };
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "linear_create_ticket",
+    label: "Linear Create Ticket",
+    description:
+      "Create a new Linear issue. The ticket's description must include " +
+      "a '## Acceptance Criteria' section with '- [ ] ...' checkbox " +
+      "bullets, so the ticket is immediately consumable by the scaffold " +
+      "TDD pipeline (push-ticket / next-step) without further enrichment. " +
+      "Use to push planned work to Linear when the user explicitly asks. " +
+      "To create a parent ticket with children, first create the parent " +
+      "(omit parent_id), then create each child with the parent's " +
+      "identifier passed as parent_id.",
+    promptGuidelines: [
+      "Use linear_create_ticket only when the user explicitly asks to " +
+      "create tickets in Linear. Always confirm the ticket title, " +
+      "description, and acceptance criteria with the user before " +
+      "creating, since the result is visible to everyone on the team " +
+      "and not locally reversible.",
+      "Every ticket description must include a '## Acceptance Criteria' " +
+      "section with '- [ ] ...' checkbox bullets. Each criterion must be " +
+      "independently testable — the same bar review-ticket checks against.",
+      "If the work is too large for a single implementation pass (criteria " +
+      "fan across unrelated modules, or have strict sequential " +
+      "dependencies), create a parent ticket and child tickets. Create " +
+      "the parent first, then each child with the parent's identifier as " +
+      "parent_id.",
+    ],
+    parameters: Type.Object({
+      team_id: Type.String({
+        description:
+          "The team's internal UUID. Resolve via linear_list_teams if the " +
+          "user provides a team name instead.",
+      }),
+      title: Type.String({
+        description:
+          "Concise ticket title (verb + subject, <=10 words).",
+      }),
+      description: Type.String({
+        description:
+          "Markdown body. Must include a '## Acceptance Criteria' section " +
+          "with '- [ ] ...' checkbox bullets for pipeline compatibility.",
+      }),
+      parent_id: Type.Optional(Type.String({
+        description:
+          "The parent ticket's human-readable identifier (e.g. SA-42). " +
+          "If given, the new issue is created as a Linear sub-issue of " +
+          "that parent. Omit to create a standalone ticket.",
+      })),
+    }),
+    async execute(_toolCallId, params, signal) {
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              "Error: No Linear API key found. Set the LINEAR_API_KEY " +
+              "env var, or add a \"linear\" entry to ~/.pi/agent/auth.json, " +
+              "or create ~/.secrets/linear-key.",
+          }],
+          isError: true,
+        };
+      }
+
+      try {
+        // Build the IssueCreateInput. teamId and title/description are
+        // always present (required params); parentId is only added when
+        // the caller supplied a parent identifier, mirroring
+        // fetch_ticket.py's create_ticket().
+        const input: Record<string, string> = {
+          teamId: params.team_id,
+          title: params.title,
+          description: params.description,
+        };
+
+        // If a parent identifier was supplied, resolve it to the parent's
+        // internal UUID first (issueCreate's parentId takes the UUID, not
+        // "SA-42"). Same pre-fetch pattern as linear_update_ticket.
+        if (params.parent_id !== undefined) {
+          const parentFetch = await linearGraphQL(
+            TICKET_QUERY, { identifier: params.parent_id }, apiKey, signal);
+          const parent = parentFetch.data?.issue;
+          if (!parent) {
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Parent ticket ${params.parent_id} not found.`,
+              }],
+              isError: true,
+            };
+          }
+          input.parentId = parent.id;
+        }
+
+        const result = await linearGraphQL(
+          CREATE_MUTATION, { input }, apiKey, signal);
+
+        if (!result.data?.issueCreate?.success) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Create did not report success: ${JSON.stringify(result)}`,
+            }],
+            isError: true,
+          };
+        }
+
+        const created = result.data.issueCreate.issue;
+        return {
+          content: [{
+            type: "text" as const,
+            text:
+              `Created ${created.identifier}: ${created.url ?? "—"}\n` +
+              `   title: ${created.title}`,
           }],
         };
       } catch (err) {

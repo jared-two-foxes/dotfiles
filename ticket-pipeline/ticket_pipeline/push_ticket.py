@@ -122,6 +122,49 @@ DEFAULT_MODEL = "opencode:gpt-5.4-mini"
 VERDICT_RE = re.compile(r"^###\s*Verdict\s*\n+(\S+)", re.MULTILINE)
 
 
+def prepare_git_branch(ticket_id: str, cfg: "lib.GitConfig", force: bool) -> None:
+    """
+    Layer 1 of the git-native workflow: make sure pipeline state files
+    are gitignored, refuse on a dirty working tree, then create (or
+    resume) the ticket/<id> branch from current HEAD and record the base
+    branch for later merge/PR. No-op when cfg.git_workflow is off.
+
+    Idempotent across re-runs: if the branch already exists (a prior
+    push for this ticket crashed after creating it, or the stack was
+    reset while the branch survived), it's checked out rather than
+    recreated - so a fresh push-ticket for the same ticket lands back
+    on its branch instead of erroring. A *different* ticket's branch
+    being current is left alone here; the existing-stack guard above
+    already decided whether this push is allowed at all.
+    """
+    if not cfg.git_workflow:
+        return
+    if not lib.git_is_repo():
+        lib.die(
+            "git_workflow = true in .dev-pipeline.toml but the current "
+            "directory is not a git repository. Disable git_workflow or run "
+            "from inside the repo."
+        )
+    lib.ensure_gitignore_entries()
+    if lib.git_user_is_dirty():
+        lib.die(
+            "Clean working tree required for git_workflow. Commit or stash "
+            f"your changes first:\n{lib.git_status_porcelain()}"
+        )
+    branch = lib.ticket_branch_name(cfg, ticket_id)
+    base_branch = cfg.base_branch or lib.git_current_branch()
+    if lib.git_branch_exists(branch):
+        if not force and lib.git_current_branch() != branch:
+            # Resuming an in-progress ticket's own branch is fine; silently
+            # switching onto another ticket's pre-existing branch is not.
+            log.info("-- git_workflow: ticket branch %s already exists; checking it out.", branch)
+        lib.git_checkout(branch)
+    else:
+        lib.git_create_branch(branch)
+        render.print_line(f"-- git_workflow: created branch {branch} from {base_branch}.")
+    lib.record_git_base_branch(ticket_id, base_branch)
+
+
 def print_declined_criteria(newly_declined: list[tuple["lib.CriterionFrame", list[str]]]) -> None:
     """
     Same shape as next_step.py's helper of the same name - prints one
@@ -382,9 +425,10 @@ def main() -> None:
     args = parser.parse_args()
     verbosity.setup_logging(args.log_level)
     model, step_models = lib.resolve_step_models(lib.PIPELINE_CONFIG_FILE, args.model)
+    git_cfg = lib.load_git_config(lib.PIPELINE_CONFIG_FILE)
     ticket_id = args.ticket_id
 
-    # ── Guard: runs before any file is touched ─────────────────────────────
+    # ── Guard: runs before any file is touched ──────────────────────────
     existing = lib.load_stack()
     if existing:
         if existing[0].ticket == ticket_id:
@@ -426,6 +470,18 @@ def main() -> None:
                 "-- --force: overwriting in-progress stack for %s with %s.",
                 existing[0].ticket, ticket_id,
             )
+
+    # ── git-native workflow: branch + dirty-tree guard (Layer 1) ────────
+    # Runs after the re-entrancy guard (so a same-ticket resume that's
+    # about to return early doesn't recreate its branch) and before any
+    # seeding work. The dirty-tree guard sees only pre-existing user
+    # changes: ensure_gitignore_entries has already hidden this
+    # pipeline's own state files, so an existing .criteria-stack.json
+    # from a prior push doesn't count as "dirty". Skipped on --dry-run,
+    # which only ever previews a split and must not create a branch or
+    # touch .gitignore.
+    if not args.dry_run:
+        prepare_git_branch(ticket_id, git_cfg, args.force)
 
     if args.validate_only:
         # Full cleanup (unlike --from-gap-plan below): this never reuses

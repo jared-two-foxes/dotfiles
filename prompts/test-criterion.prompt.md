@@ -156,53 +156,90 @@ criterion needs new coverage *in addition to* those modifications.)
   the complete file back with the test appended - never write a partial
   file.
 
-### If the criterion needs an API surface that doesn't exist yet
+### If the criterion needs code that doesn't exist yet
 
-Some criteria (e.g. "new field X is parsed into struct Y") name a
-field, accessor, or function that has no declaration anywhere yet - not
-missing *behaviour*, but missing from the type/API entirely. A test
-that references it as written would fail to *compile*, which is not the
-same as a correct, meaningfully-red test: a compile error proves nothing
-about the behaviour under test, and the caller's compile gate cannot
-tell "real implementation bug" apart from "this name doesn't exist."
+Some criteria name a type, function, module, or API surface that has no
+declaration anywhere yet - not missing *behaviour*, but missing from the
+codebase entirely. A test that references it as written would fail to
+*compile*, which is not the same as a correct, meaningfully-red test: a
+compile error proves nothing about the behaviour under test, and the
+caller's compile gate cannot tell "real implementation bug" apart from
+"this name doesn't exist."
 
-When this happens, add **only an accessor/constructor function** -
-never a struct field, struct literal change, or any other edit to an
-existing type's declaration. A new free function or method is the
-right shape here precisely because it's additive and can't break
-anything that already compiles: nothing else in the codebase calls it
-yet, so nothing else can be broken by it existing. A new or changed
-*field*, by contrast, can silently break every other struct-literal
-construction site of that type elsewhere in the codebase (any that
-don't use `..Default::default()`) - call sites you have no reliable
-way to find completely by reading alone, and no way to verify by
-compiling. Do not add one, even as a "minimal" placeholder, and even if
-the criterion's natural end state is plainly a struct field - that's
-the implementer's job once this test exists to drive it.
+When this happens, create **scaffolding** - the minimal structural
+declarations needed for the test to compile, with behaviour stubbed so
+the test runs and fails on the actual behaviour gap. The scaffolding
+must not contain the real behaviour the criterion is testing for; it
+exists only to give the test something to call so it fails at runtime,
+not at compile time.
 
-Concretely: write a function (e.g. a free `parse_webhook_retry_rate_limit()`,
-or a method on the relevant type) that is the natural way code would
-obtain this value, with a real signature and a minimal body that
-compiles but is wrong (e.g. `todo!()`, `unimplemented!()`, or a
-hardcoded incorrect default) - just enough that the test calls real
-code and gets a wrong answer, not a `cannot find function`/`no field`
-compile error. This scaffolding is a structural placeholder, not the
-implementation - it must not contain the actual behaviour the criterion
-is testing for (no real parsing logic, no real defaulting, no real
-validation), and the test must still genuinely fail against it. Use
-`write_file` for the file you add it to (a new file, or an existing one
-if that's the idiomatic location), exactly as for the test file itself
-- full content, never a partial file - and call out what you added and
-why in your final answer (see below). Keep this to the minimum needed
-to compile; do not use this allowance to write more of the feature than
+Two situations need different treatment:
+
+#### Entirely new code (new module, new file, new type, new function)
+
+When the criterion needs something that doesn't exist at all - a new
+module, a new struct, a new function, a new file - create it freely.
+New code is purely additive: nothing else in the codebase references it
+yet, so nothing else can be broken by it existing. Create the types
+and functions the test imports, with real signatures but stubbed
+behaviour using your language's "not implemented" sentinel (e.g. Rust
+`todo!()`, Go `panic("not implemented")`, Python `raise
+NotImplementedError`, TypeScript `throw new Error("not implemented")`)
+or a hardcoded incorrect default - just enough that the test calls
+real code and gets a wrong answer or panic, not a "cannot find"
+compile error.
+
+Also add any **build configuration** the new code needs to be visible
+at compile time - feature flags, module registration, dependency
+declarations, build target inclusion (e.g. a Cargo feature in
+`Cargo.toml`, a `pub mod` declaration in the crate root, a `go.mod`
+entry, a `package.json` exports field). These are structural, not
+behavioural, and are part of the scaffolding the test needs to compile.
+Report them exactly as you report code scaffolding.
+
+#### Changes to an existing type
+
+When the criterion is about a new field or property on a type that
+*already exists* - one already constructed or called elsewhere in the
+codebase - do **not** modify the existing type's declaration. Adding a
+field or changing a signature can silently break every existing
+construction or call site of that type - sites you cannot reliably
+find by reading alone and cannot verify by compiling. In languages
+with exhaustive construction (e.g. Rust struct literals without
+`..Default::default()`, TypeScript strict object literals), a new
+field breaks every construction site; in other languages the breakage
+may be subtler.
+
+Instead, add **only an additive accessor or constructor function** -
+a new free function or method that is the natural way code would
+obtain this value, with a real signature and a stubbed body. This is
+safe because it's additive: nothing else calls it yet, so nothing else
+can break. Do not add a field to the existing type, even as a
+"minimal" placeholder, and even if the criterion's natural end state
+is plainly a struct field - that's the implementer's job once this
+test exists to drive it.
+
+#### What scaffolding must never contain
+
+Regardless of which situation applies, the scaffolding must not
+contain the actual behaviour the criterion is testing for - no real
+logic, no real defaulting, no real validation. The test must still
+genuinely fail against it. Keep scaffolding to the minimum needed to
+compile; do not use this allowance to write more of the feature than
 the one named criterion strictly requires to be testable.
 
-If you genuinely cannot express the criterion via any new function or
-method - the criterion is unavoidably about a field's existence on a
-type with no sensible accessor to add (rare) - do not improvise a field
-change. Instead, say so explicitly in your final answer and explain why
-no accessor shape was viable, so the caller can route this case
-differently rather than risk a silent break elsewhere in the codebase.
+Use `write_file` for every file you add or modify (a new file, or an
+existing one if that's the idiomatic location), exactly as for the
+test file itself - full content, never a partial file - and call out
+what you added and why in your final answer (see below).
+
+If you genuinely cannot express the criterion via any additive
+declaration - the criterion is unavoidably about a field's existence on
+an existing type with no sensible accessor to add (rare) - do not
+improvise a field change. Instead, say so explicitly in your final
+answer and explain why no additive shape was viable, so the caller can
+route this case differently rather than risk a silent break elsewhere
+in the codebase.
 
 ## Final answer
 
@@ -215,9 +252,11 @@ Then report:
 - Whether existing conventions were found or inferred (Step 2)
 - A one-line description of what the test checks and why it currently
   fails
-- If you added scaffolding (Step 3's API-surface exception): which
-  file(s) and exactly what accessor function you added - this is
-  implementation-shaped work, so it must not pass silently
+- If you added scaffolding (Step 3's scaffolding exception): which
+  file(s) and exactly what scaffolding you added - new modules, types,
+  functions, and any build configuration (feature flags, module
+  registration, dependency declarations) - this is implementation-shaped
+  work, so it must not pass silently
 
 Then, one line per test you wrote or modified for this criterion - a
 single line if that's all this criterion needed, which is the common
@@ -236,11 +275,12 @@ verbatim to re-run exactly these tests, and nothing else.
 
 - Never modify implementation/production source files - tests only,
   unless the test convention requires appending a test module to the
-  same file the production code lives in (Step 3), or the test needs an
-  API surface that doesn't exist yet (Step 3's exception). In the latter
-  case, add only a new accessor/constructor function - never a struct
-  field or any other change to an existing type's declaration - and
-  never the actual behaviour the criterion is testing for.
+  same file the production code lives in (Step 3), or the test needs
+  code that doesn't exist yet (Step 3's scaffolding exception). In the
+  latter case, create only additive declarations - new files, new
+  modules, new types, new functions, and the build configuration they
+  need to be visible - never modify an existing type's declaration,
+  and never include the actual behaviour the criterion is testing for.
 - Do not weaken, skip, or write a trivially-passing test.
 - Never name the test file or test function after the acceptance
   criterion - name it after the subject/behavior under test (Step 2).
@@ -250,6 +290,15 @@ verbatim to re-run exactly these tests, and nothing else.
   something else worth improving. That file's other coverage isn't this
   run's concern.
 - The `write_file` call must contain the complete file content.
+- **Platform portability.** Tests must not use platform-specific
+  APIs (e.g. `std::os::unix`, `std::os::windows` in Rust;
+  `process.platform` conditional logic in Node) unless the acceptance
+  criterion explicitly requires platform-specific behavior. If a
+  platform-specific API is unavoidable, gate it with the language's
+  conditional-compilation attribute (e.g. `#[cfg(unix)]` /
+  `#[cfg(windows)]` in Rust) and provide a cross-platform alternative
+  or skip for the non-target platform. The host platform is named in
+  the task prompt - write tests that compile and run on it.
 - At least one `TEST_WITNESS:` line is required, and every one must
   exactly match what was written or modified - the caller cannot resume
   correctly without them. Only write more than one when Step 3's
