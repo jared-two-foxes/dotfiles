@@ -913,12 +913,12 @@ def _run_feedback_retry(
         frame.base_commit = None
         frame.commit_sha = None
         lib.save_stack(stack)
-        lib.log_event(
-            "feedback",
+        lib.log_feedback_event(
             "apply-tester",
-            error=feedback,
+            feedback,
             criterion=frame.criterion,
             ticket=frame.ticket,
+            target=target,
         )
         do_write_test(
             stack,
@@ -936,12 +936,12 @@ def _run_feedback_retry(
         import ticket_pipeline.implement_step as implement_step
 
         lib.save_stack(stack)
-        lib.log_event(
-            "feedback",
+        lib.log_feedback_event(
             "apply-implementor",
-            error=feedback,
+            feedback,
             criterion=frame.criterion,
             ticket=frame.ticket,
+            target=target,
         )
         if frame.verification == "refactor":
             implement_step.run_implement_with_refine(

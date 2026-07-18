@@ -366,6 +366,27 @@ def log_event(
         f.write(json.dumps(entry) + "\n")
 
 
+def log_feedback_event(
+    status: str,
+    feedback_text: str,
+    criterion: str | None = None,
+    ticket: str | None = None,
+    target: str | None = None,
+) -> None:
+    """
+    Specialized wrapper for feedback log entries so call sites don't need
+    to thread user feedback through log_event's generic `error` parameter.
+    """
+    prefix = f"target={target}: " if target else ""
+    log_event(
+        "feedback",
+        status,
+        error=prefix + feedback_text,
+        criterion=criterion,
+        ticket=ticket,
+    )
+
+
 def die_with_log(
     block: str,
     msg: str,

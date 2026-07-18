@@ -98,12 +98,12 @@ def main() -> None:
     frame.feedback_target = target
     frame.status = lib.FEEDBACK_READY_STATUS
     lib.save_stack(stack)
-    lib.log_event(
-        "feedback",
+    lib.log_feedback_event(
         "queued",
-        error=f"target={target}: {feedback}",
+        feedback,
         criterion=frame.criterion,
         ticket=frame.ticket,
+        target=target,
     )
 
     render.print_line(f"-- Queued feedback for {frame.ticket} ({target}).")
