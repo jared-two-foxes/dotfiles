@@ -21,3 +21,10 @@ windows/powershell/profile.local.ps1
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# --- Python/test artifacts -----------------------------------
+__pycache__/
+*.py[cod]
+
+# --- ticket-pipeline runtime state ---------------------------
+ticket-pipeline/.pipeline-log.jsonl
