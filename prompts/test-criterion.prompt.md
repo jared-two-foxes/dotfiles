@@ -80,6 +80,45 @@ modify the named test(s) per this section, and write whatever
 additional new test(s) Step 3 below calls for. Every test you touched or
 wrote - modified or new - gets its own `TEST_WITNESS` line.
 
+### If the task prompt says this is a test-refactoring criterion
+
+When the task prompt explicitly says this is a **test-refactoring**
+criterion (it names existing test(s) to *rewrite* and says the test
+should pass GREEN after the rewrite, not fail), the goal is different
+from every other case in this prompt. This is not a "write a test that
+detects the gap" task. It is a "rewrite the test to match the new
+structure" task. The test's assertions are the safety net - they verify
+the behavior hasn't changed. Your job is to swap the plumbing, not to
+add new checks. Do this, once per named test:
+
+1. `read_file` the named test file and find that exact test.
+2. Rewrite the test per the criterion's structural requirements - change
+   imports, replace local helpers with shared ones from the codebase,
+   update helper calls, move setup/teardown, etc. Exactly the
+   structural elements the criterion describes.
+3. **Keep every assertion functionally identical** - the same behavior
+   is being tested, just through different plumbing. Do not add new
+   assertions, do not add source-scanning checks (asserting that a
+   particular import string is present in the file, that a helper was
+   *defined* somewhere rather than *called*, etc.), and do not add
+   structural-verification checks. The assertions are the safety net,
+   not the target.
+4. **Do not expect RED** - the test should compile and pass (GREEN) after
+   the rewrite. A rewrite that comes back RED means the rewrite is
+   incorrect, not that there's a gap to implement.
+5. Handle compile-time requirements (feature flags, module visibility,
+   dependency declarations) so the test actually compiles - this is part
+   of the refactor, not implementation. The criterion's structural
+   changes may require the test to import from a new location or depend
+   on a module that needs to be visible; make those structural changes
+   too, the same way Step 3's scaffolding exception treats build
+   configuration as structural.
+6. `write_file` the complete file back, and emit the `TEST_WITNESS` line
+   as usual.
+
+Everything else below (the `TEST_WITNESS` line(s), the Rules) applies
+identically for a test-refactoring rewrite.
+
 Everything else below (Step 3's compile/red-check reasoning, the
 `TEST_WITNESS` line(s), the Rules) applies identically whether a given
 test is new or modified.

@@ -79,14 +79,13 @@ touches the stack — it only makes the top frame's test pass.
 
 | Command | Description |
 |---|---|
-| `push-ticket <id>` | Fetch a Linear ticket, run plan+narrow, seed `.criteria-stack.json` with one frame per remaining acceptance criterion. Also runs
- the split check (complexity assessment) and creates child tickets if the ticket is too large. |
+| `push-ticket <id>` | Fetch a Linear ticket, run plan+narrow, seed `.criteria-stack.json` with one frame per remaining acceptance criterion. The criteria stack handles any number of criteria from a single ticket — splitting is not automatic. |
 | `next-step` | Advance the criteria stack by exactly one step. No ticket-id argument — reads from the stack itself. Pauses (exit 0) at every human input
  point; exits non-zero only on genuine pipeline failure. |
 | `implement-step` | AI-implement the top frame's criterion: make its named failing test pass without modifying the test. Never touches the stack — run
  `next-step` afterward to pop. |
 
-### Ticket Restructuring
+### Ticket Restructuring (manual — not part of push-ticket)
 
 | Command | Description |
 |---|---|
@@ -193,7 +192,6 @@ to pop.
 | `--prepend` | push-ticket | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after. |
 | `--validate-only` | push-ticket | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly. |
 | `--from-gap-plan` | push-ticket | Reuse existing `.gap-plan.md` instead of re-running plan+narrow. |
-| `--dry-run` | push-ticket | Preview split children without creating anything in Linear or pushing to the stack. |
 | `--ticket-file-in <path>` | review-ticket, propose-ticket-edit, explore-ticket, push-ticket | Read ticket from a local file instead of fetching from
  Linear. |
 | `--log-level <level>` | most commands | `trace`/`debug`/`info`/`warning`/`error`/`critical`. `debug` shows per-tool-call activity; `trace` adds raw

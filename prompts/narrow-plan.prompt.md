@@ -125,6 +125,50 @@ now-dropped PASS criterion is dropped too.
 - **If every criterion is PASS:** the plan is fully satisfied - see the
   empty-criteria form in Final answer below.
 
+### Scoping partially-met criteria
+
+When a criterion explicitly names multiple items (files, functions,
+endpoints, modules - identifiable by backtick-quoted paths, a numbered
+list, "each of the N files," "every X in directory Y," etc.) and your
+Step 2 evidence shows only a subset is unmet, **scope the criterion to
+just the unmet items** rather than copying it verbatim. Keep the
+criterion's substance (what it requires) identical - change only which
+items it applies to.
+
+In the `why:` annotation, record:
+- The original criterion's scope (e.g., "original criterion covers 11
+  files")
+- Which items are already met (e.g., "9 already migrated")
+- Why the retained items are unmet (e.g., "these 2 still define local
+  helpers")
+
+This ensures the downstream test-writer and implementer focus on the
+actual gap, not on re-verifying items that are already satisfied.
+
+**Example:**
+- Original: ``- [ ] Each of the 11 listed test files uses the shared helper(s) from `virtual_assistant::test_support` instead of local copies.``
+- Evidence: 9 already migrated; `xero_reconcile_observability.rs` and `xero_webhook.rs` still use local copies.
+- Scoped: ``- [ ] `libs/virtual_assistant_api/tests/xero_reconcile_observability.rs` and `libs/virtual_assistant_api/tests/xero_webhook.rs` use the shared helper(s) from `virtual_assistant::test_support` instead of local copies. <!-- why: original covers 11 files; 9 already migrated; these 2 still define local helpers; verify: test-refactor; existing_test: ... -->``
+
+The criterion's **visible text** is rewritten — the broad "Each of the 11
+listed test files" is replaced with the two specific file paths as
+backtick-quoted tokens. The `why:` annotation records the original scope
+and which items were already met. The file paths are backtick-quoted and
+fully qualified so downstream tooling (`extract_referenced_paths`,
+`check_test_refactor_satisfied`) can locate and read them.
+
+Do NOT scope when:
+- The criterion names a single item (file, function, etc.) - copy
+  verbatim as today.
+- The criterion names multiple items but ALL are unmet - copy verbatim
+  as today.
+- The criterion is a blanket gate like "cargo test passes" referencing
+  other criteria - copy verbatim, or drop per the existing rules for
+  blanket restatements.
+- You cannot identify specific unmet items (the criterion is vague or
+  your evidence is UNKNOWN) - copy verbatim and let the `why:` note the
+  uncertainty.
+
 ## Step 4 - Classify how each retained criterion gets verified
 
 For each criterion retained in Step 3, decide: can satisfying it be
@@ -135,6 +179,23 @@ Final answer format below for exactly where.
 - `test` is the default assumption for anything that changes behavior a
   test can observe: application code, config that affects runtime
   behavior, anything with an assertable input/output.
+- `test-refactor` is for criteria where the named file(s) are test
+  files, the criterion describes structural changes to those tests
+  (imports, helpers, utilities, setup/teardown - not new assertions or
+  behavior changes), and the behavior under test should remain
+  identical. Always accompanied by `existing_test:` refs. Expected
+  outcome: GREEN after the rewrite (no RED, no implementation step).
+- `refactor` is for criteria where the named file(s) are production
+  code, the criterion describes structural changes (not behavior
+  changes), and existing tests already cover the behavior. The tests are
+  the safety net, not the target. Always accompanied by `existing_test:`
+  refs; if no specific safety-net tests can be identified, tag it
+  `manual` instead. Expected outcome: GREEN before and after.
+- The key distinction from `test`: a `test` criterion changes
+  observable behavior (the test should be RED until the behavior is
+  implemented). A `test-refactor` or `refactor` criterion preserves
+  behavior (tests should be GREEN throughout - they're the safety net,
+  not the proof of new behavior).
 - `manual` is for criteria with no meaningful red/green: prose
   documentation (README updates, docs describing a feature), comments
   explaining *why* rather than asserting behavior, CI/tooling config
@@ -177,6 +238,15 @@ on a `test` criterion that needs genuinely new coverage. Never guess at
 a name to fill this in; an omitted tag correctly tells the test-writer
 to write a new test, same as always.
 
+The `existing_test:` tag is also required for `test-refactor` and
+`refactor` criteria: `test-refactor` rewrites those specific existing
+test(s) (you can't refactor a test that doesn't exist yet), and
+`refactor` keeps those specific existing test(s) GREEN as its safety
+net. If you can't name a specific existing test for a structural
+change you'd otherwise tag `refactor`, tag it `manual` instead - a
+refactor with no identifiable safety net has no mechanical floor at
+all, which is exactly what `manual` is for.
+
 ## Final answer
 
 Your final response (no further tool calls) must be exactly the
@@ -197,6 +267,9 @@ caller writes this text verbatim to `.gap-plan.md`.
 <!-- only criteria marked FAIL or UNKNOWN in Step 2 -->
 - [ ] [criterion, copied verbatim from the original plan] <!-- why: one-line reason it's not yet satisfied; verify: test|manual -->
 - [ ] [criterion needing an existing test updated instead of a new one] <!-- why: existing test asserts old behavior; verify: test; existing_test: path/to/file::test_name -->
+- [ ] [criterion about test structure] <!-- why: local helpers still present; verify: test-refactor; existing_test: path/to/file::test_name -->
+- [ ] [criterion about production code structure] <!-- why: local implementation still present; verify: refactor; existing_test: path/to/file::test_name -->
+- [ ] [criterion where only some named items are unmet, scoped to those items] <!-- why: original covers N items; M already met; these are still unmet because ...; verify: test; existing_test: path/to/file::test_name -->
 (or, if every criterion was PASS: "(none - all criteria satisfied)")
 
 ## Implementation Plan
@@ -211,11 +284,23 @@ no criteria remain)
 - Never drop a criterion as PASS without the evidence Step 2 requires -
   an UNKNOWN criterion is retained, not dropped, same as FAIL.
 - Never invent a new criterion not in the original plan, and never
-  reword a retained criterion's substance - copy it verbatim; the
-  one-line "why" reason and "verify:"/"existing_test:" tags are the
-  only additions.
-- Every retained criterion gets exactly one "verify:" tag - `test` or
-  `manual`, never both, never omitted (see Step 4).
-- "existing_test:" is optional and only ever accompanies `verify: test`
-  - never `manual`, and never guessed at when Step 2 didn't confirm a
-  specific existing test to point at (see Step 4).
+  reword a retained criterion's substance. Copy each criterion
+  verbatim, with one exception: when a criterion names multiple items
+  and only a subset is unmet (Step 2 evidence), you MUST scope the
+  criterion to just the unmet items - rewriting the criterion's visible
+  text to name only those items as backtick-quoted file paths (so
+  downstream mechanical checks can locate and read them), without
+  changing what it requires of them. Record the original scope in the
+  "why" annotation. The "verify:"/"existing_test:" tags are additions,
+  same as before.
+- Every retained criterion gets exactly one "verify:" tag - `test`,
+  `test-refactor`, `refactor`, or `manual`, never more than one, never
+  omitted (see Step 4).
+- `refactor` without `existing_test:` refs must be tagged `manual`
+  instead - a refactor with no identifiable safety net has no
+  mechanical floor. `test-refactor` always requires `existing_test:`
+  refs (you can't refactor a test that doesn't exist yet).
+- "existing_test:" is optional for `test` (only when Step 2 confirmed a
+  specific existing test to point at), but required for `test-refactor`
+  and `refactor`; it never accompanies `manual`, and is never guessed
+  at (see Step 4).

@@ -112,6 +112,7 @@ PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
 REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-singlepass.prompt.md"
 TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
 TEST_QUALITY_REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-test-quality.prompt.md"
+RECHECK_CRITERION_PROMPT_FILE = PROMPTS_DIR / "recheck-criterion.prompt.md"
 
 # Host OS name, injected into every test-criterion and test-quality
 # review prompt so the Tester/Reviewer write tests that compile on the
@@ -1167,16 +1168,18 @@ def extract_acceptance_criteria(plan_content: str) -> list[str]:
     ]
 
 
-VERIFICATION_TAG_RE = re.compile(r"verify:\s*(test|manual)\b", re.IGNORECASE)
+VERIFICATION_TAG_RE = re.compile(
+    r"verify:\s*(test(?:-refactor)?|refactor|manual)\b", re.IGNORECASE
+)
 
 
 def extract_verification_mode(criterion: str) -> str:
     """
-    Parses a "verify: test|manual" tag out of a criterion's trailing HTML
-    comment (narrow-plan.prompt.md's Final answer format embeds this
-    alongside the existing "why" reason, per its Step 3 - Narrower tags
-    each retained criterion this way at the source, rather than a
-    separate classification pass).
+    Parses a "verify: test|test-refactor|refactor|manual" tag out of a
+    criterion's trailing HTML comment (narrow-plan.prompt.md's Final
+    answer format embeds this alongside the existing "why" reason, per
+    its Step 3 - Narrower tags each retained criterion this way at the
+    source, rather than a separate classification pass).
 
     Defaults to "test" - the universal behavior before this
     classification existed, and the safe default for anything this can't
@@ -1186,8 +1189,10 @@ def extract_verification_mode(criterion: str) -> str:
     this tag.
     """
     match = VERIFICATION_TAG_RE.search(criterion)
-    if match and match.group(1).lower() == "manual":
-        return "manual"
+    if match:
+        mode = match.group(1).lower()
+        if mode in ("manual", "test-refactor", "refactor"):
+            return mode
     return "test"
 
 
@@ -1252,16 +1257,33 @@ class CriterionFrame:
     test_names: list[str] | None  # fully-qualified, parallel to
                             # test_files, for run_scoped_test/
                             # run_scoped_tests.
-    status: str            # "pending" | "test-written" | "done"
+    status: str            # "pending" | "test-written" | "done" |
+                            # "baseline-confirmed" (refactor mode:
+                            # safety-net tests confirmed GREEN at
+                            # baseline, awaiting the structural
+                            # refactor before recheck).
     origin: str             # "ticket" | "review" | "validate-missed" -
                             # recorded but not yet acted on differently;
                             # all origins go through the identical
                             # test-write -> implement -> gate cycle.
-    verification: str = "test"  # "test" | "manual" - set from the gap
-                            # plan's own "verify:" tag (see
-                            # extract_verification_mode) for criteria
-                            # that aren't expressible as a red/green test
-                            # (documentation, config, CI changes...).
+    verification: str = "test"  # "test" | "test-refactor" | "refactor"
+                            # | "manual" - set from the gap plan's own
+                            # "verify:" tag (see
+                            # extract_verification_mode). "test" is the
+                            # default for behavior changes a red/green
+                            # test proves (write a failing test ->
+                            # implement). "manual" is for criteria with
+                            # no meaningful red/green (documentation,
+                            # config, CI). "test-refactor" is for
+                            # criteria that restructure existing test
+                            # code (imports/helpers/utilities) without
+                            # changing assertions - the test-writer
+                            # rewrites the test, expected GREEN after.
+                            # "refactor" is for criteria that
+                            # restructure production code without
+                            # changing behavior - existing tests are the
+                            # safety net (kept GREEN), WRITE_TEST is
+                            # skipped.
                             # Defaults to "test" - the universal behavior
                             # before this field existed, and the safe
                             # default for anything the tag-parsing can't
@@ -1399,6 +1421,17 @@ def peek_frame() -> CriterionFrame | None:
     stack = load_stack()
     return stack[0] if stack else None
 
+
+# A verification="refactor" frame (see extract_verification_mode) whose
+# baseline check has passed: the safety-net tests named in
+# existing_test_refs were all GREEN at baseline, so the refactor is
+# cleared to proceed. The frame sits in this status while the human
+# (or implement_step) makes the structural changes to production code;
+# the next 'next_step' call re-runs the safety-net tests and pops only if
+# they're still GREEN *and* a production file actually changed. Shared
+# here (not private to next_step.py) because implement_step.py needs to
+# recognize it as the "refactor awaiting implementation" status too.
+BASELINE_CONFIRMED_STATUS = "baseline-confirmed"
 
 # A ticket's per-criterion frames are all real acceptance criteria with
 # a test to write; this sentinel is not one - it's a durable stand-in
@@ -1622,20 +1655,31 @@ def check_symbol_grounding(candidates: list[str]) -> list[str]:
 
 def verify_existing_test_refs_resolve(existing_test_refs: list[str]) -> list[str]:
     """
-    For each "file::name" ref, confirms the file exists and that `name`
-    (the part after the last "::") appears somewhere in it as a whole
-    word - a plain text search, not full AST parsing, language-agnostic
-    on purpose (unlike implement_step.py's brace-counting
-    _extract_function_block, this only needs to know the name exists
-    *somewhere* plausible, not extract its full body). Returns one
-    human-readable reason per ref that doesn't resolve.
+    For each "file::name" ref, confirms the file exists and that the
+    function name (the last "::"-separated segment of the qualified test
+    name) appears somewhere in it as a whole word - a plain text search,
+    not full AST parsing, language-agnostic on purpose (unlike
+    implement_step.py's brace-counting _extract_function_block, this only
+    needs to know the name exists *somewhere* plausible, not extract its
+    full body). Returns one human-readable reason per ref that doesn't
+    resolve.
+
+    The ref format is "file::qualified_test_name" where the test name is
+    "in whatever form your test runner's filter syntax expects" (see
+    test-criterion.prompt.md). For Rust that's "mod::test_name" (e.g.
+    "tests::quickbooks_oauth_token_url_uses_production_endpoint"), which
+    contains its own "::" separator. Splitting on the FIRST "::"
+    (partition, not rpartition) keeps the file path intact while leaving
+    the full qualified name as the test part; the function name (last
+    "::"-separated segment of the qualified name) is what's searched for
+    in the file.
     """
     unresolved = []
     for ref in existing_test_refs:
         if "::" not in ref:
             unresolved.append(f"existing_test ref '{ref}' is not in 'file::name' shape")
             continue
-        file_part, _, name = ref.rpartition("::")
+        file_part, _, name = ref.partition("::")
         path = Path(file_part)
         if not path.is_file():
             unresolved.append(f"existing_test ref '{ref}': file does not exist")
@@ -1645,8 +1689,9 @@ def verify_existing_test_refs_resolve(existing_test_refs: list[str]) -> list[str
         except OSError as e:
             unresolved.append(f"existing_test ref '{ref}': could not read file ({e})")
             continue
-        if not re.search(r"\b" + re.escape(name) + r"\b", content):
-            unresolved.append(f"existing_test ref '{ref}': no symbol named '{name}' found in {file_part}")
+        func_name = name.rpartition("::")[2] if "::" in name else name
+        if not re.search(r"\b" + re.escape(func_name) + r"\b", content):
+            unresolved.append(f"existing_test ref '{ref}': no symbol named '{func_name}' found in {file_part}")
     return unresolved
 
 
@@ -1745,6 +1790,194 @@ def extract_plan_context_for_criterion(criterion: str, gap_plan_text: str) -> st
         if any(noun in line for noun in nouns)
     ]
     return "\n".join(matching_lines) if matching_lines else impl_section
+
+
+# ---------------------------------------------------------------------------
+# Mechanical pre-check for verify="test-refactor" criteria - the same
+# "status is a hint, re-detect from real state" principle the state
+# machine already applies to verify="test" (red/green) and verify=
+# "refactor" (baseline + git-changed-files) criteria. A test-refactor
+# criterion is about structural changes to existing test code
+# (imports/helpers/utilities, not assertions - see
+# narrow-plan.prompt.md's Step 4), expected GREEN throughout, so there
+# is no red/green signal to re-detect satisfaction from: the only
+# mechanical floor is "do the named file(s) actually contain (or no
+# longer contain) what the criterion describes?" This parses the
+# criterion's structural claims into positive ("imports X from Z",
+# "uses X::method") and negative ("contains no local X struct", "no
+# local X() helper") assertions, reads the named file(s), and returns
+# True only when every parsed assertion passes. Deliberately
+# conservative: a criterion whose wording matches no known pattern, or
+# that names a file this can't read, returns False (inconclusive) so
+# the caller falls through to the normal WRITE_TEST path, same as
+# today - this never pops a frame it can't positively confirm.
+# ---------------------------------------------------------------------------
+
+# The leading identifier-path of a backtick-quoted "uses `X::method(...)`"
+# claim - everything from the start of the token up to the first
+# character that isn't a word char or ":" (so "EnvVarGuard::unset("
+# yields "EnvVarGuard::unset"). Used only for the "uses" positive
+# assertion, where matching the whole call expression verbatim would
+# be too brittle (quote style, spacing in the arguments vary).
+_RECHECK_USES_LEADING_RE = re.compile(r"[A-Za-z_][\w:]*")
+
+# "imports `X` and `Y` from `Z`" - the backtick-quoted source module
+# after "from", plus every backtick-quoted imported name between
+# "imports" and "from" (an import assertion is positive: the file must
+# contain the source string AND every imported name).
+_RECHECK_IMPORTS_RE = re.compile(r"\bimports?\b(.+?)\bfrom\s*`([^`]+)`", re.IGNORECASE)
+
+# "no local `X` struct" - a negative assertion: the file must NOT
+# define `struct X`.
+_RECHECK_NO_LOCAL_STRUCT_RE = re.compile(r"no local `([^`]+)` struct", re.IGNORECASE)
+
+# "no local `X()` or `Y()` helper" - the span between "no local" and
+# "helper" holds one or more backtick-quoted `name()` tokens; each is a
+# negative assertion (the file must NOT define `fn name`).
+_RECHECK_NO_LOCAL_HELPER_RE = re.compile(r"no local (.+?) helper", re.IGNORECASE)
+
+# "uses `X::method(...)`" - a positive assertion: the file must contain
+# the token's leading identifier-path (see _RECHECK_USES_LEADING_RE).
+_RECHECK_USES_RE = re.compile(r"\buses?\s*`([^`]+)`", re.IGNORECASE)
+
+
+def _parse_test_refactor_assertions(criterion_visible: str) -> tuple[list[str], list[re.Pattern]]:
+    """
+    Parse a test-refactor criterion's visible text (before its trailing
+    HTML comment) into (positives, negatives):
+      - positives: substrings the named file(s) must contain (a plain
+        ``in`` check, like verify_existing_test_refs_resolve's name
+        search - no regex, so an import path like ``crate::test_support``
+        or a call like ``EnvVarGuard::unset`` matches verbatim).
+      - negatives: compiled regexes the file(s) must NOT match (each
+        a symbol-definition shape - ``struct X`` or ``fn X`` - so a
+        bare mention of ``X`` in an unrelated position isn't itself a
+        hit; the same deliberate simplicity as
+        verify_existing_test_refs_resolve's whole-word search, no AST
+        parsing and no comment stripping).
+
+    Returns ([], []) when the wording matches none of the known
+    patterns (see check_test_refactor_satisfied) - the caller treats
+    that as inconclusive. Never raises; an unparseable clause simply
+    contributes nothing rather than failing the whole parse.
+    """
+    positives: list[str] = []
+    negatives: list[re.Pattern] = []
+
+    # "imports `X` and `Y` from `Z`" -> file must contain `Z` and each
+    # of the imported names (X, Y, ...). Non-greedy up to the nearest
+    # "from `...`", so a criterion with a single import clause parses
+    # exactly that clause; multiple clauses (rare) each add their own.
+    for m in _RECHECK_IMPORTS_RE.finditer(criterion_visible):
+        names_span = m.group(1)
+        source = m.group(2).strip()
+        positives.append(source)
+        for name in BACKTICK_TOKEN_RE.findall(names_span):
+            name = name.strip()
+            if name:
+                positives.append(name)
+
+    # "no local `X` struct" -> file must NOT define `struct X`.
+    for m in _RECHECK_NO_LOCAL_STRUCT_RE.finditer(criterion_visible):
+        name = m.group(1).strip()
+        negatives.append(re.compile(r"\bstruct\s+" + re.escape(name) + r"\b"))
+
+    # "no local `X()` or `Y()` helper" -> for each backtick `name()`
+    # token in the span, file must NOT define `fn name`. Tokens without
+    # a trailing `()` (e.g. a struct name caught in the same span when a
+    # criterion bundles a struct clause and a helper clause with "and")
+    # are skipped - the struct clause has its own pattern above.
+    for m in _RECHECK_NO_LOCAL_HELPER_RE.finditer(criterion_visible):
+        clause = m.group(1)
+        for tok in BACKTICK_TOKEN_RE.findall(clause):
+            tok = tok.strip()
+            if tok.endswith("()"):
+                name = tok[:-2].strip()
+                if name:
+                    negatives.append(re.compile(r"\bfn\s+" + re.escape(name) + r"\b"))
+
+    # "uses `X::method(...)`" -> file must contain the token's leading
+    # identifier-path (matches "EnvVarGuard::unset" out of
+    # "EnvVarGuard::unset(\"XERO_API_BASE_URL\")"), so quote style and
+    # spacing in the call's arguments don't break the match.
+    for m in _RECHECK_USES_RE.finditer(criterion_visible):
+        token = m.group(1).strip()
+        leading = _RECHECK_USES_LEADING_RE.match(token)
+        if leading:
+            positives.append(leading.group(0))
+        elif token:
+            positives.append(token)
+
+    return positives, negatives
+
+
+def check_test_refactor_satisfied(criterion: str, existing_test_refs: list[str]) -> bool:
+    """
+    Mechanical (no-AI) check: is this test-refactor criterion already
+    satisfied by the current codebase? Returns True only when every
+    structural claim the criterion makes can be verified by reading
+    the named file(s). Returns False (inconclusive / not satisfied) if
+    any check can't be mechanically confirmed - the caller falls
+    through to the normal WRITE_TEST path in that case, same as today.
+
+    Works by:
+      1. Extracting the named file(s) from the criterion's backtick-
+         quoted paths (extract_referenced_paths, same convention as
+         extract_plan_context_for_criterion's backtick tokens) - a
+         criterion naming a file that doesn't exist returns [] here, so
+         this returns False (nothing to read, can't confirm).
+      2. Parsing the criterion's visible text (before its trailing
+         HTML comment) into positive ("imports X from Z", "uses
+         X::method") and negative ("contains no local X struct", "no
+         local X() helper") assertions - see
+         _parse_test_refactor_assertions. A criterion whose wording
+         matches no known pattern yields zero assertions, so this
+         returns False (inconclusive -> fall through), never vacuously
+         True.
+      3. Reading each named file and checking every assertion against
+         every file (a single-file criterion - the common case - just
+         checks that one; a multi-file criterion requires the claim to
+         hold in every named file, the conservative direction: a False
+         here only falls through to WRITE_TEST, never pops wrongly).
+         Simple text search for positives, regex for negative
+         symbol-definition shapes - same deliberate simplicity as
+         verify_existing_test_refs_resolve and check_symbol_grounding,
+         no AST parsing.
+
+    existing_test_refs is accepted for symmetry with the frame's other
+    mechanical checks (and because the caller already has it in hand)
+    but isn't itself part of the satisfaction check: a test-refactor
+    criterion's existing_test refs name the test(s) being refactored,
+    whose *existence* is already verified by grounding
+    (verify_existing_test_refs_resolve) and whose *satisfaction* is a
+    question about the production/test code the criterion describes,
+    not about the refs themselves.
+    """
+    visible = criterion.split(" <!--", 1)[0]
+    positives, negatives = _parse_test_refactor_assertions(visible)
+    if not positives and not negatives:
+        # No known structural claim to verify - inconclusive, same as a
+        # criterion with wording this parser doesn't recognize.
+        return False
+
+    paths = extract_referenced_paths(visible)
+    if not paths:
+        # No file to read (either none named, or none named exists) -
+        # can't confirm anything, same conservative fallback.
+        return False
+
+    for path_str in paths:
+        try:
+            content = Path(path_str).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        for needle in positives:
+            if needle not in content:
+                return False
+        for pattern in negatives:
+            if pattern.search(content):
+                return False
+    return True
 
 
 FINDINGS_SECTION_RE = re.compile(r"^## Findings\s*\n(.*?)(?:\n## |\Z)", re.DOTALL | re.MULTILINE)
@@ -2465,23 +2698,46 @@ def _parse_test_witnesses(text: str) -> list[tuple[str, str]]:
 
 
 def build_test_criterion_prompt(
-    criterion: str, plan_context: str, existing_test_refs: list[str] | None = None
+    criterion: str, plan_context: str, existing_test_refs: list[str] | None = None,
+    verification: str = "test",
 ) -> str:
     instructions = load_prompt_body(TEST_CRITERION_PROMPT_FILE)
-    existing_test_section = (
-        f"\n\nThis criterion is about changing behavior existing test(s) "
-        f"already cover, not adding new coverage - modify {'that test' if len(existing_test_refs) == 1 else 'those tests'} "
-        f"instead of writing a new one (see this prompt's own instructions "
-        f"for exactly how). The test(s) to change: {', '.join(existing_test_refs)}."
-        if existing_test_refs else ""
-    )
+    if verification == "test-refactor":
+        existing_test_section = (
+            f"\n\nThis criterion is about refactoring test code structure "
+            f"- the test's assertions should remain functionally "
+            f"identical. Rewrite the existing test(s) to match the "
+            f"criterion's structural requirements without adding new "
+            f"assertions or source-scanning checks. The test(s) to "
+            f"rewrite: {', '.join(existing_test_refs)}."
+            if existing_test_refs else ""
+        )
+        write_instruction = (
+            "Rewrite the existing test(s) for exactly this one acceptance "
+            "criterion - this is a test-refactoring criterion, not a "
+            "behavior change. The test's assertions should remain "
+            "functionally the same; change only the structural elements "
+            "the criterion describes. The test should pass (GREEN) after "
+            "the rewrite."
+        )
+    else:
+        existing_test_section = (
+            f"\n\nThis criterion is about changing behavior existing test(s) "
+            f"already cover, not adding new coverage - modify {'that test' if len(existing_test_refs) == 1 else 'those tests'} "
+            f"instead of writing a new one (see this prompt's own instructions "
+            f"for exactly how). The test(s) to change: {', '.join(existing_test_refs)}."
+            if existing_test_refs else ""
+        )
+        write_instruction = (
+            "Write a failing test for exactly this one acceptance "
+            "criterion, and only this one:"
+        )
     return (
         f"{instructions}\n\n---\n\n"
         f"Here is the relevant Implementation Plan context for this "
         f"criterion, extracted from the gap plan - already complete and "
         f"current, no need to read_file it again:\n\n{plan_context}\n\n"
-        f"Write a failing test for exactly this one acceptance criterion, "
-        f"and only this one:\n\n{criterion}"
+        f"{write_instruction}\n\n{criterion}"
         f"{existing_test_section}\n\n{_HOST_PLATFORM_NOTE}"
     )
 
@@ -2693,16 +2949,30 @@ def run_test_for_criterion_with_compile_retry(
 
 
 def _run_tester_step(
-    prompt: str, model: str, ticket_id: str | None, criterion: str
-) -> tuple[list[str], list[str]]:
+    prompt: str, model: str, ticket_id: str | None, criterion: str,
+    no_files_is_fatal: bool = True,
+) -> tuple[list[str] | None, list[str] | None]:
     """
     Shared "run the Tester once on this prompt, parse its TEST_WITNESS
     lines" core used by both run_test_for_criterion_with_compile_retry
     and run_test_for_criterion_with_full_retry. Returns parallel
     (file_paths, test_names) lists in witness order; dies on a tool/AI
-    failure, a run that wrote no files, or a run with no witness line -
-    same fail-fast contract every Tester call already had, factored out
-    only to keep the two retry loops from duplicating ~25 lines.
+    failure or a run with no witness line - same fail-fast contract
+    every Tester call already had, factored out only to keep the two
+    retry loops from duplicating ~25 lines.
+
+    A run that writes no files is, by default, also fatal
+    (die_with_log) - the original fail-fast behaviour, which
+    run_test_for_criterion_with_compile_retry still relies on. But
+    run_test_for_criterion_with_full_retry passes
+    no_files_is_fatal=False: a Tester that writes nothing is a strong
+    signal the criterion may already be satisfied (it re-read the
+    code and found no gap to write a test for), so that variant needs
+    the run to *return* a (None, None) sentinel the caller can recover
+    from (see do_write_test/_handle_no_test_written) rather than taking
+    the whole pipeline down. A run with files but no TEST_WITNESS line
+    is a malformed response, not a satisfaction signal, so it stays
+    fatal regardless of this flag.
     """
     test_files: list[str] = []
 
@@ -2725,10 +2995,21 @@ def _run_tester_step(
         die_with_log("test-criterion", str(e), criterion=criterion, ticket=ticket_id)
     render_step_output(result.text)
     if not test_files:
-        die_with_log(
-            "test-criterion", "Tester finished without writing any test files.",
+        if no_files_is_fatal:
+            die_with_log(
+                "test-criterion", "Tester finished without writing any test files.",
+                criterion=criterion, ticket=ticket_id,
+            )
+        # Non-fatal path: the Tester judged the criterion already
+        # satisfied (or otherwise saw nothing to write). Return the
+        # sentinel so the caller's recovery path can decide whether to
+        # pop or pause - never retry here, since a fix prompt presupposes
+        # a file to fix and there's nothing to feed back.
+        log_event(
+            "test-criterion", "no-test-written",
             criterion=criterion, ticket=ticket_id,
         )
+        return None, None
     witnesses = _parse_test_witnesses(result.text)
     if not witnesses:
         die_with_log(
@@ -2747,9 +3028,10 @@ def run_test_for_criterion_with_full_retry(
     max_attempts: int = 5,
     ticket_id: str | None = None,
     existing_test_refs: list[str] | None = None,
+    verification: str = "test",
 ) -> tuple[
-    list[str],
-    list[str],
+    list[str] | None,
+    list[str] | None,
     list[subprocess.CompletedProcess],
     subprocess.CompletedProcess | None,
     str | None,
@@ -2783,17 +3065,30 @@ def run_test_for_criterion_with_full_retry(
 
     Returns (file_paths, test_names, test_results, compile_result,
     quality_concern):
-      - file_paths/test_names: parallel lists in witness order.
+      - file_paths/test_names: parallel lists in witness order. Both are
+        None when the Tester wrote no files at all (see below) - the
+        sentinel do_write_test dispatches to _handle_no_test_written
+        for, rather than treating as a normal test-written result.
       - test_results: one CompletedProcess per test from the last
         iteration that reached Gate 2 (what do_write_test needs for
-        red/green dispatch). Empty if compile never succeeded.
+        red/green dispatch). Empty if compile never succeeded, or if
+        the Tester wrote nothing (sentinel path).
       - compile_result: the last compile gate's CompletedProcess (None
-        only if the loop never ran a compile gate). Caller checks
+        only if the loop never ran a compile gate, including the
+        no-test-written sentinel path). Caller checks
         returncode != 0 for the fatal path.
       - quality_concern: None if the quality review passed (or was
-        never reached due to compile failure); the flagged concern
-        string if the loop exhausted with quality still flagged
-        (advisory fallback).
+        never reached due to compile failure or the no-test-written
+        sentinel); the flagged concern string if the loop exhausted
+        with quality still flagged (advisory fallback).
+
+    The no-test-written sentinel (file_paths is None) is returned
+    immediately - the loop does not retry on it. A Tester that writes
+    nothing is signalling the criterion may already be satisfied (it
+    re-read the code and found no gap); the compile/quality fix prompts
+    presuppose a file to fix, so retrying them is pointless. The caller
+    decides whether to pop (recovery path confirmed satisfaction) or
+    pause for a human.
 
     existing_test_refs affects only the attempt-1 prompt (same as the
     compile-retry variant); fix prompts already say "read_file {files}
@@ -2810,7 +3105,9 @@ def run_test_for_criterion_with_full_retry(
     for attempt in range(1, max_attempts + 1):
         # -- Select prompt ------------------------------------------------
         if attempt == 1:
-            prompt = build_test_criterion_prompt(criterion, plan_context, existing_test_refs)
+            prompt = build_test_criterion_prompt(
+                criterion, plan_context, existing_test_refs, verification=verification,
+            )
         elif failure_kind == "compile":
             log.warning(
                 "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
@@ -2828,7 +3125,18 @@ def run_test_for_criterion_with_full_retry(
             )
 
         # -- Run Tester ---------------------------------------------------
-        file_paths, test_names = _run_tester_step(prompt, model, ticket_id, criterion)
+        file_paths, test_names = _run_tester_step(
+            prompt, model, ticket_id, criterion, no_files_is_fatal=False,
+        )
+        if file_paths is None:
+            # Tester wrote nothing - a strong signal the criterion may
+            # already be satisfied (it re-read the code and found no gap
+            # to write a test for). Don't burn the rest of the attempt
+            # budget retrying: the fix prompts presuppose a file to fix,
+            # and there's nothing to feed back. Propagate the sentinel
+            # (None file_paths) straight to the caller's recovery path
+            # (do_write_test -> _handle_no_test_written).
+            return None, None, [], None, None
 
         # -- Gate 1: compile ---------------------------------------------
         compile_result = run_command(
@@ -2854,7 +3162,7 @@ def run_test_for_criterion_with_full_retry(
         concern = run_test_quality_review(
             criterion, plan_context, file_paths, test_names,
             existing_test_refs or [], model, ticket_id=ticket_id,
-            test_red_green=test_red_green,
+            test_red_green=test_red_green, verification=verification,
         )
         if concern:
             any_red = any(test_red_green)
@@ -2900,6 +3208,7 @@ def build_test_quality_review_prompt(
     test_names: list[str],
     existing_test_refs: list[str],
     test_red_green: list[bool] | None = None,
+    verification: str = "test",
 ) -> str:
     instructions = load_prompt_body(TEST_QUALITY_REVIEW_PROMPT_FILE)
     # Correlate each written/modified test against the hint list by
@@ -2928,12 +3237,23 @@ def build_test_quality_review_prompt(
         result_note = ""
         if test_red_green is not None and idx < len(test_red_green):
             is_red = test_red_green[idx]
-            result_note = (
-                "\n  Actual result: RED (failed when run against current code)"
-                if is_red else
-                "\n  Actual result: GREEN (passed when run against current code "
-                "- this test is not detecting any gap in the current implementation)"
-            )
+            if is_red:
+                result_note = (
+                    "\n  Actual result: RED (failed when run against current code)"
+                )
+            elif verification == "test-refactor":
+                result_note = (
+                    "\n  Actual result: GREEN (passed when run against current "
+                    "code - this is expected for a test-refactoring criterion; "
+                    "the test should pass after the rewrite. Verify the rewrite "
+                    "preserved all original assertions and changed only the "
+                    "structural elements the criterion describes.)"
+                )
+            else:
+                result_note = (
+                    "\n  Actual result: GREEN (passed when run against current code "
+                    "- this test is not detecting any gap in the current implementation)"
+                )
         sections.append(f"- {test_file} :: {test_name}\n  {modification_note}{result_note}")
     tests_block = "\n".join(sections)
     return (
@@ -2955,6 +3275,7 @@ def run_test_quality_review(
     model: str,
     ticket_id: str | None = None,
     test_red_green: list[bool] | None = None,
+    verification: str = "test",
 ) -> str | None:
     """
     Reviews the test(s) Tester just wrote or modified for this criterion
@@ -2985,6 +3306,7 @@ def run_test_quality_review(
                 build_test_quality_review_prompt(
                     criterion, plan_context, test_files, test_names,
                     existing_test_refs, test_red_green=test_red_green,
+                    verification=verification,
                 ),
                 tools.READ_ONLY_TOOLS,
                 tools.make_executor(allow_write=False),
@@ -3008,6 +3330,102 @@ def run_test_quality_review(
             )
         return None
     return result.text
+
+
+def build_recheck_criterion_prompt(criterion: str, plan_context: str) -> str:
+    instructions = load_prompt_body(RECHECK_CRITERION_PROMPT_FILE)
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"The single acceptance criterion to recheck (its visible text "
+        f"before any trailing \u003c!-- comment is what it requires; the comment's "
+        f"why:/verify:/existing_test: tags are stale hints from an earlier "
+        f"narrow pass, not ground truth about the current state):\n\n"
+        f"{criterion}\n\n"
+        f"Use read_file/list_dir/search_files to verify whether this "
+        f"criterion is satisfied by the codebase in its current state. "
+        f"Your final line must be exactly one of: SATISFIED, NOT "
+        f"SATISFIED, or UNKNOWN."
+    )
+
+
+def _find_recheck_verdict(text: str) -> str | None:
+    """
+    Parse a Rechecker response into exactly one of "SATISFIED",
+    "NOT SATISFIED", "UNKNOWN", or None (unparseable). Prefers a verdict
+    on its own final non-empty line (optionally after a "Verdict:" label
+    and/or markdown emphasis), so reasoning prose that happens to
+    mention one of the tokens earlier can't be misread as the verdict -
+    the prompt instructs the model to put the verdict last, on its own.
+    Falls back to scanning every line the same way, then to a
+    priority-ordered whole-text search (NOT SATISFIED before SATISFIED,
+    since the latter is a substring of the former). Returns None only
+    when none of those find anything.
+    """
+    candidates = ("NOT SATISFIED", "SATISFIED", "UNKNOWN")
+
+    def _clean(line: str) -> str:
+        s = line.strip().lstrip("*#-> ").strip().strip("*").strip()
+        s = re.sub(r"^(?:verdict\s*[:\-]\s*)", "", s, flags=re.IGNORECASE).strip().strip("*").strip()
+        return s
+
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if lines and _clean(lines[-1]) in candidates:
+        return _clean(lines[-1])
+    for ln in lines:
+        if _clean(ln) in candidates:
+            return _clean(ln)
+    return find_verdict(text, ["NOT SATISFIED", "SATISFIED", "UNKNOWN"])
+
+
+def recheck_single_criterion(
+    criterion: str, plan_context: str, model: str, ticket_id: str | None = None,
+) -> str:
+    """
+    Focused, single-criterion re-narrow: runs the Rechecker AI step on
+    exactly one criterion against the current codebase. Returns
+    "SATISFIED", "NOT SATISFIED", or "UNKNOWN". Used by next_step.py's
+    _handle_no_test_written as the second-opinion fallback after the
+    mechanical check (check_test_refactor_satisfied) is inconclusive
+    and the Tester wrote nothing - the case a text search can't verify
+    but an AI reading the code can (a behavioral criterion incidentally
+    satisfied by a sibling's implementation).
+
+    Like run_test_quality_review, this is a side channel: a failure
+    here (AIError, tools.PipelineAbort, or an unparseable verdict) is
+    NEVER fatal. Any failure degrades to "UNKNOWN" (treated as
+    "inconclusive -> pause for human") rather than die_with_log, so an
+    infrastructure failure in this second-opinion path can't take the
+    pipeline down or auto-pop a frame the check couldn't actually
+    confirm.
+    """
+    try:
+        result = run_ai_step_with_retry(
+            lambda: run_with_tools(
+                build_recheck_criterion_prompt(criterion, plan_context),
+                tools.READ_ONLY_TOOLS,
+                tools.make_executor(allow_write=False),
+                "recheck-criterion",
+                model=model,
+                summarize_call=tools.summarize_tool_call,
+            ),
+            "recheck-criterion",
+            criterion=criterion, ticket=ticket_id,
+        )
+    except (AIError, tools.PipelineAbort) as e:
+        log.warning("-- Recheck failed to run (degrading to UNKNOWN): %s", e)
+        return "UNKNOWN"
+    render_step_output(result.text)
+    verdict = _find_recheck_verdict(result.text)
+    if verdict is None:
+        log.warning(
+            "-- Recheck output had no recognizable verdict (degrading to "
+            "UNKNOWN). See output above."
+        )
+        return "UNKNOWN"
+    return verdict
 
 
 def build_review_prompt(changed_files: list[str], plan_text: str) -> str:

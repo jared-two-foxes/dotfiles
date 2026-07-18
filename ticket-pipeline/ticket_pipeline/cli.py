@@ -64,7 +64,7 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
             "AI-implement the stack's top frame: make its failing test pass",
         ),
     }),
-    ("Ticket restructuring", {
+    ("Ticket restructuring (manual)", {
         "split-ticket": _Command(
             "split_ticket",
             "Assess a ticket for complexity and propose child tickets if too large",

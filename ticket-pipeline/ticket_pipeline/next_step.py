@@ -35,7 +35,36 @@ general N-test case; N=1 behaves exactly as it always has.
     "awaiting-manual-impl"),
     verification == "manual"                -> MANUAL_CRITERION (no test
                                                involved at all - see below)
+  top frame status == "pending",
+    verification == "refactor"              -> REFACTOR_SETUP (existing tests
+                                               are the safety net - see below)
+  top frame status == "pending",
+    verification == "test-refactor",
+    check_test_refactor_satisfied            -> mark done, re-detect (POP)
+                                             (mechanical pre-check: the
+                                              named file(s) already match the
+                                              criterion's structural claims
+                                              - no WRITE_TEST AI call at all)
+  top frame status == "baseline-confirmed",
+    verification == "refactor"              -> recheck_refactor_tests:
+    any safety-net test red                  -> pause (refactor broke something)
+    all green, no production file changed     -> pause (refactor not done yet)
+    all green + a production file changed     -> mark done, re-detect (POP)
   top frame status == "pending"            -> WRITE_TEST
+    (verification == "test-refactor" flows
+     through here too: the test-writer rewrites
+     an existing test; a GREEN rewrite pops
+     immediately for origin="ticket")
+  WRITE_TEST tester writes no files      -> _handle_no_test_written:
+    --accept-no-test, or mechanical check     -> mark done, re-detect (POP)
+      confirms it
+    AI recheck (first visit) says SATISFIED    -> mark done, re-detect (POP)
+    otherwise (or on resume, skip_ai=True)    -> pause in 'nothing-written'
+                                               (--accept-no-test pops later)
+  top frame status == "nothing-written"    -> _handle_no_test_written (resume,
+                                               skip_ai=True): mechanical check
+                                               + --accept-no-test as above,
+                                               no AI re-spend; else pause again
   top frame status == "test-written",
     missing test_files/test_names          -> WRITE_TEST (retry)
   top frame status == "test-written"       -> re-run every scoped test
@@ -91,6 +120,36 @@ be identified at all, there's nothing to mechanically check - popping
 requires an explicit --accept-manual, the same escape-hatch shape as
 --accept-green, rather than ever silently trusting a criterion this
 pipeline has no way to verify.
+
+A frame tagged verification="test-refactor" (a structural change to
+test code - imports/helpers/utilities, not assertions - see
+extract_verification_mode) flows through WRITE_TEST like a normal "test"
+criterion, but the test-writer is told to *rewrite* the named existing
+test(s) rather than write a failing one, and the quality reviewer is
+told a GREEN outcome is expected (not a suspicious tautology). A rewrite
+that comes back GREEN pops immediately for origin="ticket" (same as any
+green-at-write-time test); a rewrite that comes back RED is an incorrect
+rewrite (not a gap to implement), so implement_step refuses it and the
+human fixes the test by hand before re-running next_step.
+
+A frame tagged verification="refactor" (a structural change to
+production code that preserves behavior - see
+extract_verification_mode) skips WRITE_TEST entirely: the existing tests
+named in its existing_test_refs are the safety net, not the target.
+REFACTOR_SETUP runs a mandatory baseline check first - every safety-net
+test must be GREEN *before* the refactor starts; RED at baseline dies
+hard (a GREEN-after-refactor check is meaningless if the tests were red
+to begin with, so the pipeline refuses to mask a pre-existing breakage
+as "the refactor's job to fix"). On GREEN, it pauses (status =
+baseline-confirmed) for the human or implement_step to make the
+structural changes. The next next_step call rechecks: every safety-net
+test must still be GREEN *and* a production file this criterion names
+must appear in git_changed_files() - the conjunction that proves the
+refactor preserved behavior AND actually happened, so a no-op can't
+slip through on "nothing broke" alone. A refactor criterion with no
+identifiable safety-net tests is meant to be tagged manual by the
+narrower (see narrow-plan.prompt.md Step 4) - it never reaches this
+mode.
 
 POP removes the top frame. If the new top frame belongs to a different
 ticket (or the stack is now empty), that ticket's frames are all done:
@@ -165,6 +224,19 @@ GREEN_UNCONFIRMED_STATUS = "green-unconfirmed"
 # principle as every other phase (status is a hint, never a trust
 # boundary).
 MANUAL_PENDING_STATUS = "awaiting-manual-impl"
+
+# A frame whose WRITE_TEST run produced no test files at all - the
+# Tester re-read the code and wrote nothing, a strong signal the
+# criterion may already be satisfied (the test-refactor landed before or
+# during the run, or a behavior criterion was incidentally satisfied by
+# a sibling). Distinguished from "pending" so the next `next_step` call
+# re-enters the recovery path (_handle_no_test_written with skip_ai=True)
+# rather than blindly retrying WRITE_TEST, and from "test-written"
+# (which means a confirmed-red test is awaiting implementation).
+# Pops via --accept-no-test, or once the mechanical check/AI recheck can
+# confirm satisfaction; otherwise pauses for a human, same escape-hatch
+# shape as --accept-green/--accept-manual.
+NOTHING_WRITTEN_STATUS = "nothing-written"
 
 
 def do_await_impl(
@@ -319,7 +391,185 @@ def do_manual_criterion(stack: list, frame: "lib.CriterionFrame", accept_manual:
     do_await_manual_impl(frame, paths)
 
 
-def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands: dict, git_cfg: "lib.GitConfig | None" = None) -> None:
+def do_refactor_setup(
+    stack: list, frame: "lib.CriterionFrame", commands: dict, git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    """
+    REFACTOR_SETUP: the entry point for a verification="refactor" frame
+    (see extract_verification_mode) - a criterion that restructures
+    production code without changing behavior, using existing tests as
+    the safety net. There's no WRITE_TEST here: the safety-net tests are
+    already written (named in frame.existing_test_refs), and the
+    criterion is *not* about adding coverage. Instead this:
+
+      1. records base_commit (same as do_write_test/do_manual_criterion,
+         so reset-criterion works on refactor frames too),
+      2. populates frame.test_files/test_names from existing_test_refs
+         (the safety-net tests the rest of this mode re-runs),
+      3. runs a mandatory baseline check: every safety-net test must be
+         GREEN *before* the refactor starts. RED at baseline means the
+         safety net is already broken, so refusing to proceed is the
+         only safe move - a GREEN-after-refactor check is meaningless if
+         the tests were red to begin with. dies via die_with_log with a
+         clear message rather than silently masking a pre-existing
+         breakage as "the refactor's job to fix."
+      4. on GREEN: sets status to BASELINE_CONFIRMED_STATUS and pauses
+         (the human or implement_step makes the structural changes; the
+         next 'next_step' call rechecks).
+
+    There's no origin-based trust distinction here, unlike
+    GREEN_UNCONFIRMED_STATUS: the safety-net tests are *pre-existing*
+    (not freshly written by this pipeline), so a baseline GREEN is real
+    evidence the behavior they cover currently works - nothing about
+    how this frame was pushed changes that.
+    """
+    if git_cfg is not None and git_cfg.git_workflow and frame.base_commit is None:
+        try:
+            frame.base_commit = lib.git_current_head()
+            lib.save_stack(stack)
+        except lib.GitError as e:
+            log.warning("-- git_workflow: could not record base_commit (non-fatal): %s", e)
+
+    # Populate test_names/test_files from existing_test_refs (each a
+    # "file::qualified_test_name"). An empty list here is a programming
+    # error, not a runtime path: narrow-plan.prompt.md's Step 4 requires
+    # existing_test: refs on every refactor criterion, and a refactor
+    # frame without any is meant to be tagged manual by the narrower; a
+    # manual frame never reaches this function. Guard anyway so a bad
+    # tag can't crash later code that assumes non-empty lists.
+    test_files: list[str] = []
+    test_names: list[str] = []
+    for ref in frame.existing_test_refs:
+        file_path, _, test_name = ref.partition("::")
+        test_files.append(file_path)
+        test_names.append(test_name)
+    frame.test_files = test_files
+    frame.test_names = test_names
+
+    if not test_names:
+        lib.die_with_log(
+            "refactor-setup",
+            "This criterion is tagged verify:refactor but carries no "
+            "existing_test: refs - a refactor with no identifiable safety "
+            "net should have been tagged verify:manual by the narrower. "
+            "Fix the gap plan's tag or tag it manual, then re-run.",
+            criterion=frame.criterion, ticket=frame.ticket,
+        )
+
+    results = lib.run_scoped_tests(
+        test_names, commands, "refactor baseline check", quiet=True
+    )
+    red_names = [n for n, r in zip(test_names, results) if r.returncode != 0]
+    if red_names:
+        red_list = "\n".join(f"  - {n}" for n in red_names)
+        lib.die_with_log(
+            "refactor-setup",
+            f"Safety-net tests are RED at baseline - the safety net must be "
+            f"GREEN before refactoring. A GREEN-after-refactor check is "
+            f"meaningless if the tests were red to begin with. Fix the "
+            f"failing test(s) (or verify the existing_test refs are correct) "
+            f"before re-running.\nRed at baseline:\n{red_list}",
+            criterion=frame.criterion, ticket=frame.ticket,
+        )
+
+    frame.status = lib.BASELINE_CONFIRMED_STATUS
+    lib.save_stack(stack)
+    render.print_line()
+    render.print_line("-- Refactor baseline confirmed: all safety-net tests GREEN.")
+    for f, n in zip(test_files, test_names):
+        render.print_line(f"   {f} :: {n}")
+    render.print_line(f"   Criterion: {frame.criterion}")
+    render.print_line(
+        "   Make the structural changes (by hand or 'implement-step'), then "
+        "run 'next_step' - it re-runs the safety-net tests and pops only if "
+        "they're still GREEN *and* a production file actually changed."
+    )
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
+
+
+def recheck_refactor_tests(
+    stack: list, frame: "lib.CriterionFrame", commands: dict, git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    """
+    Post-implementation check for a verification="refactor" frame already
+    past its baseline (status == BASELINE_CONFIRMED_STATUS): re-runs the
+    safety-net tests fresh and pops only on the conjunction that makes
+    a refactor "done":
+      - every safety-net test GREEN (the behavior the tests cover didn't
+        change), AND
+      - at least one production file this criterion/plan_context names
+        actually appears in git_changed_files() (the structural change
+        the criterion describes really happened - not just "nothing
+        broke, so pop it" which would let a no-op pass).
+
+    Any safety-net test RED pauses for human intervention (the refactor
+    broke something) rather than dying - same pause-and-resume shape as
+    recheck_test_frame, not the baseline check's hard stop. All GREEN but
+    no named production file changed yet also pauses (the refactor
+    hasn't actually happened) - the human/ implement_step hasn't done
+    the work, same shape as do_manual_criterion's "no match yet" branch.
+    Status is a hint, never a trust boundary, same principle as every
+    other phase: this re-derives both checks from real state every call.
+    """
+    results = lib.run_scoped_tests(
+        frame.test_names, commands, "refactor recheck", quiet=True
+    )
+    red_names = [n for n, r in zip(frame.test_names, results) if r.returncode != 0]
+    if red_names:
+        # Re-establish the baseline (GREEN) before pausing, so the next
+        # recheck is a clean "are they green now?" rather than a stuck
+        # baseline-confirmed with known-red tests. Status stays
+        # BASELINE_CONFIRMED_STATUS either way - the pause message is the
+        # only thing that differs from the all-green-but-no-change branch.
+        frame.status = lib.BASELINE_CONFIRMED_STATUS
+        lib.save_stack(stack)
+        render.print_line()
+        render.print_line("-- Refactor broke safety-net test(s):")
+        for n, r in zip(frame.test_names, results):
+            if r.returncode != 0:
+                render.print_line(f"   RED: {n}")
+        render.print_line(f"   Criterion: {frame.criterion}")
+        render.print_line(
+            "   Fix the refactor (by hand or re-run 'implement-step'), then run "
+            "'next_step' again. The safety-net tests must be GREEN before this "
+            "criterion can pop."
+        )
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        sys.exit(0)
+
+    # All safety-net tests GREEN - confirm the refactor actually happened.
+    paths = lib.extract_referenced_paths(f"{frame.criterion}\n{frame.plan_context}")
+    if paths and not (set(paths) & set(lib.git_changed_files())):
+        frame.status = lib.BASELINE_CONFIRMED_STATUS
+        lib.save_stack(stack)
+        render.print_line()
+        render.print_line("-- Safety-net tests are GREEN but no production file has changed yet.")
+        if frame.test_names:
+            render.print_line("   Safety-net test(s) (still GREEN):")
+            for f, n in zip(frame.test_files, frame.test_names):
+                render.print_line(f"     {f} :: {n}")
+        render.print_line(f"   Criterion: {frame.criterion}")
+        render.print_line(
+            "   Make the structural changes (by hand or 'implement-step'), then "
+            "run 'next_step' again."
+        )
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        sys.exit(0)
+
+    # Tests GREEN + a production file changed - criterion satisfied.
+    # Set status="done" and let the caller's loop re-detect and dispatch
+    # to do_pop, mirroring recheck_test_frame's all-green branch (which
+    # sets status="done" and returns rather than popping directly).
+    frame.status = "done"
+    lib.save_stack(stack)
+    return
+
+
+def do_write_test(
+    stack: list, frame: "lib.CriterionFrame", model: str, commands: dict,
+    accept_no_test: bool = False, git_cfg: "lib.GitConfig | None" = None,
+) -> None:
     """
     Writes (or retries writing) frame's test(s) through the unified
     three-gate loop (lib.run_test_for_criterion_with_full_retry):
@@ -375,8 +625,17 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
         lib.run_test_for_criterion_with_full_retry(
             frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
             existing_test_refs=frame.existing_test_refs,
+            verification=frame.verification,
         )
     )
+    if file_paths is None:
+        # The Tester wrote nothing - a strong signal this criterion may
+        # already be satisfied (see _handle_no_test_written). Dispatch to
+        # the recovery path rather than treating an empty result as a
+        # normal test-written frame (there are no test_files/test_names
+        # to dispatch on).
+        _handle_no_test_written(stack, frame, model, accept_no_test)
+        return
     if compile_result is None or compile_result.returncode != 0:
         exit_code = compile_result.returncode if compile_result is not None else "unknown"
         lib.die_with_log(
@@ -438,6 +697,108 @@ def do_write_test(stack: list, frame: "lib.CriterionFrame", model: str, commands
     frame.unconfirmed_tests = unconfirmed
     lib.save_stack(stack)
     do_await_impl(frame, test_results_zipped)
+
+
+def _handle_no_test_written(
+    stack: list, frame: "lib.CriterionFrame", model: str,
+    accept_no_test: bool, skip_ai: bool = False,
+) -> None:
+    """
+    Recovery path for the "Tester wrote nothing" sentinel (file_paths is
+    None from run_test_for_criterion_with_full_retry): the Tester re-read
+    the code and wrote no test - a strong signal the criterion may
+    already be satisfied (the test-refactor landed before or during this
+    run, or a behavior criterion was incidentally satisfied by a
+    sibling's implementation). Decides pop-vs-pause via two escalating
+    checks, same "status is a hint, re-detect from real state" principle
+    as every other phase:
+
+      1. --accept-no-test, or the mechanical pre-check
+         (check_test_refactor_satisfied) confirming it -> pop now (set
+         status="done" and return; the next step() iteration's
+         status=="done" branch calls do_pop, the same defer-and-pop
+         shape do_write_test's all-green origin="ticket" path uses).
+      2. Otherwise (skip_ai=False only) a focused single-criterion AI
+         re-narrow (recheck_single_criterion) as a second opinion for the
+         behavioral cases a text search can't verify. SATISFIED -> pop;
+         NOT SATISFIED/UNKNOWN -> fall through.
+      3. Otherwise pause for a human (exit 0), setting status to
+         NOTHING_WRITTEN_STATUS so the next `next_step` re-enters this
+         path with skip_ai=True (so it doesn't re-spend the AI call every
+         resume) rather than blindly retrying WRITE_TEST.
+
+    skip_ai=True is the resume-mode flag: a NOTHING_WRITTEN_STATUS frame
+    re-entering this path has already had its AI second opinion (or lack
+    thereof); re-running it on every resume would just burn calls. The
+    mechanical check still runs on resume (cheap, and the codebase may
+    have changed since the pause - that's also what lets a human who
+    fixed the code in the meantime auto-pop without the flag), and
+    --accept-no-test still pops.
+    """
+    # Step 1: explicit accept, or mechanical confirmation. The
+    # mechanical check runs on every visit (including resumes) - it's
+    # cheap, and a frame first reached here via the WRITE_TEST path may
+    # not have had it run yet (the step() pre-check only fires for
+    # verification="test-refactor"; a "test" criterion that wrote
+    # nothing reaches here without it).
+    if accept_no_test:
+        log.info(
+            "-- --accept-no-test: accepting %s as satisfied despite the "
+            "tester writing nothing.", frame.criterion,
+        )
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+    if lib.check_test_refactor_satisfied(frame.criterion, frame.existing_test_refs):
+        log.info(
+            "-- Criterion already satisfied (mechanical check) - popping "
+            "without a written test."
+        )
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+
+    # Step 2: AI second opinion (first visit only).
+    if not skip_ai:
+        verdict = lib.recheck_single_criterion(
+            frame.criterion, frame.plan_context, model, ticket_id=frame.ticket,
+        )
+        if verdict == "SATISFIED":
+            log.info(
+                "-- Recheck verdict SATISFIED - criterion already met in "
+                "current code. Popping without a written test."
+            )
+            frame.status = "done"
+            frame.unconfirmed_tests = []
+            lib.save_stack(stack)
+            return
+        # NOT SATISFIED or UNKNOWN -> fall through to the human pause.
+
+    # Step 3: pause for human confirmation.
+    frame.status = NOTHING_WRITTEN_STATUS
+    lib.save_stack(stack)
+    render.print_line()
+    render.print_line("-- Tester wrote no test files for this criterion.")
+    render.print_line(
+        "-- The criterion may already be satisfied, but it could not be "
+        "confirmed mechanically"
+        + (" or by an AI re-check" if not skip_ai else "")
+        + "."
+    )
+    render.print_line("-- Review the criterion and the current code:")
+    render.print_line(f"   {frame.criterion}")
+    render.print_line(
+        "-- If satisfied, run 'next_step --accept-no-test' to pop this frame."
+    )
+    render.print_line(
+        "-- If not satisfied, investigate why the tester produced nothing "
+        "(the gap plan's 'why:' may be stale - the refactor may have "
+        "already landed)."
+    )
+    render.print_line(f"-- Token usage: {ai_client.usage}")
+    sys.exit(0)
 
 
 def recheck_test_frame(
@@ -761,6 +1122,7 @@ def step(
     model: str, commands: dict, continuous: bool, config_path: Path,
     step_models: dict[str, str] | None = None,
     accept_green: bool = False, accept_manual: bool = False,
+    accept_no_test: bool = False,
     git_cfg: "lib.GitConfig | None" = None,
 ) -> None:
     """
@@ -796,18 +1158,70 @@ def step(
         recheck_test_frame(stack, frame, commands, accept_green)
         return
 
+    if frame.status == NOTHING_WRITTEN_STATUS:
+        # A prior WRITE_TEST run wrote no test files and paused here -
+        # re-enter the recovery path with skip_ai=True so it doesn't
+        # re-spend the AI second opinion every resume. The mechanical
+        # check still runs (cheap, and may now confirm a human fix), and
+        # --accept-no-test still pops. See _handle_no_test_written.
+        _handle_no_test_written(stack, frame, model, accept_no_test, skip_ai=True)
+        return
+
     if frame.verification == "manual" and frame.status in ("pending", MANUAL_PENDING_STATUS):
         do_manual_criterion(stack, frame, accept_manual, git_cfg)
         return
 
+    # refactor mode (see extract_verification_mode): a structural change to
+    # production code, using existing tests as the safety net. No WRITE_TEST -
+    # the safety-net tests already exist (named in existing_test_refs). Two
+    # phases: baseline confirmation (GREEN required before the refactor
+    # starts), then post-implementation recheck (GREEN + a production file
+    # changed). test-refactor mode needs no dispatch of its own here: it flows
+    # through the existing pending/test-written branches, with the
+    # test-writer's rewrite branching on the verification tag (see
+    # build_test_criterion_prompt).
+    if frame.verification == "refactor":
+        if frame.status == "pending":
+            do_refactor_setup(stack, frame, commands, git_cfg)
+            return
+        if frame.status == lib.BASELINE_CONFIRMED_STATUS:
+            recheck_refactor_tests(stack, frame, commands, git_cfg)
+            return
+        # A refactor frame in any other status (e.g. "done") falls through
+        # to the general handling below.
+
     if frame.status == "pending":
-        do_write_test(stack, frame, model, commands, git_cfg)
+        # Pre-check verify="test-refactor" frames for already-satisfied
+        # criteria before spending a WRITE_TEST AI call: a test-refactor
+        # criterion has no red/green signal to re-detect satisfaction from
+        # (expected GREEN throughout), so the only mechanical floor is
+        # "do the named file(s) actually contain (or no longer contain)
+        # what the criterion describes?" (check_test_refactor_satisfied).
+        # This is the same "status is a hint, re-detect from real state"
+        # principle the state machine already applies to verify="test"
+        # (red/green) and verify="refactor" (baseline + git-changed-files).
+        # A confirmed-satisfied frame pops without ever calling the Tester
+        # - mirroring do_write_test's all-green origin="ticket" path (set
+        # status="done" and return; the next step() iteration pops).
+        if (
+            frame.verification == "test-refactor"
+            and lib.check_test_refactor_satisfied(frame.criterion, frame.existing_test_refs)
+        ):
+            log.info(
+                "-- test-refactor criterion already satisfied (mechanical "
+                "pre-check) - popping without WRITE_TEST."
+            )
+            frame.status = "done"
+            frame.unconfirmed_tests = []
+            lib.save_stack(stack)
+            return
+        do_write_test(stack, frame, model, commands, accept_no_test, git_cfg)
         return
 
     if frame.status == "test-written":
         if not frame.test_files or not frame.test_names:
             log.warning("-- Frame is test-written but missing test_files/test_names - retrying WRITE_TEST.")
-            do_write_test(stack, frame, model, commands, git_cfg)
+            do_write_test(stack, frame, model, commands, accept_no_test, git_cfg)
             return
         recheck_test_frame(stack, frame, commands, accept_green)
         return
@@ -869,6 +1283,19 @@ def main() -> None:
              "confirmed it (nothing to override).",
     )
     parser.add_argument(
+        "--accept-no-test",
+        action="store_true",
+        help="Accept the top frame as satisfied if it's currently paused in the "
+             "'nothing-written' state (a criterion whose WRITE_TEST run produced "
+             "no test files at all - the tester re-read the code and wrote "
+             "nothing, a strong signal the criterion may already be satisfied, "
+             "e.g. a test-refactor that landed before or during the run). "
+             "Overrides the mechanical pre-check and the AI re-check - use this "
+             "after confirming the criterion really is already met. Has no effect "
+             "if the top frame isn't in that state, or if the mechanical check or "
+             "AI re-check already confirmed it (nothing to override).",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -891,6 +1318,7 @@ def main() -> None:
             model, commands, args.continuous, config_path,
             step_models=step_models,
             accept_green=args.accept_green, accept_manual=args.accept_manual,
+            accept_no_test=args.accept_no_test,
             git_cfg=git_cfg,
         )
 

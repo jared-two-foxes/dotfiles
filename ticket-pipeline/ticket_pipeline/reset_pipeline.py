@@ -15,6 +15,13 @@ What gets removed (default):
   - .criteria-stack.json     - the pipeline's sole cross-invocation
                                 state (see pipeline_lib.py's module
                                 docstring) - unless --keep-stack.
+  - .declined-criteria.json  - append-only ledger of criteria rejected
+                                by the grounding check. Removing it on
+                                reset means previously declined
+                                criteria will be re-checked on the next
+                                push - desirable for a clean slate,
+                                especially after a grounding-check bug
+                                fix that wrongly declined criteria.
   - .ticket.md, .tdd-plan.md, .updated-plan.md, .gap-plan.md
                               - transient scratch push_ticket.py/
                                 next_step.py regenerate fresh on every
@@ -66,6 +73,7 @@ FIXED_SCRATCH_FILES = (
     lib.UPDATED_PLAN_FILE,
     lib.GAP_PLAN_FILE,
     lib.GIT_STATE_FILE,
+    lib.DECLINED_CRITERIA_FILE,
 )
 
 # Per-ticket working files with a predictable *default* name - each

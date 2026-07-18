@@ -69,6 +69,27 @@ did a file this criterion names actually change - or --accept-manual),
 run on the very next 'next_step' call same as if a human had made the
 change by hand.
 
+Level 3 - refactor implementation (verification="refactor" frames
+only): criteria narrow-plan.prompt.md tagged refactor (structural
+changes to production code that preserve behavior, with existing tests
+as the safety net) have a named test that's already GREEN at baseline,
+not RED. This level reuses the Level 1 implement loop (tamper guard,
+build gate, green check, refine) but with a refactor-framed prompt
+that tells the Implementor to keep the safety-net tests GREEN while
+restructuring, not to make a red test pass. Same single-owner rule: this
+never touches the stack - next_step's recheck_refactor_tests is still
+the sole judge of whether the criterion is actually satisfied (safety-
+net tests still GREEN *and* a production file actually changed), run on
+the very next 'next_step' call. A pre-refactor green check refuses to
+start if any safety-net test is RED (the safety net must hold before
+*and* after the refactor).
+
+verification="test-refactor" frames are refused here: there is no
+production code to implement for a test-refactoring criterion (the
+test-writer rewrites an existing test, expected GREEN). A test-refactor
+frame that reached test-written (RED rewrite) is an incorrect rewrite
+the human must fix by hand, not work for this script.
+
 Exit codes: 0 when the scoped test is green (whether this run made it
 green or found it already green); non-zero on exhausted attempts, a
 tampered test, or any genuine pipeline failure. Composable from shell:
@@ -96,6 +117,7 @@ DEFAULT_MAX_ATTEMPTS = 3
 
 IMPLEMENT_CRITERION_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion.prompt.md"
 IMPLEMENT_CRITERION_DIRECT_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion-direct.prompt.md"
+IMPLEMENT_CRITERION_REFACTOR_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion-refactor.prompt.md"
 
 # Pipeline bookkeeping the Implementor must never write, regardless of
 # what the model decides. The named test file is deliberately NOT here -
@@ -339,6 +361,79 @@ def build_implement_criterion_direct_fix_prompt(
     )
 
 
+def build_implement_criterion_refactor_prompt(
+    criterion: str, plan_context: str, test_files: list[str], test_names: list[str]
+) -> str:
+    instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_REFACTOR_PROMPT_FILE)
+    test_list = "\n".join(f"- {f} :: {n}" for f, n in zip(test_files, test_names))
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"This refactoring is for exactly this one acceptance "
+        f"criterion, and only this one:\n\n{criterion}\n\n"
+        f"The safety-net test(s) that must remain GREEN "
+        f"(must all stay passing without modifying {'them' if len(test_names) != 1 else 'it'}):\n{test_list}"
+    )
+
+
+def build_implement_criterion_refactor_fix_prompt(
+    criterion: str,
+    plan_context: str,
+    test_files: list[str],
+    test_names: list[str],
+    still_red: list[str],
+    changed_so_far: list[str],
+    failure_kind: str,
+    error_output: str,
+) -> str:
+    instructions = lib.load_prompt_body(IMPLEMENT_CRITERION_REFACTOR_PROMPT_FILE)
+    test_list = "\n".join(f"- {f} :: {n}" for f, n in zip(test_files, test_names))
+    changed_list = "\n".join(f"- {p}" for p in changed_so_far) or "- (none recorded)"
+    if failure_kind == "compile":
+        failure_desc = (
+            "but the project does not build. Fix the build error with the "
+            "smallest targeted change - do not re-implement from scratch or "
+            "deviate from the approach already taken unless the error itself "
+            "proves that approach can't work."
+        )
+    else:
+        still_red_list = "\n".join(f"- {n}" for n in still_red)
+        safety_quote = 'safety-net test(s)'
+        extra = (
+            f"Every test named above under \"{safety_quote}\" must end up "
+            f"green - including any not listed as still red, which were "
+            f"already green and must not be broken again while you fix the "
+            f"rest. "
+            if len(test_names) != 1 else ""
+        )
+        failure_desc = (
+            f"and it builds, but your refactor broke "
+            f"{'this test' if len(still_red) == 1 else 'these safety-net tests'} "
+            f"(they were GREEN at baseline and must be GREEN again):\n{still_red_list}\n\n"
+            f"{extra}"
+            f"Read the test output below to understand what behavior "
+            f"regressed, then make the smallest targeted fix that restores "
+            f"the test(s) to GREEN. Do not modify any named test to make it "
+            f"pass - the tests are the safety net, not the target."
+        )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this "
+        f"criterion, extracted from the gap plan - already complete and "
+        f"current, no need to read_file it again:\n\n{plan_context}\n\n"
+        f"You already attempted a refactor for exactly this one acceptance "
+        f"criterion, and only this one:\n\n{criterion}\n\n"
+        f"The safety-net test(s) that must remain GREEN "
+        f"(must all stay passing without modifying {'them' if len(test_names) != 1 else 'it'}):\n{test_list}\n\n"
+        f"Files changed in the previous attempt (read these first to see "
+        f"what was tried):\n{changed_list}\n\n"
+        f"{failure_desc}\n\n"
+        f"Error output:\n\n```\n{error_output}\n```"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The implement loop.
 # ---------------------------------------------------------------------------
@@ -436,6 +531,7 @@ def run_implement_with_refine(
     model: str,
     commands: dict,
     max_attempts: int,
+    verification: str = "test",
 ) -> list[str]:
     """
     Implement the frame's criterion against its named failing test(s),
@@ -450,6 +546,14 @@ def run_implement_with_refine(
     below applies to the whole group, not just whichever test(s) started
     red, since a fix aimed at one could otherwise silently regress an
     already-passing sibling with nothing to catch it.
+
+    `verification` selects the prompt family: "test" (the default) uses
+    the regular Implementor prompts framed around making a red test pass;
+    "refactor" uses the Refactor Implementor prompts framed around
+    keeping an already-green safety net green while restructuring
+    production code. The loop structure (tamper guard, build gate, green
+    check, refine) is identical either way - the only thing that differs
+    is how each attempt's prompt is worded.
     """
     test_files, test_names = frame.test_files, frame.test_names
     snapshots = snapshot_tests(test_files, test_names)
@@ -458,23 +562,38 @@ def run_implement_with_refine(
     failure_kind: str | None = None
     last_error: str | None = None
     last_result: subprocess.CompletedProcess | None = None
-    still_red: list[str] = list(test_names)
+    # For a refactor frame the safety-net tests are GREEN at baseline, so
+    # nothing is "still red" before the first attempt; the initial value
+    # only matters to the fix prompt, which recomputes it after each
+    # attempt's green check anyway.
+    still_red: list[str] = [] if verification == "refactor" else list(test_names)
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            prompt = build_implement_criterion_prompt(
-                frame.criterion, frame.plan_context, test_files, test_names
-            )
+            if verification == "refactor":
+                prompt = build_implement_criterion_refactor_prompt(
+                    frame.criterion, frame.plan_context, test_files, test_names
+                )
+            else:
+                prompt = build_implement_criterion_prompt(
+                    frame.criterion, frame.plan_context, test_files, test_names
+                )
         else:
             log.warning(
                 "-- %s failed (attempt %d/%d). Feeding the error back to Implementor to fix.",
                 "Build" if failure_kind == "compile" else "Green check",
                 attempt - 1, max_attempts,
             )
-            prompt = build_implement_criterion_fix_prompt(
-                frame.criterion, frame.plan_context, test_files, test_names, still_red,
-                sorted(set(all_changed)), failure_kind, last_error,
-            )
+            if verification == "refactor":
+                prompt = build_implement_criterion_refactor_fix_prompt(
+                    frame.criterion, frame.plan_context, test_files, test_names, still_red,
+                    sorted(set(all_changed)), failure_kind, last_error,
+                )
+            else:
+                prompt = build_implement_criterion_fix_prompt(
+                    frame.criterion, frame.plan_context, test_files, test_names, still_red,
+                    sorted(set(all_changed)), failure_kind, last_error,
+                )
 
         attempt_changed: list[str] = []
 
@@ -547,12 +666,23 @@ def run_implement_with_refine(
 
     exit_code = last_result.returncode if last_result is not None else "unknown"
     what = "Code does not compile" if failure_kind == "compile" else f"{len(still_red)} test(s) still fail"
+    if verification == "refactor":
+        tail = (
+            " See output above. The frame is untouched - the safety-net test(s) "
+            "were broken by the refactor and 'next_step' still pauses at "
+            "baseline-confirmed, so you can fix the refactor by hand (or re-run "
+            "implement_step, perhaps with a different --model)."
+        )
+    else:
+        tail = (
+            ". See output above. The frame is untouched - the test(s) are "
+            "still red and 'next_step' still reports AWAIT_IMPL, so you can "
+            "implement by hand (or re-run implement_step, perhaps with a "
+            "different --model)."
+        )
     lib.die_with_log(
         "implement-criterion",
-        f"{what} after {max_attempts} attempt(s) (exit {exit_code}). See output "
-        f"above. The frame is untouched - the test(s) are still red and 'next_step' "
-        f"still reports AWAIT_IMPL, so you can implement by hand (or re-run "
-        f"implement_step, perhaps with a different --model).",
+        f"{what} after {max_attempts} attempt(s) (exit {exit_code}){tail}",
         criterion=frame.criterion,
     )
 
@@ -637,6 +767,93 @@ def main() -> None:
         )
         render.print_line(f"-- Token usage: {ai_client.usage}")
         return
+
+    # Level 3: refactor-verification frames. The safety-net test(s)
+    # (named in existing_test_refs, mirrored into test_files/test_names
+    # by next_step's do_refactor_setup) are already GREEN at baseline -
+    # this level restructures the production code while keeping them
+    # GREEN, rather than making a red test pass. Pre-conditions mirror
+    # next_step.py's refactor dispatch: status must be baseline-confirmed
+    # (do_refactor_setup ran the baseline check), and the safety-net
+    # tests must currently be GREEN (not RED like Level 1).
+    if frame.verification == "refactor":
+        if frame.status != lib.BASELINE_CONFIRMED_STATUS:
+            render.print_line(
+                "-- Top frame is a refactor criterion but its status "
+                + repr(frame.status)
+                + " is not awaiting implementation. Run 'next_step' first "
+                "to establish the baseline."
+            )
+            sys.exit(1)
+        if not frame.test_files or not frame.test_names:
+            render.print_line(
+                "-- Refactor frame is baseline-confirmed but has no "
+                "safety-net test(s) recorded. Run 'next_step' to re-run "
+                "refactor setup."
+            )
+            sys.exit(1)
+
+        green_results = lib.run_scoped_tests(
+            frame.test_names, commands, "pre-refactor green check"
+        )
+        red_names = [n for n, r in zip(frame.test_names, green_results) if r.returncode != 0]
+        if red_names:
+            render.print_line(
+                "-- Safety-net test(s) are RED - the refactor cannot proceed "
+                "until they are GREEN again (the safety net must hold before "
+                "and after the refactor). Fix them first, then re-run."
+            )
+            for n in red_names:
+                render.print_line("   RED: " + n)
+            sys.exit(1)
+
+        render.print_line()
+        render.print_line("-- Refactoring (keeping safety-net tests GREEN):")
+        for f, n in zip(frame.test_files, frame.test_names):
+            render.print_line("   " + f + " :: " + n)
+        render.print_line("   Criterion: " + frame.criterion)
+
+        changed_files = run_implement_with_refine(
+            frame, args.model, commands, args.max_attempts,
+            verification=frame.verification,
+        )
+
+        render.print_line()
+        render.print_line("-- Refactored: " + frame.criterion)
+        render.print_line(
+            "   All " + str(len(frame.test_names)) + " safety-net test(s) still GREEN:"
+        )
+        for f, n in zip(frame.test_files, frame.test_names):
+            render.print_line("     " + f + " :: " + n)
+        render.print_line(
+            "   Files changed (" + str(len(changed_files)) + "): " + ", ".join(changed_files)
+        )
+        render.print_line("-- Run 'next_step' to re-check and pop this criterion.")
+        render.print_line(f"-- Token usage: {ai_client.usage}")
+        return
+
+    # Refuse test-refactor frames: there is no production code to
+    # implement for a test-refactoring criterion. If the test-writer's
+    # rewrite came back RED (status="test-written"), the rewrite itself
+    # is incorrect - the human must fix the test by hand and re-run
+    # 'next_step', which rechecks and pops once it is GREEN.
+    if frame.verification == "test-refactor" and frame.status == "test-written":
+        render.print_line(
+            "-- This is a test-refactor criterion whose rewrite came back RED."
+        )
+        render.print_line(
+            "   There is no production code to implement - the rewrite itself"
+        )
+        render.print_line(
+            "   is incorrect. Fix the test by hand (keep its assertions"
+        )
+        render.print_line(
+            "   functionally identical; change only the structural elements"
+        )
+        render.print_line(
+            "   the criterion describes), then run 'next_step' to re-check."
+        )
+        sys.exit(1)
 
     if frame.status != "test-written" or not frame.test_files or not frame.test_names:
         render.print_line(

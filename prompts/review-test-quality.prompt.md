@@ -58,6 +58,24 @@ call paths, so one being solid says nothing about whether another is.
 For each test in the list, read its exact body and decide: does it
 actually exercise the behavior this criterion describes, or is it
 adjacent, trivially satisfiable, or tautological? Concretely, watch for:
+
+**If the task prompt indicates this is a test-refactoring criterion**
+(a rewrite of existing test(s) expected to be GREEN after the change,
+not a fresh failing test), a GREEN test is the **expected** outcome,
+not a suspicious signal. Do *not* apply the "green but should be red"
+heuristic below for any test in such a criterion. Instead, verify:
+(a) the rewrite preserved all original assertions functionally (same
+behavior tested, same expected outcomes),
+(b) the rewrite changed the structural elements the criterion describes
+(imports, helpers, utilities, setup/teardown),
+(c) the rewrite didn't accidentally weaken, remove, or alter any
+assertion, and didn't add source-scanning checks (asserting an import
+string is present, a helper was *defined* somewhere rather than *called*,
+etc.). The diff-based coverage-loss check in Step 3 is the **primary**
+quality gate for these criteria, not a secondary one - focus there.
+
+For every other criterion (not a test-refactoring one), concretely
+watch for:
 - Asserting something that's true regardless of the feature under test
   (a literal against itself, a mock call happened without checking any
   effect of it, a value the test itself just set with no real code path
@@ -103,6 +121,14 @@ assertion that test previously made should still be there, doing what
 it did before. Silently losing that coverage is exactly the failure
 mode this step exists to catch - it doesn't turn anything red, so
 nothing else in this pipeline would ever notice it.
+
+For a **test-refactoring** criterion, this diff-based coverage-loss
+check is the **primary** quality gate (see Step 2) - the rewrite is
+expected to change imports/helpers/utilities while keeping every
+assertion functionally identical, so the diff is exactly where you
+confirm that happened. The same rule applies: any assertion the
+criterion isn't about changing should still be there, doing what it
+did before; only the structural plumbing should differ.
 
 If an entry is marked as a modification but no diff is available (e.g.
 the file was untracked before this change), say so for that entry and
