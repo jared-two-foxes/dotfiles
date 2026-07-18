@@ -23,6 +23,7 @@ from ticket_pipeline.lib import render
 _VALIDATING = lib.VALIDATING_STATUS          # "validating"
 _GREEN_UNCONFIRMED = "green-unconfirmed"      # GREEN_UNCONFIRMED_STATUS
 _MANUAL_PENDING = "awaiting-manual-impl"      # MANUAL_PENDING_STATUS
+_FEEDBACK_READY = lib.FEEDBACK_READY_STATUS
 
 
 def _truncate(text: str, width: int = 100) -> str:
@@ -129,6 +130,10 @@ def show_status(show_log: bool = False) -> None:
     # Show origin if not the default
     if frame.origin != "ticket":
         render.print_line(f"  Origin: {frame.origin}")
+    if frame.status == _FEEDBACK_READY and frame.feedback_target:
+        render.print_line(f"  Feedback target: {frame.feedback_target}")
+    if frame.feedback:
+        render.print_line(f"  Feedback: {_truncate(frame.feedback, 200)}")
 
     # Dispatch on status to give actionable guidance
     _print_section("Next action:")
@@ -163,6 +168,25 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
         _print_guidance([
             "Run 'scaffold next-step' to continue ticket validation.",
             "(Re-fetch + re-narrow + lint + full test suite + code review)",
+        ])
+        return
+
+    if status == _FEEDBACK_READY:
+        target = frame.feedback_target or "unknown"
+        if target == lib.FEEDBACK_TARGET_TESTER:
+            _print_guidance([
+                "Run 'scaffold next-step' to roll back the previous test-writing attempt",
+                "and re-run the Tester with your queued feedback.",
+            ])
+            return
+        if target == lib.FEEDBACK_TARGET_IMPLEMENTOR:
+            _print_guidance([
+                "Run 'scaffold next-step' to re-run the Implementor with your queued feedback.",
+            ])
+            return
+        _print_guidance([
+            "This criterion has human-only feedback queued.",
+            "Fix it by hand, then continue with the normal next command for this criterion.",
         ])
         return
 

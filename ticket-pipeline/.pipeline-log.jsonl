@@ -1,0 +1,4 @@
+{"block": "feedback", "ticket": "SA-2", "criterion": "- [ ] implement thing", "ts": "2026-07-18T23:48:23+00:00", "status": "apply-implementor", "error": "fix only the failing branch", "tokens_prompt": null, "tokens_completion": null, "cost_usd": null}
+{"block": "feedback", "ticket": "SA-1", "criterion": "- [ ] refactor test", "ts": "2026-07-18T23:48:23+00:00", "status": "apply-tester", "error": "narrow the rewrite", "tokens_prompt": null, "tokens_completion": null, "cost_usd": null}
+{"block": "feedback", "ticket": "SA-2", "criterion": "- [ ] implement thing", "ts": "2026-07-18T23:48:27+00:00", "status": "apply-implementor", "error": "fix only the failing branch", "tokens_prompt": null, "tokens_completion": null, "cost_usd": null}
+{"block": "feedback", "ticket": "SA-1", "criterion": "- [ ] refactor test", "ts": "2026-07-18T23:48:27+00:00", "status": "apply-tester", "error": "narrow the rewrite", "tokens_prompt": null, "tokens_completion": null, "cost_usd": null}

@@ -111,6 +111,7 @@ NARROW_PROMPT_FILE = PROMPTS_DIR / "narrow-plan.prompt.md"
 PLAN_NARROW_PROMPT_FILE = PROMPTS_DIR / "plan-narrow.prompt.md"
 REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-singlepass.prompt.md"
 TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
+TEST_REFINE_PROMPT_FILE = PROMPTS_DIR / "test-refine.prompt.md"
 TEST_QUALITY_REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-test-quality.prompt.md"
 RECHECK_CRITERION_PROMPT_FILE = PROMPTS_DIR / "recheck-criterion.prompt.md"
 
@@ -137,6 +138,17 @@ DEFAULT_STEP_MODELS: dict[str, str] = {
     "plan": "opencode:claude-sonnet-4-6",
     "narrow": "opencode:claude-sonnet-4-6",
 }
+
+FEEDBACK_READY_STATUS = "feedback-ready"
+FEEDBACK_MAX_RETRIES = 3
+FEEDBACK_TARGET_TESTER = "tester"
+FEEDBACK_TARGET_IMPLEMENTOR = "implementor"
+FEEDBACK_TARGET_HUMAN = "human"
+FEEDBACK_TARGETS = frozenset({
+    FEEDBACK_TARGET_TESTER,
+    FEEDBACK_TARGET_IMPLEMENTOR,
+    FEEDBACK_TARGET_HUMAN,
+})
 
 USER_CONFIG_FILE = Path.home() / ".config" / "scaffold.toml"
 
@@ -1231,6 +1243,51 @@ def extract_existing_test_refs(criterion: str) -> list[str]:
     return refs
 
 
+def resolve_feedback_target(frame: "CriterionFrame", requested: str | None) -> str:
+    """
+    Resolve a user-requested feedback target for the top frame. `requested`
+    may be None/"auto" to select the natural retry target for the frame's
+    verification mode and current phase.
+    """
+    requested = (requested or "auto").strip().lower()
+    if requested != "auto" and requested not in FEEDBACK_TARGETS:
+        raise ValueError(
+            f"unknown feedback target {requested!r}; choose one of: "
+            "auto, tester, implementor, human"
+        )
+
+    verification = frame.verification
+    if verification == "test-refactor":
+        default = FEEDBACK_TARGET_TESTER
+        allowed = {FEEDBACK_TARGET_TESTER, FEEDBACK_TARGET_HUMAN}
+    elif verification == "refactor":
+        default = FEEDBACK_TARGET_IMPLEMENTOR
+        allowed = {FEEDBACK_TARGET_IMPLEMENTOR, FEEDBACK_TARGET_HUMAN}
+    elif verification == "manual":
+        default = FEEDBACK_TARGET_HUMAN
+        allowed = {FEEDBACK_TARGET_HUMAN}
+    else:
+        default = (
+            FEEDBACK_TARGET_IMPLEMENTOR
+            if frame.status == "test-written"
+            else FEEDBACK_TARGET_TESTER
+        )
+        allowed = {
+            FEEDBACK_TARGET_TESTER,
+            FEEDBACK_TARGET_IMPLEMENTOR,
+            FEEDBACK_TARGET_HUMAN,
+        }
+
+    target = default if requested == "auto" else requested
+    if target not in allowed:
+        allowed_text = ", ".join(sorted(allowed))
+        raise ValueError(
+            f"feedback target {target!r} is not valid for verification="
+            f"{verification!r}; allowed targets: {allowed_text}"
+        )
+    return target
+
+
 # ---------------------------------------------------------------------------
 # Criteria stack - .criteria-stack.json is the pipeline's canonical
 # work-queue and the only file either push_ticket.py or next_step.py
@@ -1334,6 +1391,9 @@ class CriterionFrame:
                             # criterion is popped and committed; stays
                             # None for criteria that popped with an
                             # empty diff (nothing to stage).
+    feedback: str | None = None
+    feedback_target: str | None = None
+    feedback_attempts: int = 0
 
 
 def load_stack() -> list[CriterionFrame]:
@@ -2742,6 +2802,45 @@ def build_test_criterion_prompt(
     )
 
 
+def build_test_feedback_prompt(
+    criterion: str,
+    plan_context: str,
+    feedback: str,
+    previous_changed_files: list[str],
+    existing_test_refs: list[str] | None = None,
+    verification: str = "test",
+) -> str:
+    instructions = load_prompt_body(TEST_REFINE_PROMPT_FILE)
+    changed_block = "\n".join(f"- {p}" for p in previous_changed_files) or "- (none recorded)"
+    existing_tests_block = (
+        "\n".join(f"- {ref}" for ref in (existing_test_refs or []))
+        or "- (none named)"
+    )
+    mode_note = (
+        "This is a test-refactoring criterion: preserve the existing "
+        "assertions' behavior and adjust only the structural elements the "
+        "criterion describes."
+        if verification == "test-refactor"
+        else "This feedback applies to the test-writing step only. Preserve "
+             "the criterion exactly; change only the tests needed to address "
+             "the feedback."
+    )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this criterion:\n\n"
+        f"{plan_context}\n\n"
+        f"Acceptance criterion (fixed; do not rewrite it):\n\n{criterion}\n\n"
+        f"{mode_note}\n\n"
+        f"Existing test refs for this criterion:\n{existing_tests_block}\n\n"
+        f"Files changed in the previous attempt (read these first if they still exist):\n"
+        f"{changed_block}\n\n"
+        f"User feedback to address:\n\n{feedback}\n\n"
+        f"Make the smallest targeted correction to the prior test-writing "
+        f"attempt. Do not broaden scope beyond this one criterion.\n\n"
+        f"{_HOST_PLATFORM_NOTE}"
+    )
+
+
 def run_test_for_criterion(
     criterion: str, plan_context: str, model: str, ticket_id: str | None = None
 ) -> tuple[list[str], list[str]]:
@@ -3029,6 +3128,8 @@ def run_test_for_criterion_with_full_retry(
     ticket_id: str | None = None,
     existing_test_refs: list[str] | None = None,
     verification: str = "test",
+    feedback: str | None = None,
+    previous_changed_files: list[str] | None = None,
 ) -> tuple[
     list[str] | None,
     list[str] | None,
@@ -3105,9 +3206,19 @@ def run_test_for_criterion_with_full_retry(
     for attempt in range(1, max_attempts + 1):
         # -- Select prompt ------------------------------------------------
         if attempt == 1:
-            prompt = build_test_criterion_prompt(
-                criterion, plan_context, existing_test_refs, verification=verification,
-            )
+            if feedback:
+                prompt = build_test_feedback_prompt(
+                    criterion,
+                    plan_context,
+                    feedback,
+                    previous_changed_files or [],
+                    existing_test_refs,
+                    verification=verification,
+                )
+            else:
+                prompt = build_test_criterion_prompt(
+                    criterion, plan_context, existing_test_refs, verification=verification,
+                )
         elif failure_kind == "compile":
             log.warning(
                 "-- Compile failed (attempt %d/%d). Feeding the compile error back to Tester to fix.",
