@@ -562,8 +562,9 @@ def run_implement_direct_with_refine(
     lib.die_with_log(
         "implement-criterion-direct",
         f"Code does not build after {max_attempts} attempt(s) (exit {exit_code}). See "
-        f"output above. The frame is untouched - run 'implement_step' again (perhaps "
-        f"with a different --model), or make the change by hand and run 'next_step'.",
+        f"output above. The frame is untouched - run 'next_step' again (perhaps "
+        f"with a different --model), or make the change by hand and then re-run "
+        f"'next_step'.",
         criterion=frame.criterion,
     )
 
@@ -718,14 +719,14 @@ def run_implement_with_refine(
         tail = (
             " See output above. The frame is untouched - the safety-net test(s) "
             "were broken by the refactor and 'next_step' still pauses at "
-            "baseline-confirmed, so you can fix the refactor by hand (or re-run "
-            "implement_step, perhaps with a different --model)."
+            "baseline-confirmed, so you can fix the refactor by hand (or run "
+            "'next_step' again, perhaps with a different --model)."
         )
     else:
         tail = (
             ". See output above. The frame is untouched - the test(s) are "
             "still red and 'next_step' still reports AWAIT_IMPL, so you can "
-            "implement by hand (or re-run implement_step, perhaps with a "
+            "implement by hand (or run 'next_step' again, perhaps with a "
             "different --model)."
         )
     lib.die_with_log(

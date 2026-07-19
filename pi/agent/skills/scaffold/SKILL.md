@@ -2,7 +2,7 @@
 name: scaffold
 description: >
   Knowledge of the ticket-pipeline TDD code generation tool — the `scaffold` CLI
-  and its subcommands (push-ticket, next-step, implement-step, review-ticket,
+  and its subcommands (push-ticket, next-step, review-ticket,
   propose-ticket-edit, prep-ticket, explore-ticket, split-ticket,
   create-child-tickets, update-ticket, reset-pipeline, list-models, bench),
   the criteria-stack state machine and its phases (WRITE_TEST, AWAIT_IMPL,
@@ -38,22 +38,17 @@ console script. Each subcommand forwards to a Python module's own `main()`;
 
 ## The Core TDD Loop
 
-The everyday workflow is three gestures, run repeatedly:
+The everyday workflow is two gestures, run repeatedly:
 
 ```
 scaffold push-ticket <ticket-id>    # 1. seed the criteria stack
-scaffold next-step                  # 2. write failing test, pause at AWAIT_IMPL
-scaffold implement-step             # 3. (optional) AI makes the test pass
-scaffold next-step                  # 4. re-detect green, pop, advance
+scaffold next-step                  # 2. write a test, implement, or re-check/pop
+scaffold next-step --continuous     #    optional: keep going until human input is required
 ```
 
-Steps 2–4 repeat for each acceptance criterion. When the last criterion for
+Step 2 repeats for each acceptance criterion. When the last criterion for
 a ticket is popped, `next-step` automatically runs `TICKET_VALIDATE` — no
 separate command needed.
-
-`implement-step` is optional: the human can implement by hand at any
-AWAIT_IMPL pause and just run `next-step` again. `implement-step` never
-touches the stack — it only makes the top frame's test pass.
 
 ## Command Reference
 
@@ -75,15 +70,12 @@ touches the stack — it only makes the top frame's test pass.
 | `explore-ticket <id>` | Interactive session: the AI explores the codebase and converses with you at the terminal to fill out acceptance criteria and
  context. The only genuinely interactive script. Output is a proposed expanded ticket — never written to Linear unless you do it yourself. |
 
-### Seed & Drive the Criteria Loop
+### Seed & Run the Criteria Loop
 
 | Command | Description |
 |---|---|
 | `push-ticket <id>` | Fetch a Linear ticket, run plan+narrow, seed `.criteria-stack.json` with one frame per remaining acceptance criterion. The criteria stack handles any number of criteria from a single ticket — splitting is not automatic. |
-| `next-step` | Advance the criteria stack by exactly one step. No ticket-id argument — reads from the stack itself. Pauses (exit 0) at every human input
- point; exits non-zero only on genuine pipeline failure. |
-| `implement-step` | AI-implement the top frame's criterion: make its named failing test pass without modifying the test. Never touches the stack — run
- `next-step` afterward to pop. |
+| `next-step` | Advance the criteria stack by exactly one phase. No ticket-id argument — reads from the stack itself. Re-run it to keep moving; `--continuous` keeps going until a genuine human-only pause. |
 
 ### Ticket Restructuring (manual — not part of push-ticket)
 
@@ -182,12 +174,12 @@ to pop.
 
 | Flag | Command | Effect |
 |---|---|---|
-| `--continuous` | next-step | Advance through every mechanical transition without pausing; stop only at genuine human input points. |
+| `--continuous` | next-step | Advance through every automatable transition without pausing; stop only at genuine human input points. |
 | `--accept-green` | next-step | Accept unconfirmed green tests (validate-missed/review origin criteria whose tests passed without implementation). |
 | `--accept-manual` | next-step | Accept a manual-verification criterion as satisfied, overriding the git-changed-files floor check. |
 | `--model <id>` | most commands | AI model to use (default: `opencode:gpt-5.4-mini`). |
-| `--config <path>` | next-step, implement-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
-| `--max-attempts <n>` | implement-step | Total implement attempts, initial write + refines sharing one budget (default: 3). |
+| `--config <path>` | next-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
+| `--max-attempts <n>` | next-step | Total implementation attempts, initial write + refines sharing one budget (default: 3). |
 | `--force` | push-ticket | Abandon an in-progress stack for a different ticket; replace entirely. |
 | `--prepend` | push-ticket | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after. |
 | `--validate-only` | push-ticket | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly. |
@@ -295,8 +287,8 @@ Key prompt files:
 | `plan.prompt.md` | The planning step (full implementation plan from ticket) |
 | `narrow-plan.prompt.md` | The narrowing step (gap plan: what's left to do) — also tags `verification: manual` and `existing_test:` refs |
 | `test-criterion.prompt.md` | WRITE_TEST phase (write a failing test for one criterion) |
-| `implement-criterion.prompt.md` | implement-step (make the failing test pass) |
-| `implement-criterion-direct.prompt.md` | implement-step for manual-verification frames (no target test) |
+| `implement-criterion.prompt.md` | next-step's implementation phase (make the failing test pass) |
+| `implement-criterion-direct.prompt.md` | next-step's implementation phase for manual-verification frames (no target test) |
 | `review-singlepass.prompt.md` | TICKET_VALIDATE's code review gate |
 | `review-test-quality.prompt.md` | Gating test-quality review inside WRITE_TEST's retry loop (advisory fallback on budget exhaustion) |
 | `review-ticket.prompt.md` | review-ticket command |
@@ -307,22 +299,23 @@ Key prompt files:
 ## Architectural Principles
 
 1. **Single-owner rule** — only `next-step` writes to `.criteria-stack.json`
-   (and `push-ticket` at seed time). `implement-step` never touches the stack;
-   it only makes the top frame's test pass. This makes failure safe: if
-   `implement-step` exhausts its attempts, the frame is still `test-written`,
-   the test is still red, and `next-step` drops back into AWAIT_IMPL.
+   (and `push-ticket` at seed time). The implementation phase never touches the
+   stack directly; it only makes the top frame's test pass. This makes failure
+   safe: if implementation exhausts its attempts, the frame is still
+   `test-written`, the test is still red, and `next-step` drops back into
+   AWAIT_IMPL.
 
 2. **Guard-first** — every precondition is re-checked from real state before
    any AI call spends money. `push-ticket` checks re-entrancy/clobber guards
-   before touching any file. `implement-step` checks the stack, frame status,
-   and scoped-test redness before running the Implementor.
+   before touching any file. `next-step` checks stack state, frame status, and
+   scoped-test redness before running the Implementor.
 
 3. **Status is a hint, never a trust boundary** — `next-step` re-detects
    real state at the top of every step. A frame stored as `"test-written"`
    might have been fixed by a human; the phase check re-runs the tests and
    dispatches based on what's actually red/green, not what's stored.
 
-4. **Test tamper guard** — `implement-step` snapshots each test function's
+4. **Test tamper guard** — the implementation phase snapshots each test function's
    source (brace-counting extraction) before the first attempt and verifies
    it byte-for-byte unchanged after every attempt. Modifying the test to
    make it pass is a hard, mechanical failure. Pipeline bookkeeping files

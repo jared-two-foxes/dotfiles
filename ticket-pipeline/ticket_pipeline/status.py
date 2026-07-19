@@ -211,12 +211,12 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
             _print_guidance([
                 f"Make the change to: {files_str}",
                 "Then run: scaffold next-step",
-                "(The pipeline checks whether those file(s) appear in git diff.)",
+                "(If the file(s) are still unchanged, that rerun lets the pipeline attempt the change automatically.)",
             ])
         else:
             _print_guidance([
-                "Make the change described in the criterion.",
-                "Then run: scaffold next-step --accept-manual",
+                "Make the change described in the criterion, or re-run scaffold next-step to let the pipeline try it.",
+                "Afterward, run: scaffold next-step --accept-manual",
                 "(No specific file could be identified for mechanical checking.)",
             ])
         return
@@ -238,8 +238,7 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
             ])
             return
         _print_guidance([
-            "Run: scaffold next-step    (re-checks the test — red → pause, green → advance)",
-            "     scaffold implement-step  (AI makes the failing test pass)",
+            "Run: scaffold next-step    (if still red, AI implements; if green, it advances)",
             "Or implement by hand, then run: scaffold next-step",
         ])
         return
