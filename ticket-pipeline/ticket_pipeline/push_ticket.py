@@ -55,10 +55,20 @@ validation pass on demand.
 plan+narrow. Use this after an earlier run already produced the gap
 plan and you just want to seed the stack from it.
 
+--explore runs an interactive per-criterion context-scaffolding session
+after plan+narrow (or after --from-gap-plan), before the stack is written.
+For each criterion that survived the gap check, an interactive agent
+explores the codebase and asks you targeted questions about things the
+code can't answer (which approach to follow, which patterns apply, which
+integration points matter), then appends its findings directly to that
+frame's plan_context. Every downstream step (test-writer, recheck) sees
+the enriched context automatically. Without --explore the stack is written
+immediately after plan+narrow, same as today.
+
 Usage:
     push_ticket <ticket-id> [--model <model-id>] [--ticket-file-in <path>]
                 [--from-gap-plan | --validate-only] [--force | --prepend]
-                [--log-level <level>]
+                [--explore] [--log-level <level>]
 """
 
 import argparse
@@ -249,6 +259,19 @@ def main() -> None:
              "other system that doesn't exist yet.",
     )
     parser.add_argument(
+        "--explore",
+        action="store_true",
+        help="After plan+narrow (or --from-gap-plan), run an interactive "
+             "per-criterion context-scaffolding session before writing the "
+             "stack. For each criterion the agent explores the codebase and "
+             "asks targeted questions about implementation approach, patterns, "
+             "and integration points, appending its findings to that frame's "
+             "plan_context so every downstream step sees the enriched context. "
+             "Incompatible with --validate-only (no criteria are built in that "
+             "mode). Makes push_ticket interactive - omit for scripted/headless "
+             "use.",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -259,6 +282,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     verbosity.setup_logging(args.log_level)
+    if args.explore and args.validate_only:
+        lib.die("--explore and --validate-only are incompatible: --validate-only pushes no criteria frames.")
     model, step_models = lib.resolve_step_models(lib.PIPELINE_CONFIG_FILE, args.model)
     git_cfg = lib.load_git_config(lib.PIPELINE_CONFIG_FILE)
     ticket_id = args.ticket_id
@@ -363,6 +388,17 @@ def main() -> None:
             render.print_line("-- Nothing pushed.")
             render.print_line(f"-- Token usage: {ai_client.usage}")
             return
+
+    # ── Optional interactive context scaffolding (--explore) ────────────
+    if args.explore and frames:
+        render.print_line()
+        render.print_line(
+            "-- --explore: starting per-criterion context scaffolding. "
+            "The agent will explore the codebase and may ask you targeted "
+            "questions below. Answer each at the '> ' prompt; press Enter "
+            "with no answer to let it proceed on its own judgement."
+        )
+        lib.run_explore_for_frames(frames, model)
 
     # ── Combined write ──────────────────────────────────────────────────
     if args.prepend and existing:

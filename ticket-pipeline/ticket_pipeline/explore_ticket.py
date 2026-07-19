@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-explore-ticket - Interactive grill/explore/expand session that turns a
-rough ticket into one with a complete set of acceptance criteria and
-supporting context, before anyone plans or implements against it.
+explore-ticket - Interactive context-scaffolding session that assembles
+the implementation context a ticket needs before anyone plans or codes
+against it.
 
 Deliberately standalone, same as review-ticket.py/propose-ticket-edit.py:
 not called by push_ticket.py/next_step.py/pipeline_lib.py, and does not
@@ -13,22 +13,23 @@ aborts the run the instant a model asks anything). This script is the
 opposite on purpose: the model is expected to explore the codebase and
 then actually converse with you at the terminal - asking one concrete
 question at a time via ask_user_question, reading your real answer, and
-using it to keep exploring or ask the next question - until it judges the
-criteria/context complete enough to implement without further
-back-and-forth.
+using it to keep exploring or ask the next question - until it has enough
+to produce a rich implementation context block.
 
-Why this exists: review-ticket.py catches a ticket that's stale or
-already-satisfied by checking it against the codebase; it never asks you
-anything, because none of the scripts around it have a human available
-mid-run. But plenty of ticket gaps aren't things the codebase can answer
-- they're missing intent, unstated edge cases, or scope the author never
-wrote down. This script is where that missing context gets pulled out of
-you specifically, before the ticket goes anywhere near plan/narrow/
-push_ticket.
+Why this exists: review-ticket.py checks a ticket's claims against the
+codebase but never asks anything - no human is available mid-run. And
+the non-interactive pipeline steps cannot discover which files to touch,
+which patterns to follow, or which tradeoffs to resolve when the ticket
+is silent on them. This script is where that execution context gets
+assembled interactively, before the ticket goes anywhere near plan/narrow/
+push_ticket. It does not rewrite acceptance criteria - that is
+propose-ticket-edit's job. Any spec gaps noticed are flagged in the
+output, not silently fixed.
 
-Output is a proposed, expanded ticket - never written to Linear, never
-written to .ticket.md unless you point --ticket-file-out at it yourself.
-Feed it into the existing tools same as any other local revision, e.g.:
+Output is an annotated ticket - the original criteria verbatim plus a
+Context section - never written to Linear, never written to .ticket.md
+unless you point --ticket-file-out at it yourself. Feed it into the
+existing tools same as any other local revision, e.g.:
 
     explore-ticket SA-42 --ticket-file-out .ticket-explored-SA-42.md
     review-ticket SA-42 --ticket-file-in .ticket-explored-SA-42.md
@@ -62,7 +63,7 @@ EXPLORE_PROMPT_FILE = lib.PROMPTS_DIR / "explore-ticket.prompt.md"
 TICKET_DEDUP_KEY = ".ticket.md"
 
 EXPANDED_TICKET_RE = re.compile(
-    r"^## Expanded Ticket\s*\n(.*?)\n## What This Added\b",
+    r"^## Annotated Ticket\s*\n(.*?)\n## What This Added\b",
     re.DOTALL | re.MULTILINE,
 )
 
@@ -79,12 +80,12 @@ def build_explore_prompt(ticket_content: str, prefetch_block: str) -> str:
         f"Here is the ticket - already complete and current, no need to "
         f"read_file it again:\n\n{ticket_content}{prefetch_section}\n\n"
         f"Explore the codebase with read_file/list_dir/search_files and "
-        f"ask the human clarifying questions with ask_user_question - one "
+        f"ask the human targeted questions with ask_user_question - one "
         f"at a time, waiting for each real answer - until you have enough "
-        f"to expand the ticket's acceptance criteria and context. Produce "
-        f"the result in the exact format from Step 5 above. Your final "
-        f"response (no further tool calls) must be exactly that output - "
-        f"no chat header, no preamble or trailing commentary."
+        f"implementation context to annotate the ticket. Produce the result "
+        f"in the exact format from Step 6 above. Your final response (no "
+        f"further tool calls) must be exactly that output - no chat header, "
+        f"no preamble or trailing commentary."
     )
 
 
@@ -108,21 +109,21 @@ def run_explore_step(ticket_content: str, model: str) -> str:
         )
     except (ai_client.AIError, tools.PipelineAbort) as e:
         lib.die(str(e))
-    if "## Expanded Ticket" not in result.text:
+    if "## Annotated Ticket" not in result.text:
         lib.render_step_output(result.text, level=0)
-        lib.die("Explorer did not produce a valid expanded ticket (see output above).")
+        lib.die("Explorer did not produce a valid annotated ticket (see output above).")
     return result.text
 
 
 def extract_expanded_ticket(proposal_text: str) -> str | None:
     """
-    Pulls just the expanded ticket body out of the model's final response
-    (between the '## Expanded Ticket' heading and the '## What This
+    Pulls the annotated ticket body out of the model's final response
+    (between the '## Annotated Ticket' heading and the '## What This
     Added' heading that always follows it per the prompt's output
     format), so it can be diffed against the original and written out on
     its own - mirrors propose-ticket-edit.py's extract_revised_ticket.
     Anchored on '## What This Added' specifically, not the next '## ' of
-    any kind, since the expanded ticket body commonly contains its own
+    any kind, since the annotated ticket body commonly contains its own
     '### Context From Exploration & Discussion' heading.
     """
     match = EXPANDED_TICKET_RE.search(proposal_text)
@@ -146,7 +147,7 @@ def print_diff(original: str, revised: str) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Interactively explore the codebase and grill the human to expand a ticket's acceptance criteria and context.",
+        description="Interactively explore the codebase and question the human to assemble implementation context for a ticket.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -168,13 +169,13 @@ def main() -> None:
         "--ticket-file-out",
         type=Path,
         default=None,
-        help="Where to write the expanded ticket (default: "
+        help="Where to write the annotated ticket (default: "
              ".ticket-explored-{ticket-id}.md). Ignored if --no-write is passed.",
     )
     parser.add_argument(
         "--no-write",
         action="store_true",
-        help="Only print the expanded ticket/diff - don't write it anywhere.",
+        help="Only print the annotated ticket/diff - don't write it anywhere.",
     )
     parser.add_argument(
         "--log-level",
@@ -204,7 +205,7 @@ def main() -> None:
     proposal_text = run_explore_step(ticket_content, args.model)
 
     render.print_line()
-    render.print_line(f"-- Expanded ticket for {args.ticket_id}:")
+    render.print_line(f"-- Annotated ticket for {args.ticket_id}:")
     render.print_line()
     render.print_line(proposal_text)
 
