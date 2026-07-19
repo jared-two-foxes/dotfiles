@@ -63,6 +63,10 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
             "implement_step",
             "AI-implement the stack's top frame: make its failing test pass",
         ),
+        "drive": _Command(
+            "drive",
+            "Loop next-step + implement-step automatically until human input is needed",
+        ),
     }),
     ("Ticket restructuring (manual)", {
         "split-ticket": _Command(
