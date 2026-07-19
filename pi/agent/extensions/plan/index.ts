@@ -25,13 +25,19 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, normalize, sep } from "node:path";
 import { Type } from "typebox";
 
 // Type-only — erased at runtime by jiti, no package resolution needed.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-export default function (pi: ExtensionAPI) {
+// Pattern that validates a ticket's acceptance-criteria section: checks
+// that the '## Acceptance Criteria' heading is present and is followed
+// by at least one '- [ ] ...' checkbox bullet. [\s\S]*? is intentionally
+// broad — a ticket body may include a short paragraph between the heading
+// and the first criterion, so we only require that the checkbox appears
+// somewhere after the heading, not immediately adjacent to it.
+const ACCEPTANCE_CRITERIA_PATTERN = /## Acceptance Criteria[\s\S]*?- \[ \] /;
   pi.registerTool({
     name: "write_plan",
     label: "Write Plan",
@@ -90,28 +96,41 @@ export default function (pi: ExtensionAPI) {
           isError: true,
         };
       }
-      if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
+      // Verify the resolved path is directly inside cwd. process.cwd()
+      // never returns a trailing separator, so `cwd + sep` is a clean
+      // directory prefix: `/project/` (not `/project`). This correctly
+      // allows any file directly in cwd (resolved = cwd + sep + name) and
+      // rejects both same-level path-prefix collisions (/project-evil/) and
+      // upward traversal (../sibling/). The .md guard above already prevents
+      // the only edge case where resolved would equal cwd itself (empty stem).
+      const cwd = process.cwd();
+      const resolved = resolve(cwd, normalize(filename));
+      if (!resolved.startsWith(cwd + sep)) {
         return {
           content: [{
             type: "text" as const,
-            text: "Error: filename must not contain path separators or '..' components.",
+            text: "Error: filename must not traverse outside the working directory.",
           }],
           isError: true,
         };
       }
-      if (!content.includes("## Acceptance Criteria")) {
+      // Validate that the '## Acceptance Criteria' heading is present and
+      // is followed by at least one '- [ ] ...' checkbox bullet (see
+      // ACCEPTANCE_CRITERIA_PATTERN above for the rationale).
+      if (!ACCEPTANCE_CRITERIA_PATTERN.test(content)) {
         return {
           content: [{
             type: "text" as const,
             text:
               "Error: content must include a '## Acceptance Criteria' section " +
-              "with '- [ ] ...' checkbox bullets for scaffold pipeline compatibility.",
+              "with at least one '- [ ] ...' checkbox bullet for scaffold " +
+              "pipeline compatibility.",
           }],
           isError: true,
         };
       }
 
-      writeFileSync(join(process.cwd(), filename), content, "utf-8");
+      writeFileSync(resolved, content, "utf-8");
       return {
         content: [{
           type: "text" as const,

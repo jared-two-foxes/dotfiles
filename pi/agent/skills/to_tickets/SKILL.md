@@ -68,7 +68,8 @@ decision** (below) to decide how many tickets to produce.
 For each ticket:
 - Choose a short kebab-case ID: `adhoc-{short-name}` (e.g.
   `adhoc-cache-invalidation`). This is the ID passed to `scaffold
-  push-ticket` and becomes the branch name under `git_workflow`.
+  push-ticket` and, with `git_workflow` enabled, becomes the branch
+  name `ticket/adhoc-cache-invalidation`.
 - Write a 1–3 sentence description of what the ticket does and why.
 - Write an `## Acceptance Criteria` section with `- [ ] ...` checkbox
   bullets (3–7 items, independently testable).
