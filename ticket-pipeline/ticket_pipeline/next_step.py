@@ -237,6 +237,7 @@ MANUAL_PENDING_STATUS = "awaiting-manual-impl"
 # confirm satisfaction; otherwise pauses for a human, same escape-hatch
 # shape as --accept-green/--accept-manual.
 NOTHING_WRITTEN_STATUS = "nothing-written"
+FEEDBACK_READY_STATUS = lib.FEEDBACK_READY_STATUS
 
 
 def do_await_impl(
@@ -569,6 +570,8 @@ def recheck_refactor_tests(
 def do_write_test(
     stack: list, frame: "lib.CriterionFrame", model: str, commands: dict,
     accept_no_test: bool = False, git_cfg: "lib.GitConfig | None" = None,
+    feedback: str | None = None,
+    previous_changed_files: list[str] | None = None,
 ) -> None:
     """
     Writes (or retries writing) frame's test(s) through the unified
@@ -626,6 +629,8 @@ def do_write_test(
             frame.criterion, frame.plan_context, model, commands, ticket_id=frame.ticket,
             existing_test_refs=frame.existing_test_refs,
             verification=frame.verification,
+            feedback=feedback,
+            previous_changed_files=previous_changed_files,
         )
     )
     if file_paths is None:
@@ -847,6 +852,126 @@ def recheck_test_frame(
     frame.status = GREEN_UNCONFIRMED_STATUS
     lib.save_stack(stack)
     do_await_green_unconfirmed(frame)
+
+
+def _run_feedback_retry(
+    stack: list,
+    frame: "lib.CriterionFrame",
+    model: str,
+    commands: dict,
+    accept_no_test: bool,
+    git_cfg: "lib.GitConfig | None",
+) -> None:
+    """
+    Apply queued user feedback on the top frame as a first-class retry path.
+    The feedback is consumed exactly once here; a later correction requires a
+    fresh `give-feedback` call.
+    """
+    target = frame.feedback_target
+    feedback = frame.feedback
+    if not target or not feedback:
+        frame.status = "pending"
+        lib.save_stack(stack)
+        return
+
+    if frame.feedback_attempts >= lib.FEEDBACK_MAX_RETRIES:
+        lib.die_with_log(
+            "feedback",
+            f"Feedback retry limit reached ({lib.FEEDBACK_MAX_RETRIES}) for the top criterion. "
+            "Fix it by hand or reset the criterion before asking for another automated retry.",
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+        )
+
+    previous_changed_files = lib.git_changed_files()
+    frame.feedback = None
+    frame.feedback_target = None
+    frame.feedback_attempts += 1
+
+    if target == lib.FEEDBACK_TARGET_TESTER:
+        if not git_cfg or not git_cfg.git_workflow or frame.base_commit is None:
+            lib.die_with_log(
+                "feedback",
+                "Tester feedback requires git_workflow = true and a recorded base_commit so the "
+                "previous test-writing attempt can be rolled back safely.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        try:
+            lib.git_reset_hard(frame.base_commit)
+        except lib.GitError as e:
+            lib.die_with_log(
+                "feedback",
+                f"git reset --hard {frame.base_commit} failed before the tester retry: {e}",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        frame.status = "pending"
+        frame.test_files = None
+        frame.test_names = None
+        frame.unconfirmed_tests = []
+        frame.base_commit = None
+        frame.commit_sha = None
+        lib.save_stack(stack)
+        lib.log_feedback_event(
+            "apply-tester",
+            feedback,
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+            target=target,
+        )
+        do_write_test(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_no_test,
+            git_cfg,
+            feedback=feedback,
+            previous_changed_files=previous_changed_files,
+        )
+        return
+
+    if target == lib.FEEDBACK_TARGET_IMPLEMENTOR:
+        import ticket_pipeline.implement_step as implement_step
+
+        lib.save_stack(stack)
+        lib.log_feedback_event(
+            "apply-implementor",
+            feedback,
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+            target=target,
+        )
+        if frame.verification == "refactor":
+            implement_step.run_implement_with_refine(
+                frame,
+                model,
+                commands,
+                implement_step.DEFAULT_MAX_ATTEMPTS,
+                verification="refactor",
+                feedback=feedback,
+                previous_changed_files=previous_changed_files,
+            )
+            recheck_refactor_tests(stack, frame, commands, git_cfg)
+            return
+        implement_step.run_implement_with_refine(
+            frame,
+            model,
+            commands,
+            implement_step.DEFAULT_MAX_ATTEMPTS,
+            feedback=feedback,
+            previous_changed_files=previous_changed_files,
+        )
+        recheck_test_frame(stack, frame, commands, accept_green=False)
+        return
+
+    lib.die_with_log(
+        "feedback",
+        f"Human-targeted feedback is not an automated retry path for verification={frame.verification!r}.",
+        criterion=frame.criterion,
+        ticket=frame.ticket,
+    )
 
 
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
@@ -1147,6 +1272,10 @@ def step(
         # needed (there's nothing left to pop; the real criteria are
         # long gone).
         do_ticket_validate(frame.ticket, model, step_models, commands, config_path, git_cfg)
+        return
+
+    if frame.status == FEEDBACK_READY_STATUS:
+        _run_feedback_retry(stack, frame, model, commands, accept_no_test, git_cfg)
         return
 
     if frame.status == GREEN_UNCONFIRMED_STATUS:

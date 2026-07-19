@@ -118,6 +118,7 @@ DEFAULT_MAX_ATTEMPTS = 3
 IMPLEMENT_CRITERION_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion.prompt.md"
 IMPLEMENT_CRITERION_DIRECT_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion-direct.prompt.md"
 IMPLEMENT_CRITERION_REFACTOR_PROMPT_FILE = lib.PROMPTS_DIR / "implement-criterion-refactor.prompt.md"
+IMPLEMENT_REFINE_PROMPT_FILE = lib.PROMPTS_DIR / "implement-refine.prompt.md"
 
 # Pipeline bookkeeping the Implementor must never write, regardless of
 # what the model decides. The named test file is deliberately NOT here -
@@ -434,6 +435,40 @@ def build_implement_criterion_refactor_fix_prompt(
     )
 
 
+def build_implement_feedback_prompt(
+    frame: "lib.CriterionFrame",
+    feedback: str,
+    previous_changed_files: list[str],
+    verification: str = "test",
+) -> str:
+    instructions = lib.load_prompt_body(IMPLEMENT_REFINE_PROMPT_FILE)
+    changed_list = "\n".join(f"- {p}" for p in previous_changed_files) or "- (none recorded)"
+    test_block = ""
+    if frame.test_files and frame.test_names:
+        label = "Safety-net tests" if verification == "refactor" else "Tests to preserve"
+        test_block = (
+            f"\n\n{label}:\n"
+            + "\n".join(f"- {f} :: {n}" for f, n in zip(frame.test_files, frame.test_names))
+        )
+    mode_note = (
+        "This is a refactor retry: preserve behavior, keep the named tests GREEN, "
+        "and address only the structural problem called out in the feedback."
+        if verification == "refactor"
+        else "This is an implementation retry: preserve the criterion and make the "
+             "smallest targeted correction the feedback asks for."
+    )
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the relevant Implementation Plan context for this criterion:\n\n"
+        f"{frame.plan_context}\n\n"
+        f"Acceptance criterion (fixed; do not rewrite it):\n\n{frame.criterion}\n\n"
+        f"{mode_note}{test_block}\n\n"
+        f"Files changed in the previous attempt (read these first to see what was tried):\n"
+        f"{changed_list}\n\n"
+        f"User feedback to address:\n\n{feedback}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # The implement loop.
 # ---------------------------------------------------------------------------
@@ -444,6 +479,8 @@ def run_implement_direct_with_refine(
     model: str,
     commands: dict,
     max_attempts: int,
+    feedback: str | None = None,
+    previous_changed_files: list[str] | None = None,
 ) -> list[str]:
     """
     Level 2: direct implementation for a verification="manual" frame -
@@ -461,7 +498,12 @@ def run_implement_direct_with_refine(
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            prompt = build_implement_criterion_direct_prompt(frame.criterion, frame.plan_context)
+            if feedback:
+                prompt = build_implement_feedback_prompt(
+                    frame, feedback, previous_changed_files or [], verification="manual"
+                )
+            else:
+                prompt = build_implement_criterion_direct_prompt(frame.criterion, frame.plan_context)
         else:
             log.warning(
                 "-- Build failed (attempt %d/%d). Feeding the error back to Direct Implementor to fix.",
@@ -532,6 +574,8 @@ def run_implement_with_refine(
     commands: dict,
     max_attempts: int,
     verification: str = "test",
+    feedback: str | None = None,
+    previous_changed_files: list[str] | None = None,
 ) -> list[str]:
     """
     Implement the frame's criterion against its named failing test(s),
@@ -570,7 +614,11 @@ def run_implement_with_refine(
 
     for attempt in range(1, max_attempts + 1):
         if attempt == 1:
-            if verification == "refactor":
+            if feedback:
+                prompt = build_implement_feedback_prompt(
+                    frame, feedback, previous_changed_files or [], verification=verification
+                )
+            elif verification == "refactor":
                 prompt = build_implement_criterion_refactor_prompt(
                     frame.criterion, frame.plan_context, test_files, test_names
                 )
