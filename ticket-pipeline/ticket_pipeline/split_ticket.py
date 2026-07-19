@@ -48,8 +48,9 @@ don't have to re-derive facts a previous step already checked. Purely
 additional context: it never changes which criteria end up in which
 child, or whether the verdict is a split at all - review-ticket.py
 already strips out any criterion it finds fully satisfied before this
-ticket ever reaches split-ticket.py (see prep-ticket.py, which wires this
-up automatically), so there's nothing here to react to on that front.
+ticket ever reaches split-ticket.py - review-ticket.py already strips out
+any criterion it finds fully satisfied before this ticket is pushed, so
+there's nothing here to react to on that front.
 
 Usage:
     split-ticket <ticket-id> [--model <model-id>] [--ticket-file-in <path>]

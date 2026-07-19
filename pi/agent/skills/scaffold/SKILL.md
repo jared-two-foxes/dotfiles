@@ -3,7 +3,7 @@ name: scaffold
 description: >
   Knowledge of the ticket-pipeline TDD code generation tool — the `scaffold` CLI
   and its subcommands (push-ticket, next-step, review-ticket,
-  propose-ticket-edit, prep-ticket, explore-ticket, split-ticket,
+  propose-ticket-edit, split-ticket,
   create-child-tickets, update-ticket, reset-pipeline, list-models, bench),
   the criteria-stack state machine and its phases (WRITE_TEST, AWAIT_IMPL,
   TICKET_VALIDATE, etc.), and pipeline state files (.criteria-stack.json,
@@ -52,23 +52,14 @@ separate command needed.
 
 ## Command Reference
 
-### Ticket Prep (before the pipeline)
+### Ticket Review (manual, situational)
 
 | Command | Description |
 |---|---|
-| `prep-ticket <id>` | Loop review-ticket / propose-ticket-edit until the ticket's wording is clean, then hand off to explore-ticket. Never touches
- Linear. |
-| `review-ticket <id>` | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the
- ticket. |
-| `propose-ticket-edit <id>` | Rewrite a ticket to resolve review-ticket's flagged concerns. Output to `.ticket-proposed-<id>.md` by default. Never
- touches Linear. |
+| `review-ticket <id>` | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the ticket. |
+| `propose-ticket-edit <id>` | Rewrite a ticket to resolve review-ticket's flagged concerns. Output to `.ticket-proposed-<id>.md` by default. Never touches Linear. |
 
-### Explore (interactive, human-in-the-loop)
-
-| Command | Description |
-|---|---|
-| `explore-ticket <id>` | Interactive session: the AI explores the codebase and converses with you at the terminal to fill out acceptance criteria and
- context. The only genuinely interactive script. Output is a proposed expanded ticket — never written to Linear unless you do it yourself. |
+These commands are available for manual use on Linear tickets or when a ticket needs post-hoc correction. Ticket quality (review, context exploration, criteria verification) is handled upstream by the `to_tickets` or `planner` skills before any ticket reaches `push-ticket`.
 
 ### Seed & Run the Criteria Loop
 
@@ -184,8 +175,7 @@ to pop.
 | `--prepend` | push-ticket | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after. |
 | `--validate-only` | push-ticket | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly. |
 | `--from-gap-plan` | push-ticket | Reuse existing `.gap-plan.md` instead of re-running plan+narrow. |
-| `--ticket-file-in <path>` | review-ticket, propose-ticket-edit, explore-ticket, push-ticket | Read ticket from a local file instead of fetching from
- Linear. |
+| `--ticket-file-in <path>` | review-ticket, propose-ticket-edit, push-ticket | Read ticket from a local file instead of fetching from Linear. |
 | `--log-level <level>` | most commands | `trace`/`debug`/`info`/`warning`/`error`/`critical`. `debug` shows per-tool-call activity; `trace` adds raw
  request/response payloads. |
 
@@ -240,7 +230,6 @@ Each entry in `.criteria-stack.json` has:
 | `.gap-plan.md` | Narrowed plan with remaining acceptance criteria |
 | `.ticket-review-<id>.md` | review-ticket report |
 | `.ticket-proposed-<id>.md` | propose-ticket-edit output |
-| `.ticket-explored-<id>.md` | explore-ticket output |
 | `.ticket-split-<id>.md` | split-ticket report |
 | `.ticket-children-<id>.json` | create-child-tickets manifest |
 
@@ -293,7 +282,6 @@ Key prompt files:
 | `review-test-quality.prompt.md` | Gating test-quality review inside WRITE_TEST's retry loop (advisory fallback on budget exhaustion) |
 | `review-ticket.prompt.md` | review-ticket command |
 | `propose-ticket-edit.prompt.md` | propose-ticket-edit command |
-| `explore-ticket.prompt.md` | explore-ticket command |
 | `split-ticket.prompt.md` | split-ticket complexity check |
 
 ## Architectural Principles

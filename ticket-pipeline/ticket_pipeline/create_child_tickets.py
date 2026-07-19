@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 create-child-tickets - turn split-ticket.py's proposed child tickets into
-real Linear sub-issues of the parent, and record them locally so
-prep-ticket.py can push each onto the criteria stack in order.
+real Linear sub-issues of the parent, and record them locally so each
+can be pushed onto the criteria stack in order via push_ticket --prepend.
 
 Purely mechanical: split-ticket.py's own prompt enforces a fully
 structured output (title/description/acceptance-criteria per child), so
@@ -24,9 +24,8 @@ Dies if the split report's verdict is "no-split" - nothing to create.
 
 Writes .ticket-children-{ticket-id}.json: an ordered list of
 {"id": <identifier>, "title": <title>} for each created child, in the
-same order split-ticket.py proposed them - so prep-ticket.py can
-push_ticket --prepend each one without re-parsing the split report
-itself.
+same order split-ticket.py proposed them - so each child can be pushed
+via push_ticket --prepend without re-parsing the split report itself.
 
 Usage:
     create-child-tickets <ticket-id> [--split-file-in <path>] [--yes]
