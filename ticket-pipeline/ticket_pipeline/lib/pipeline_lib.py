@@ -114,6 +114,7 @@ TEST_CRITERION_PROMPT_FILE = PROMPTS_DIR / "test-criterion.prompt.md"
 TEST_REFINE_PROMPT_FILE = PROMPTS_DIR / "test-refine.prompt.md"
 TEST_QUALITY_REVIEW_PROMPT_FILE = PROMPTS_DIR / "review-test-quality.prompt.md"
 RECHECK_CRITERION_PROMPT_FILE = PROMPTS_DIR / "recheck-criterion.prompt.md"
+EXPLORE_CRITERION_PROMPT_FILE = PROMPTS_DIR / "explore-criterion.prompt.md"
 
 # Host OS name, injected into every test-criterion and test-quality
 # review prompt so the Tester/Reviewer write tests that compile on the
@@ -2738,6 +2739,140 @@ def run_smoke_gate(smoke_cmd: str | None) -> None:
     result = run_command(smoke_cmd, "smoke test")
     if result.returncode != 0:
         die_with_log("smoke", f"Smoke test failed (exit {result.returncode}). See output above.")
+
+
+# ---------------------------------------------------------------------------
+# Per-criterion interactive explore step (--explore in push_ticket).
+# run_explore_for_criterion runs one interactive session for a single frame,
+# producing a context string to append to that frame's plan_context.
+# run_explore_for_frames iterates the full list, calling
+# run_explore_for_criterion for each, mutating plan_context in place before
+# the stack is written. Both are called only when the human passed --explore
+# to push_ticket; every other push path never touches these functions.
+# ---------------------------------------------------------------------------
+
+EXPLORE_CONTEXT_HEADING = "### Context From Exploration & Discussion"
+_EXPLORE_CONTEXT_RE = re.compile(
+    r"^### Context From Exploration & Discussion\s*\n(.*?)(?:\n### |\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+_EXPLORE_GAP_RE = re.compile(
+    r"^### Spec Gaps Noticed\s*\n(.+?)(?:\n### |\Z)",
+    re.DOTALL | re.MULTILINE,
+)
+
+# Same dedup-key convention used by explore_ticket.py - the ticket was
+# embedded in the prompt already; a read_file call for it returns the
+# short "you already have this" note instead of re-sending the content.
+_EXPLORE_TICKET_DEDUP_KEY = ".ticket.md"
+
+
+def build_explore_criterion_prompt(criterion: str, plan_context: str) -> str:
+    """
+    Build the prompt for an interactive per-criterion context-scaffolding
+    session. The existing plan_context (extracted from the gap plan at frame-
+    build time) is given as a starting point the model will extend, not
+    replace.
+    """
+    instructions = load_prompt_body(EXPLORE_CRITERION_PROMPT_FILE)
+    prefetch_block, _ = prefetch_referenced_files(criterion + "\n" + plan_context)
+    prefetch_section = f"\n\n{prefetch_block}" if prefetch_block else ""
+    return (
+        f"{instructions}\n\n---\n\n"
+        f"Here is the acceptance criterion to scaffold context for:\n\n"
+        f"{criterion}\n\n"
+        f"Here is the existing plan context for this criterion - already "
+        f"complete and current, treat it as a starting point:\n\n"
+        f"{plan_context}{prefetch_section}\n\n"
+        f"Explore the codebase with read_file/list_dir/search_files and "
+        f"ask the human targeted questions with ask_user_question - one "
+        f"at a time, waiting for each real answer - until you have enough "
+        f"implementation context for this criterion. Produce the result "
+        f"in the exact format from Step 5 above. Your final response (no "
+        f"further tool calls) must be exactly that output - no chat "
+        f"header, no preamble or trailing commentary."
+    )
+
+
+def run_explore_for_criterion(criterion: str, plan_context: str, model: str) -> str:
+    """
+    Run one interactive context-scaffolding session for a single criterion.
+    Returns the context string to append to the frame's plan_context: the
+    full '### Context From Exploration & Discussion' block (and any
+    '### Spec Gap Noticed' block) from the model's response, ready to
+    concatenate with a blank line separator. Returns an empty string if
+    the model produced a valid response but found nothing to add.
+
+    Propagates AIError and PipelineAbort to the caller (push_ticket.py),
+    which decides whether to abort or continue with the remaining frames.
+    """
+    from . import ai_client as _ai_client
+    result = run_ai_step_with_retry(
+        lambda: _ai_client.run_with_tools(
+            build_explore_criterion_prompt(criterion, plan_context),
+            tools.EXPLORE_TOOLS,
+            tools.make_executor(
+                allow_write=False,
+                interactive=True,
+                preloaded_paths={_EXPLORE_TICKET_DEDUP_KEY},
+            ),
+            "explore-criterion",
+            model=model,
+            summarize_call=tools.summarize_tool_call,
+        ),
+        "explore-criterion",
+    )
+    if EXPLORE_CONTEXT_HEADING not in result.text:
+        render.print_line(
+            f"-- explore-criterion: response had no context heading - "
+            f"skipping criterion (raw output above)."
+        )
+        render_step_output(result.text, level=1)
+        return ""
+
+    # Extract both the context block and any spec-gap notice to append.
+    parts: list[str] = []
+    ctx_match = _EXPLORE_CONTEXT_RE.search(result.text)
+    if ctx_match:
+        body = ctx_match.group(1).strip()
+        if body:
+            parts.append(f"{EXPLORE_CONTEXT_HEADING}\n\n{body}")
+        else:
+            parts.append(EXPLORE_CONTEXT_HEADING)
+    gap_match = _EXPLORE_GAP_RE.search(result.text)
+    if gap_match:
+        parts.append(f"### Spec Gaps Noticed\n{gap_match.group(1).strip()}")
+    return "\n\n".join(parts)
+
+
+def run_explore_for_frames(frames: "list[CriterionFrame]", model: str) -> None:
+    """
+    Run an interactive context-scaffolding session for each frame in
+    `frames`, appending the returned context to each frame's plan_context
+    in place. Frames are explored in stack order (index 0 first). A
+    failure on one frame is logged and skipped; the remaining frames are
+    still explored so that a single bad response doesn't silently discard
+    context gathered for all subsequent criteria.
+
+    Called by push_ticket.py when --explore is passed, after frame-building
+    but before the stack is written.
+    """
+    total = len(frames)
+    for i, frame in enumerate(frames):
+        render.print_line()
+        render.print_line(
+            f"-- explore ({i + 1}/{total}): {frame.criterion[:80]}"
+            + ("..." if len(frame.criterion) > 80 else "")
+        )
+        try:
+            extra = run_explore_for_criterion(frame.criterion, frame.plan_context, model)
+        except (ai_client.AIError, tools.PipelineAbort) as e:
+            render.print_line(
+                f"-- explore-criterion: skipping criterion after error: {e}"
+            )
+            continue
+        if extra:
+            frame.plan_context = frame.plan_context.rstrip() + "\n\n" + extra
 
 
 # ---------------------------------------------------------------------------
