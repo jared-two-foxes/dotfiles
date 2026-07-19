@@ -46,7 +46,7 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
             "Interactive session to fill out a ticket's acceptance criteria/context",
         ),
     }),
-    ("Seed & drive the criteria loop", {
+    ("Seed & run the criteria loop", {
         "status": _Command(
             "status",
             "Show where the pipeline is and what to do next (no AI, no tests)",
@@ -57,19 +57,11 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
         ),
         "next-step": _Command(
             "next_step",
-            "Advance the criteria stack by one step (run repeatedly)",
-        ),
-        "implement-step": _Command(
-            "implement_step",
-            "AI-implement the stack's top frame: make its failing test pass",
+            "Advance the criteria stack by one phase (re-run to keep moving)",
         ),
         "give-feedback": _Command(
             "give_feedback",
             "Queue feedback on the top frame for an automated retry on next-step",
-        ),
-        "drive": _Command(
-            "drive",
-            "Loop next-step + implement-step automatically until human input is needed",
         ),
     }),
     ("Ticket restructuring (manual)", {

@@ -31,9 +31,9 @@ scaffold push-ticket     (mixed)            "seed the work queue"
       v
   +--------------------------------------------+
   |   scaffold next-step   (run repeatedly)    |
-  |   - write a test, or make a manual change  |
-  |   - pause for a human, or hand off to      |
-  |     scaffold implement-step                |
+  |   - write a test, implement, or re-check   |
+  |   - pause only for genuine human-only      |
+  |     confirmation/inspection                |
   |   - detect green, pop, repeat              |
   +--------------------------------------------+
       |
@@ -115,9 +115,9 @@ ticket is mid-flight - resolved via `--force` to abandon it or
 
 The main loop. Every invocation looks at the top of the stack, re-checks
 real state (never trusts the stored `status` blindly), and advances
-exactly one step. `--continuous` chains every purely-mechanical
-transition without stopping; it still always pauses at a genuine human
-decision point.
+exactly one phase. `--continuous` chains every automatable transition
+without stopping; it still always pauses at a genuine human decision
+point.
 
 ### 3a. Write the test (`WRITE_TEST` phase)
 
@@ -129,8 +129,8 @@ decision point.
 | Red check | **[Mechanical]** | Runs just this one test. |
 
 **Outcome branches** (still within `WRITE_TEST`):
-- Red, as expected -> pause: **[Human]** implements, or hands off to
-  `scaffold implement-step` (Stage 4).
+- Red, as expected -> pause: **[Human]** can implement by hand, or re-run
+  `scaffold next-step` to let the pipeline implement automatically.
 - Green immediately, and this criterion came from the ticket's own
   original criteria -> trusted as a side-effect of a sibling
   criterion, mark done, continue (**[Mechanical]**).
@@ -145,7 +145,7 @@ decision point.
 | Step | Nature | What happens |
 |---|---|---|
 | Mechanical floor check | **[Mechanical]** | For a `verification: manual` criterion (docs/config/CI), there's no test to re-run. Instead: does the file this criterion names (parsed from its own wording) actually show up as changed in `git diff`/untracked files? |
-| Dispatch | **[Mechanical]** / **[Human]** | Match found -> trusted immediately, mark done. No match -> pause for a human to make the change (or run `scaffold implement-step`'s Level 2, Stage 4b), then re-check; `--accept-manual` overrides when no specific file could even be identified. |
+| Dispatch | **[Mechanical]** / **[Human]** | Match found -> trusted immediately, mark done. No match -> pause for a human to make the change, or re-run `scaffold next-step` to let the pipeline attempt it automatically; `--accept-manual` overrides when no specific file could even be identified. |
 
 ### 3c. Pop and continue
 
@@ -156,12 +156,13 @@ decision point.
 
 ---
 
-## Stage 4 - `scaffold implement-step` (optional AI implementation)
+## Stage 4 - `scaffold next-step` implementation phase (optional AI implementation)
 
 Never required - a human can always implement by hand and let
-`scaffold next-step` detect green. When invoked, it re-checks every
-precondition itself before spending anything, and never touches the
-stack (`scaffold next-step` still owns every status transition).
+`scaffold next-step` detect green. When `next-step` reaches an
+implementation-capable state, a later `next-step` invocation re-checks
+every precondition itself before spending anything, and never touches
+the stack except through `next-step`'s own status transitions.
 
 ### 4a. Level 1 - test-targeted implementation (the common case)
 
@@ -190,7 +191,7 @@ config, CI - anything `narrow` judged as having no meaningful red/green).
 
 Whether the criterion is actually satisfied is still entirely
 `scaffold next-step`'s job (Stage 3b's mechanical floor check) -
-`scaffold implement-step` never makes that call itself.
+the implementation phase never makes that call itself.
 
 ---
 
@@ -231,8 +232,8 @@ so a crash partway through resumes validation on the next
 | `push-ticket` narrow step | narrow-plan | Narrow to unsatisfied criteria; tag `verify:`/`existing_test:` |
 | `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one |
 | `next-step` WRITE_TEST (advisory) | review-test-quality | Judge whether the test just (written/modified) is meaningful - never blocks |
-| `implement-step` Level 1 | implement-criterion | Make a named failing test pass |
-| `implement-step` Level 2 | implement-criterion-direct | Directly implement a no-test (manual) criterion |
+| `next-step` implementation phase | implement-criterion | Make a named failing test pass |
+| `next-step` implementation phase (manual) | implement-criterion-direct | Directly implement a no-test (manual) criterion |
 | `next-step` TICKET_VALIDATE | narrow-plan (again) | Safety-net re-check for missed criteria |
 | `next-step` TICKET_VALIDATE | review-singlepass | Whole-ticket code review, APPROVED/CHANGES REQUESTED |
 
@@ -248,7 +249,7 @@ read/write - is deterministic code with no model in the loop.
 | Pause | Trigger | Resolved by |
 |---|---|---|
 | `scaffold explore-ticket`'s questions | Always, by design | Answering at the terminal |
-| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `scaffold implement-step` |
+| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `scaffold next-step` again |
 | `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `scaffold next-step --accept-green` |
 | `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `scaffold next-step --accept-manual` |
 | Stack clobber | Pushing a ticket while a different one is mid-flight | `--force` or `--prepend` |
