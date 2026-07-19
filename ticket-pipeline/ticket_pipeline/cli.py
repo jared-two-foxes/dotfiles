@@ -67,6 +67,10 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
             "give_feedback",
             "Queue feedback on the top frame for an automated retry on next-step",
         ),
+        "drive": _Command(
+            "drive",
+            "Loop next-step + implement-step automatically until human input is needed",
+        ),
     }),
     ("Ticket restructuring (manual)", {
         "split-ticket": _Command(
