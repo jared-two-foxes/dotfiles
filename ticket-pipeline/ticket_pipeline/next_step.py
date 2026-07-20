@@ -1197,12 +1197,7 @@ def do_skip_test_direct_implementation(
     import ticket_pipeline.implement_step as implement_step
 
     _record_base_commit_if_needed(stack, frame, git_cfg)
-    changed_files = implement_step.run_implement_direct_with_refine(
-        frame, model, commands, max_attempts
-    )
-    render.print_line()
-    render.print_line(f"-- Implemented (skip-test): {frame.criterion}")
-    render.print_line(f"   Files changed ({len(changed_files)}): {', '.join(changed_files)}")
+    implement_step.run_implement_direct_with_refine(frame, model, commands, max_attempts)
     _handle_no_test_written(
         stack,
         frame,
@@ -1726,7 +1721,8 @@ def main() -> None:
              "if the top frame isn't in that state, or if the mechanical check or "
              "AI re-check already confirmed it (nothing to override).",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--manual-test",
         action="store_true",
         help="Use manually authored test(s) for the top pending test criterion "
@@ -1741,7 +1737,7 @@ def main() -> None:
         help="Scoped test reference for --manual-test. Repeatable. Format: "
              "<file>::<qualified_test_name>.",
     )
-    parser.add_argument(
+    mode_group.add_argument(
         "--skip-test",
         action="store_true",
         help="Skip WRITE_TEST for the top pending verify:test criterion and hand "
@@ -1759,8 +1755,6 @@ def main() -> None:
     args = parser.parse_args()
     if args.manual_test_ref and not args.manual_test:
         parser.error("--manual-test-ref requires --manual-test")
-    if args.manual_test and args.skip_test:
-        parser.error("--skip-test cannot be combined with --manual-test")
     verbosity.setup_logging(args.log_level)
 
     config_path = Path(args.config)

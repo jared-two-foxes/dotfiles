@@ -123,6 +123,10 @@ status == "pending",
                                     --manual-test-ref refs, or
                                     existing_test refs if present;
                                     run compile + scoped tests)
+status == "pending",
+--skip-test passed              → SKIP_TEST_GATE
+                                   (skip WRITE_TEST and hand directly
+                                    to Implementor with build-only gate)
 status == "test-written",
   missing test_files/test_names → WRITE_TEST (retry)
 status == "test-written"        → re-run scoped tests:
@@ -176,6 +180,7 @@ to pop.
 | `--accept-manual` | next-step | Accept a manual-verification criterion as satisfied, overriding the git-changed-files floor check. |
 | `--manual-test` | next-step | Use manually authored test(s) for the top pending test criterion instead of running the Tester AI. |
 | `--manual-test-ref <file::qualified_test_name>` | next-step | Scoped test reference for `--manual-test`; repeatable. |
+| `--skip-test` | next-step | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
 | `--model <id>` | most commands | AI model to use (default: `opencode:gpt-5.4-mini`). |
 | `--config <path>` | next-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
 | `--max-attempts <n>` | next-step | Total implementation attempts, initial write + refines sharing one budget (default: 3). |

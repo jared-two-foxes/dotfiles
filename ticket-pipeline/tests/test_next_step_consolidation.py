@@ -377,7 +377,7 @@ class NextStepArgValidationTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as cm:
                 next_step.main()
         self.assertEqual(2, cm.exception.code)
-        self.assertIn("--skip-test cannot be combined with --manual-test", stderr.getvalue())
+        self.assertIn("not allowed with argument", stderr.getvalue())
 
 
 if __name__ == "__main__":

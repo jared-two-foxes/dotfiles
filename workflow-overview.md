@@ -145,6 +145,10 @@ or edit the test by hand, then run `scaffold next-step --manual-test
 --manual-test-ref <file>::<qualified_test_name>` to run the same compile
 and scoped red/green gates without invoking the Tester AI.
 
+Optional non-TDD path (for pending test criteria): run
+`scaffold next-step --skip-test` to bypass test generation and hand the
+criterion directly to the Implementor (build-gated, no red/green loop).
+
 ### 3b. Manual criteria (no test at all)
 
 | Step | Nature | What happens |
