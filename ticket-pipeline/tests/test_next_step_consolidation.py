@@ -283,6 +283,63 @@ class ManualTestModeTests(unittest.TestCase):
         self.assertEqual([nested_name], frame.test_names)
 
 
+class SkipTestModeTests(unittest.TestCase):
+    def _frame(self, *, status="pending", verification="test"):
+        return lib.CriterionFrame(
+            ticket="SA-1",
+            criterion="- [ ] do the thing",
+            plan_context="ctx",
+            test_files=None,
+            test_names=None,
+            status=status,
+            origin="ticket",
+            verification=verification,
+        )
+
+    def test_pending_skip_test_hands_off_to_direct_implementor(self):
+        frame = self._frame()
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch("ticket_pipeline.implement_step.run_implement_direct_with_refine", return_value=["src/example.py"]) as run_direct, \
+             mock.patch.object(next_step, "_handle_no_test_written") as handle_no_test:
+            next_step.step(
+                "model",
+                {"build_cmd": "true"},
+                False,
+                lib.PIPELINE_CONFIG_FILE,
+                skip_test=True,
+            )
+        run_direct.assert_called_once()
+        handle_no_test.assert_called_once()
+
+    def test_skip_test_rejects_non_pending_frame(self):
+        frame = self._frame(status="test-written")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "die_with_log", side_effect=RuntimeError("bad skip")) as die_with_log:
+            with self.assertRaisesRegex(RuntimeError, "bad skip"):
+                next_step.step(
+                    "model",
+                    {"build_cmd": "true"},
+                    False,
+                    lib.PIPELINE_CONFIG_FILE,
+                    skip_test=True,
+                )
+        self.assertIn("only applies when the top frame is pending", die_with_log.call_args.args[1])
+
+    def test_skip_test_rejects_non_test_verification(self):
+        frame = self._frame(verification="manual")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "die_with_log", side_effect=RuntimeError("bad mode")) as die_with_log:
+            with self.assertRaisesRegex(RuntimeError, "bad mode"):
+                next_step.step(
+                    "model",
+                    {"build_cmd": "true"},
+                    False,
+                    lib.PIPELINE_CONFIG_FILE,
+                    skip_test=True,
+                )
+        self.assertIn("only valid for verification='test'", die_with_log.call_args.args[1])
+
+
 class StatusGuidanceTests(unittest.TestCase):
     def test_pending_guidance_mentions_manual_test_path(self):
         frame = lib.CriterionFrame(
@@ -300,6 +357,7 @@ class StatusGuidanceTests(unittest.TestCase):
              mock.patch("ticket_pipeline.status.render.print_line", side_effect=lambda text="": printed.append(text)):
             status.show_status()
         self.assertTrue(any("--manual-test --manual-test-ref" in line for line in printed))
+        self.assertTrue(any("--skip-test" in line for line in printed))
 
 
 class NextStepArgValidationTests(unittest.TestCase):
@@ -311,6 +369,15 @@ class NextStepArgValidationTests(unittest.TestCase):
                 next_step.main()
         self.assertEqual(2, cm.exception.code)
         self.assertIn("--manual-test-ref requires --manual-test", stderr.getvalue())
+
+    def test_skip_test_rejects_manual_test_combination(self):
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", ["next_step", "--manual-test", "--skip-test"]), \
+             mock.patch("sys.stderr", stderr):
+            with self.assertRaises(SystemExit) as cm:
+                next_step.main()
+        self.assertEqual(2, cm.exception.code)
+        self.assertIn("--skip-test cannot be combined with --manual-test", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -39,6 +39,10 @@ general N-test case; N=1 behaves exactly as it always has.
     verification == "refactor"              -> REFACTOR_SETUP (existing tests
                                                are the safety net - see below)
   top frame status == "pending",
+    --skip-test                             -> SKIP_TEST_GATE (skip Tester AI
+                                               and hand directly to Implementor;
+                                               no red/green loop)
+  top frame status == "pending",
     --manual-test                           -> MANUAL_TEST_GATE (skip Tester AI;
                                                use --manual-test-ref refs, or
                                                existing_test refs if present;
@@ -186,6 +190,7 @@ without stopping, pausing only at a genuine human pause point.
 Usage:
     next_step [--model <model-id>] [--config <path>] [--continuous]
               [--manual-test [--manual-test-ref <file::qualified_test_name> ...]]
+              [--skip-test]
               [--log-level <level>]
 """
 
@@ -1180,6 +1185,33 @@ def do_manual_test_authoring(
     do_await_impl(frame, list(zip(test_files, test_names, scoped_results)))
 
 
+def do_skip_test_direct_implementation(
+    stack: list,
+    frame: "lib.CriterionFrame",
+    model: str,
+    commands: dict,
+    max_attempts: int,
+    accept_no_test: bool,
+    git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    import ticket_pipeline.implement_step as implement_step
+
+    _record_base_commit_if_needed(stack, frame, git_cfg)
+    changed_files = implement_step.run_implement_direct_with_refine(
+        frame, model, commands, max_attempts
+    )
+    render.print_line()
+    render.print_line(f"-- Implemented (skip-test): {frame.criterion}")
+    render.print_line(f"   Files changed ({len(changed_files)}): {', '.join(changed_files)}")
+    _handle_no_test_written(
+        stack,
+        frame,
+        model,
+        accept_no_test=accept_no_test,
+        skip_ai=False,
+    )
+
+
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
     just_popped_ticket = frame.ticket
     just_popped_criterion = frame.criterion
@@ -1456,6 +1488,7 @@ def step(
     accept_no_test: bool = False,
     manual_test: bool = False,
     manual_test_refs: list[str] | None = None,
+    skip_test: bool = False,
     max_attempts: int = 3,
     git_cfg: "lib.GitConfig | None" = None,
 ) -> None:
@@ -1490,6 +1523,26 @@ def step(
                 ticket=frame.ticket,
             )
         do_manual_test_authoring(stack, frame, commands, manual_test_refs, git_cfg)
+        return
+
+    if skip_test:
+        if frame.status != "pending":
+            lib.die_with_log(
+                "skip-test",
+                "Skip-test mode only applies when the top frame is pending.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        if frame.verification != "test":
+            lib.die_with_log(
+                "skip-test",
+                f"Skip-test mode is only valid for verification='test' (got {frame.verification!r}).",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        do_skip_test_direct_implementation(
+            stack, frame, model, commands, max_attempts, accept_no_test, git_cfg
+        )
         return
 
     if frame.status == lib.VALIDATING_STATUS:
@@ -1689,6 +1742,12 @@ def main() -> None:
              "<file>::<qualified_test_name>.",
     )
     parser.add_argument(
+        "--skip-test",
+        action="store_true",
+        help="Skip WRITE_TEST for the top pending verify:test criterion and hand "
+             "it directly to the Implementor with build-only gating.",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -1700,6 +1759,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.manual_test_ref and not args.manual_test:
         parser.error("--manual-test-ref requires --manual-test")
+    if args.manual_test and args.skip_test:
+        parser.error("--skip-test cannot be combined with --manual-test")
     verbosity.setup_logging(args.log_level)
 
     config_path = Path(args.config)
@@ -1716,6 +1777,7 @@ def main() -> None:
             accept_no_test=args.accept_no_test,
             manual_test=args.manual_test,
             manual_test_refs=args.manual_test_ref,
+            skip_test=args.skip_test,
             max_attempts=args.max_attempts,
             git_cfg=git_cfg,
         )
