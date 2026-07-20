@@ -19,8 +19,8 @@ This is the opt-in side channel to the researcher persona. Your primary
 role is still research and analysis; ticket creation only happens when the
 user explicitly asks for it. Load this skill to get the workflow, the
 ticket format, and the splitting rules in one place so the tickets you
-produce are good enough that `scaffold explore-ticket` would be a no-op on
-them.
+produce are ready for `scaffold push-ticket` without any further
+preparation.
 
 ## When to use this skill
 
@@ -97,9 +97,10 @@ implementer (human or the scaffold plan step) has the background it needs:
 - [terms defined, scope boundaries clarified]
 ```
 
-This mirrors the "Context From Exploration & Discussion" section in
-`explore-ticket.prompt.md`. The pipeline doesn't parse it, but it is what
-makes the ticket complete enough that `scaffold explore-ticket` is a no-op.
+This mirrors the `### Context` section format used by the `to_tickets`
+skill. The pipeline doesn't parse it, but it is what makes the ticket
+complete enough that `scaffold push-ticket` can run plan+narrow without
+needing to ask for clarification.
 
 ## Splitting decision
 

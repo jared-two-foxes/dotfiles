@@ -2761,7 +2761,7 @@ _EXPLORE_GAP_RE = re.compile(
     re.DOTALL | re.MULTILINE,
 )
 
-# Same dedup-key convention used by explore_ticket.py - the ticket was
+# Same dedup-key convention used by the explore step in push_ticket - the ticket was
 # embedded in the prompt already; a read_file call for it returns the
 # short "you already have this" note instead of re-sending the content.
 _EXPLORE_TICKET_DEDUP_KEY = ".ticket.md"

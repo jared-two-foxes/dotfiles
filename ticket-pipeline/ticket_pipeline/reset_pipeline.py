@@ -27,9 +27,9 @@ What gets removed (default):
                                 next_step.py regenerate fresh on every
                                 run; never read back by a *later*,
                                 separate invocation.
-  - .ticket-review-*.md, .ticket-proposed-*.md, .ticket-explored-*.md
-                              - prep-ticket/review-ticket/propose-
-                                ticket-edit/explore-ticket's per-ticket
+  - .ticket-review-*.md, .ticket-proposed-*.md
+                              - review-ticket/propose-
+                                ticket-edit's per-ticket
                                 working files (their *default* output
                                 paths only - a custom --ticket-file-out
                                 elsewhere isn't matched by this glob and

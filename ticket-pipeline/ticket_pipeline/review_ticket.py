@@ -161,16 +161,15 @@ def apply_mechanical_grounding(ticket_id: str, ticket_content: str, report: str)
     miss exactly this failure: SA-454's raw ticket text claimed invoices
     should map to an `Outstanding` status that was never a real
     InvoiceStatus variant, and review-ticket's AI step returned "clear"
-    anyway, despite having codebase read access. prep-ticket's loop
-    treats "clear" as done - a soft AI judgment call is not a reliable
-    backstop for a fact a grep resolves in milliseconds, so this doesn't
-    ask the model to try harder, it checks independently in Python and
-    overrules the verdict if the two disagree.
+    anyway, despite having codebase read access. A soft AI judgment call
+    is not a reliable backstop for a fact a grep resolves in milliseconds,
+    so this doesn't ask the model to try harder, it checks independently
+    in Python and overrules the verdict if the two disagree.
 
     Appends a "### Mechanical Grounding" section (distinct from the AI's
     own "### Concerns", which this never edits) and rewrites the
-    "### Verdict" line in place - prep_ticket.py's loop only reads that
-    line via VERDICT_RE, so a note alone wouldn't keep the loop going.
+    "### Verdict" line in place so any caller reading only that line
+    sees the corrected verdict.
     Each failure is also recorded to lib.DECLINED_CRITERIA_FILE (origin
     "review-ticket") for visibility alongside every other grounding
     checkpoint, even though the ledger's is_declined skip won't

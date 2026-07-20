@@ -501,7 +501,7 @@ READ_WRITE_TOOLS = [
 ]
 
 # For genuinely interactive sessions (a human present at the terminal for
-# the whole run, e.g. explore-ticket.py) - swaps the abort-on-ask
+# the whole run) - swaps the abort-on-ask
 # ASK_USER_PROMPT_SCHEMA for ASK_USER_QUESTION_SCHEMA, which make_executor
 # answers for real when interactive=True instead of raising
 # ClarificationNeeded. No write_file - this is exploration + discussion,
@@ -547,7 +547,7 @@ def make_executor(
         block on real terminal input (via input()), returning the human's
         answer as the tool result so the model's conversation continues -
         for a script where a human is genuinely present the whole run
-        (e.g. explore-ticket.py). If False (default), ask_user_question is
+        (e.g. push_ticket --explore). If False (default), ask_user_question is
         rejected the same way write_file is when allow_write=False - this
         executor is meant to answer for real or not offer the tool at all,
         never to silently no-op a live question.

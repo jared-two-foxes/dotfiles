@@ -26,11 +26,7 @@ class _Command:
 
 
 _GROUPS: list[tuple[str, dict[str, _Command]]] = [
-    ("Ticket prep", {
-        "prep-ticket": _Command(
-            "prep_ticket",
-            "Loop review-ticket/propose-ticket-edit until the ticket's wording is clear",
-        ),
+    ("Ticket review (manual)", {
         "review-ticket": _Command(
             "review_ticket",
             "Check a ticket's claims against the actual codebase (read-only report)",
@@ -38,12 +34,6 @@ _GROUPS: list[tuple[str, dict[str, _Command]]] = [
         "propose-ticket-edit": _Command(
             "propose_ticket_edit",
             "Rewrite a ticket to resolve review-ticket's flagged concerns",
-        ),
-    }),
-    ("Explore", {
-        "explore-ticket": _Command(
-            "explore_ticket",
-            "Interactive session to fill out a ticket's acceptance criteria/context",
         ),
     }),
     ("Seed & run the criteria loop", {

@@ -60,7 +60,27 @@ the ticket explicitly says to create. The pipeline's grounding check will
 decline criteria that mention phantom symbols, and the failure is silent:
 the pipeline simply rejects the frame.
 
-### 3. Synthesize tickets
+### 3. Ask targeted questions
+
+After reading the codebase, ask the user one question at a time about
+things the code alone cannot answer:
+
+- Which of several valid, codebase-consistent approaches is intended
+  (when the codebase offers more than one and the ticket doesn't specify)?
+- Constraint priorities when satisfying one work item could tension
+  with another existing pattern or architectural rule.
+- Integration points the context mentions but the codebase doesn't yet
+  reveal — a dependency that isn't in the repo yet.
+- Scope boundaries that would change which files get touched.
+
+Do **not** ask questions whose answers would only change the wording of
+a criterion — focus only on things that change which code gets written or
+how. Ask one question at a time and read the answer before asking the
+next. Stop once you have enough to write complete, grounded criteria
+without guessing. If the user's context already answers everything, skip
+this step entirely.
+
+### 4. Synthesize tickets
 
 Break the extracted work into one or more tickets. Apply the **splitting
 decision** (below) to decide how many tickets to produce.
@@ -74,15 +94,39 @@ For each ticket:
 - Write an `## Acceptance Criteria` section with `- [ ] ...` checkbox
   bullets (3–7 items, independently testable).
 - Append a `### Context` section with relevant file paths, patterns
-  discovered, edge-case decisions, and terms defined.
+  discovered, edge-case decisions, answers from Step 3, and terms defined.
 
-### 4. Write the ticket files
+### 5. Self-review each ticket
+
+Before writing any file, verify each drafted ticket against the codebase:
+
+- **Already satisfied?** For each criterion, check whether existing code
+  already fully implements the described behaviour. If yes, remove that
+  criterion — the pipeline's narrow-plan step will discard it anyway, and
+  proceeding with a stale criterion wastes a full pipeline run.
+- **Factually accurate?** Confirm that every named file, function, struct,
+  or symbol in a criterion actually exists as described (or is explicitly
+  being created). Correct any stale or wrong references.
+- **Independently testable?** Flag any criterion that depends on an
+  undefined term or that could only be verified by inspecting a criterion
+  in a different ticket. Rewrite it to describe an observable, standalone
+  outcome.
+- **Outcome, not mechanism?** If a criterion narrates the fix rather than
+  specifying the requirement (e.g. "redact it in the Debug impl" instead
+  of "never log it in plaintext"), rewrite it as the observable outcome
+  unless the mechanism is itself the hard requirement.
+
+Revise any criteria that fail the above checks. If every criterion for a
+ticket turns out to be already satisfied, drop the ticket entirely and
+tell the user — there is no work left to capture.
+
+### 6. Write the ticket files
 
 Call `write_ticket_file` once per ticket:
 - `filename`: `.ticket-{id}.md` (e.g. `.ticket-adhoc-cache-invalidation.md`)
 - `content`: the full ticket markdown
 
-### 5. Report the next steps
+### 7. Report the next steps
 
 After writing, tell the user exactly what to run for each ticket:
 
@@ -148,16 +192,18 @@ unreliable. If in doubt, keep the work in one ticket.
 
 ## Quality bar
 
-Before writing files, self-check each ticket:
+Before writing files (self-check via Step 5 above):
 
 - Each criterion is **independently testable** — observable outcome, not
   an implementation step.
 - Every **named file/symbol exists** in the codebase (or the ticket says
   to create it).
-- No work is **already done** — check the codebase; don't propose
-  criteria the pipeline will immediately narrow away.
+- No work is **already done** — verify against the codebase; criteria
+  the pipeline would immediately narrow away should be removed here.
 - The ticket is complete enough that `scaffold push-ticket` can run
   plan+narrow without needing to ask the user for clarification.
+- The `### Context` section captures all implementation decisions made
+  during Steps 2–3 so the pipeline's plan step can execute without gaps.
 - 3–7 criteria, splitting verdict applied.
 
 ## Key scaffold flags
