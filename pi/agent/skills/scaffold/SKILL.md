@@ -59,7 +59,7 @@ separate command needed.
 | `review-ticket <id>` | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the ticket. |
 | `propose-ticket-edit <id>` | Rewrite a ticket to resolve review-ticket's flagged concerns. Output to `.ticket-proposed-<id>.md` by default. Never touches Linear. |
 
-These commands are available for manual use on Linear tickets or when a ticket needs post-hoc correction. Ticket quality (review, context exploration, criteria verification) is handled upstream by the `to_tickets` or `planner` skills before any ticket reaches `push-ticket`.
+These commands are available for manual use on Linear tickets or when a ticket needs post-hoc correction. Ticket quality (review, context exploration, criteria verification) is handled upstream by the `to-tickets` or `planner` skills before any ticket reaches `push-ticket`.
 
 ### Seed & Run the Criteria Loop
 

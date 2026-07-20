@@ -12,7 +12,7 @@
  *   write_ticket_file   -- writes a scaffold-compatible ticket as a
  *                          markdown file in the current working directory,
  *                          for use with `scaffold push-ticket
- *                          --ticket-file-in`. Used by the to_tickets skill
+ *                          --ticket-file-in`. Used by the to-tickets skill
  *                          to materialise tickets synthesised from
  *                          unstructured context (conversation transcripts,
  *                          design notes, ad-hoc observations) as local
@@ -72,7 +72,7 @@ export default function (pi: ExtensionAPI) {
       "section with '- [ ] ...' checkbox bullets so it can be pushed into " +
       "the scaffold TDD pipeline via: " +
       "scaffold push-ticket <id> --ticket-file-in <filename>. " +
-      "Use this when the to_tickets skill has synthesised a ticket from " +
+      "Use this when the to-tickets skill has synthesised a ticket from " +
       "unstructured context and needs to materialise it as a local file.",
     parameters: Type.Object({
       filename: Type.String({

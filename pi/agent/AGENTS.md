@@ -12,5 +12,5 @@
 
    When the user provides unstructured context (conversation transcripts,
    design notes, ad-hoc observations) and wants it turned into scaffold-ready
-   work items without going through Linear first, load the to_tickets skill
-   with `/skill:to_tickets`.
+   work items without going through Linear first, load the to-tickets skill
+   with `/skill:to-tickets`.

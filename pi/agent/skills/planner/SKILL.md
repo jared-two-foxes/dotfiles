@@ -97,7 +97,7 @@ implementer (human or the scaffold plan step) has the background it needs:
 - [terms defined, scope boundaries clarified]
 ```
 
-This mirrors the `### Context` section format used by the `to_tickets`
+This mirrors the `### Context` section format used by the `to-tickets`
 skill. The pipeline doesn't parse it, but it is what makes the ticket
 complete enough that `scaffold push-ticket` can run plan+narrow without
 needing to ask for clarification.

@@ -1,5 +1,5 @@
 ---
-name: to_tickets
+name: to-tickets
 description: >
   Convert unstructured context — conversation transcripts, design notes,
   Slack dumps, ad-hoc observations — into properly formatted
@@ -12,7 +12,7 @@ description: >
   skill targets the scaffold pipeline directly.
 ---
 
-# to_tickets — Context to Scaffold Ticket Files
+# to-tickets — Context to Scaffold Ticket Files
 
 This skill converts unstructured context into properly formatted ticket
 `.md` files written to disk, ready for `scaffold push-ticket
@@ -33,7 +33,7 @@ Do **not** use it when:
 
 ## Difference from the planner skill
 
-| | planner | to_tickets |
+| | planner | to-tickets |
 |---|---|---|
 | Input | A research question to investigate | Existing unstructured context |
 | Output | Tickets created in Linear | Local `.md` files for scaffold |
