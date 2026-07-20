@@ -226,6 +226,9 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
         _print_guidance([
             "Run: scaffold next-step",
             "(Writes a failing test for this criterion, then pauses for implementation.)",
+            "Or write the test by hand, then run:",
+            "  scaffold next-step --manual-test --manual-test-ref <file>::<qualified_test_name>",
+            "  (replace placeholders with the real test reference)",
         ])
         return
 

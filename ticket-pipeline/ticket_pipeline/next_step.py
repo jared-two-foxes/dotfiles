@@ -39,6 +39,11 @@ general N-test case; N=1 behaves exactly as it always has.
     verification == "refactor"              -> REFACTOR_SETUP (existing tests
                                                are the safety net - see below)
   top frame status == "pending",
+    --manual-test                           -> MANUAL_TEST_GATE (skip Tester AI;
+                                               use --manual-test-ref refs, or
+                                               existing_test refs if present;
+                                               run compile + scoped tests)
+  top frame status == "pending",
     verification == "test-refactor",
     check_test_refactor_satisfied            -> mark done, re-detect (POP)
                                              (mechanical pre-check: the
@@ -180,6 +185,7 @@ without stopping, pausing only at a genuine human pause point.
 
 Usage:
     next_step [--model <model-id>] [--config <path>] [--continuous]
+              [--manual-test [--manual-test-ref <file::qualified_test_name> ...]]
               [--log-level <level>]
 """
 
@@ -1092,6 +1098,88 @@ def _run_implementation_phase(
     sys.exit(0)
 
 
+def _parse_manual_test_refs(
+    frame: "lib.CriterionFrame", manual_test_refs: list[str] | None
+) -> tuple[list[str], list[str]]:
+    # Precedence: explicit CLI refs first, then existing_test: refs from
+    # the criterion as a fallback for manual mode.
+    refs = manual_test_refs or frame.existing_test_refs or []
+    if not refs:
+        lib.die_with_log(
+            "manual-test",
+            "Manual test mode needs at least one test reference. Pass "
+            "--manual-test-ref <file::qualified_test_name> (repeatable), or "
+            "use a criterion with existing_test: refs.",
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+        )
+    test_files: list[str] = []
+    test_names: list[str] = []
+    for ref in refs:
+        file_path, sep, test_name = ref.partition("::")
+        # Strip optional markdown-style quoting/backticks from refs users
+        # copied out of plans/comments.
+        file_path = file_path.strip(" `")
+        test_name = test_name.strip(" `")
+        if not sep or not file_path or not test_name:
+            lib.die_with_log(
+                "manual-test",
+                f"Invalid manual test reference {ref!r}. Expected "
+                "<file>::<qualified_test_name>.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        test_files.append(file_path)
+        test_names.append(test_name)
+    return test_files, test_names
+
+
+def do_manual_test_authoring(
+    stack: list,
+    frame: "lib.CriterionFrame",
+    commands: dict,
+    manual_test_refs: list[str] | None,
+    git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    _record_base_commit_if_needed(stack, frame, git_cfg)
+    test_files, test_names = _parse_manual_test_refs(frame, manual_test_refs)
+    frame.test_files = test_files
+    frame.test_names = test_names
+    compile_result = lib.run_command(commands["test_compile_cmd"], "manual test compile gate")
+    if compile_result.returncode != 0:
+        lib.die_with_log(
+            "manual-test",
+            f"Manual test compile gate failed (exit {compile_result.returncode}). "
+            "Fix the test(s) and re-run 'next_step --manual-test'.",
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+        )
+    scoped_results = lib.run_scoped_tests(test_names, commands, "manual test red check", quiet=True)
+    red_names = [n for n, r in zip(test_names, scoped_results) if r.returncode != 0]
+    green_names = [n for n, r in zip(test_names, scoped_results) if r.returncode == 0]
+    # Ticket-origin criteria can trust a green-at-write-time sibling
+    # effect; validate-missed/review origins stay unconfirmed until
+    # explicit acceptance (same trust split as do_write_test).
+    unconfirmed = [] if frame.origin == "ticket" else green_names
+
+    if not red_names and not unconfirmed:
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+    if not red_names and unconfirmed:
+        frame.status = GREEN_UNCONFIRMED_STATUS
+        frame.unconfirmed_tests = unconfirmed
+        lib.save_stack(stack)
+        do_await_green_unconfirmed(frame)
+        return
+
+    frame.status = "test-written"
+    frame.unconfirmed_tests = unconfirmed
+    lib.save_stack(stack)
+    do_await_impl(frame, list(zip(test_files, test_names, scoped_results)))
+
+
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
     just_popped_ticket = frame.ticket
     just_popped_criterion = frame.criterion
@@ -1366,6 +1454,8 @@ def step(
     step_models: dict[str, str] | None = None,
     accept_green: bool = False, accept_manual: bool = False,
     accept_no_test: bool = False,
+    manual_test: bool = False,
+    manual_test_refs: list[str] | None = None,
     max_attempts: int = 3,
     git_cfg: "lib.GitConfig | None" = None,
 ) -> None:
@@ -1383,6 +1473,24 @@ def step(
 
     frame = stack[0]
     log.info("-- next_step: ticket=%s status=%s criterion=%s", frame.ticket, frame.status, frame.criterion)
+
+    if manual_test:
+        if frame.status != "pending":
+            lib.die_with_log(
+                "manual-test",
+                "Manual test mode only applies when the top frame is pending.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        if frame.verification in ("manual", "refactor"):
+            lib.die_with_log(
+                "manual-test",
+                f"Manual test mode is not valid for verification={frame.verification!r}.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        do_manual_test_authoring(stack, frame, commands, manual_test_refs, git_cfg)
+        return
 
     if frame.status == lib.VALIDATING_STATUS:
         # A prior TICKET_VALIDATE attempt for this ticket died partway
@@ -1566,6 +1674,21 @@ def main() -> None:
              "AI re-check already confirmed it (nothing to override).",
     )
     parser.add_argument(
+        "--manual-test",
+        action="store_true",
+        help="Use manually authored test(s) for the top pending test criterion "
+             "instead of invoking the Tester AI. Requires scoped test references "
+             "from --manual-test-ref or existing_test: tags.",
+    )
+    parser.add_argument(
+        "--manual-test-ref",
+        action="append",
+        default=[],
+        metavar="FILE::QUALIFIED_TEST",
+        help="Scoped test reference for --manual-test. Repeatable. Format: "
+             "<file>::<qualified_test_name>.",
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=list(verbosity.LEVELS),
@@ -1575,6 +1698,8 @@ def main() -> None:
              "progressively less.",
     )
     args = parser.parse_args()
+    if args.manual_test_ref and not args.manual_test:
+        parser.error("--manual-test-ref requires --manual-test")
     verbosity.setup_logging(args.log_level)
 
     config_path = Path(args.config)
@@ -1589,6 +1714,8 @@ def main() -> None:
             step_models=step_models,
             accept_green=args.accept_green, accept_manual=args.accept_manual,
             accept_no_test=args.accept_no_test,
+            manual_test=args.manual_test,
+            manual_test_refs=args.manual_test_ref,
             max_attempts=args.max_attempts,
             git_cfg=git_cfg,
         )

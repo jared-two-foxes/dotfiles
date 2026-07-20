@@ -140,6 +140,11 @@ point.
   vanished gap) - pauses: **[Human]** must inspect and either fix the
   test or explicitly confirm with `--accept-green`.
 
+Optional intentional manual-test path (for pending test criteria): write
+or edit the test by hand, then run `scaffold next-step --manual-test
+--manual-test-ref <file>::<qualified_test_name>` to run the same compile
+and scoped red/green gates without invoking the Tester AI.
+
 ### 3b. Manual criteria (no test at all)
 
 | Step | Nature | What happens |
@@ -230,7 +235,7 @@ so a crash partway through resumes validation on the next
 | `split-ticket` (ambiguous case only) | split-ticket | Judge whether/how to split an overly broad ticket |
 | `push-ticket` plan step | plan | Generate the full TDD plan from a ticket |
 | `push-ticket` narrow step | narrow-plan | Narrow to unsatisfied criteria; tag `verify:`/`existing_test:` |
-| `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one |
+| `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one (unless `--manual-test` is used) |
 | `next-step` WRITE_TEST (advisory) | review-test-quality | Judge whether the test just (written/modified) is meaningful - never blocks |
 | `next-step` implementation phase | implement-criterion | Make a named failing test pass |
 | `next-step` implementation phase (manual) | implement-criterion-direct | Directly implement a no-test (manual) criterion |

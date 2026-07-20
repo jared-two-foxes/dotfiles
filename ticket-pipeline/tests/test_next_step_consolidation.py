@@ -10,7 +10,7 @@ render_stub.render_markdown = lambda _text: None
 render_stub.print_line = lambda _text="": None
 sys.modules.setdefault("ticket_pipeline.lib.render", render_stub)
 
-from ticket_pipeline import cli, next_step
+from ticket_pipeline import cli, next_step, status
 from ticket_pipeline.lib import pipeline_lib as lib
 
 
@@ -161,6 +161,156 @@ class CliHelpTests(unittest.TestCase):
         self.assertIn("next-step", help_text)
         self.assertNotIn("implement-step", help_text)
         self.assertNotIn("\n  drive", help_text)
+
+    def test_next_step_help_includes_manual_test_flags(self):
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["scaffold", "next-step", "--help"]), \
+             mock.patch("sys.stdout", stdout):
+            with self.assertRaises(SystemExit) as cm:
+                cli.main()
+        self.assertEqual(0, cm.exception.code)
+        help_text = stdout.getvalue()
+        self.assertIn("--manual-test", help_text)
+        self.assertIn("--manual-test-ref", help_text)
+
+
+class ManualTestModeTests(unittest.TestCase):
+    def _frame(self, *, origin="ticket"):
+        return lib.CriterionFrame(
+            ticket="SA-1",
+            criterion="- [ ] do the thing",
+            plan_context="ctx",
+            test_files=None,
+            test_names=None,
+            status="pending",
+            origin=origin,
+            verification="test",
+        )
+
+    def test_pending_manual_test_sets_test_written_and_skips_tester_ai(self):
+        frame = self._frame()
+        red = subprocess.CompletedProcess(args=["test"], returncode=1, stdout="", stderr="")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
+             mock.patch.object(lib, "run_scoped_tests", return_value=[red]), \
+             mock.patch.object(lib, "save_stack") as save_stack, \
+             mock.patch.object(next_step, "do_await_impl") as await_impl, \
+             mock.patch.object(next_step, "do_write_test") as do_write_test:
+            next_step.step(
+                "model",
+                {"build_cmd": "true", "test_compile_cmd": "true"},
+                False,
+                lib.PIPELINE_CONFIG_FILE,
+                manual_test=True,
+                manual_test_refs=["tests/test_example.py::tests::example"],
+            )
+        self.assertEqual("test-written", frame.status)
+        self.assertEqual(["tests/test_example.py"], frame.test_files)
+        self.assertEqual(["tests::example"], frame.test_names)
+        save_stack.assert_called()
+        await_impl.assert_called_once()
+        do_write_test.assert_not_called()
+
+    def test_manual_test_rejects_bad_ref_format(self):
+        frame = self._frame()
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "die_with_log", side_effect=RuntimeError("bad ref")) as die_with_log:
+            with self.assertRaisesRegex(RuntimeError, "bad ref"):
+                next_step.step(
+                    "model",
+                    {"build_cmd": "true", "test_compile_cmd": "true"},
+                    False,
+                    lib.PIPELINE_CONFIG_FILE,
+                    manual_test=True,
+                    manual_test_refs=["bad-ref"],
+                )
+        die_with_log.assert_called_once()
+        self.assertIn("Invalid manual test reference", die_with_log.call_args.args[1])
+
+    def test_manual_test_compile_failure_dies(self):
+        frame = self._frame()
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=1, stdout="", stderr="")), \
+             mock.patch.object(lib, "die_with_log", side_effect=RuntimeError("compile fail")) as die_with_log:
+            with self.assertRaisesRegex(RuntimeError, "compile fail"):
+                next_step.step(
+                    "model",
+                    {"build_cmd": "true", "test_compile_cmd": "false"},
+                    False,
+                    lib.PIPELINE_CONFIG_FILE,
+                    manual_test=True,
+                    manual_test_refs=["tests/test_example.py::tests::example"],
+                )
+        self.assertIn("Manual test compile gate failed", die_with_log.call_args.args[1])
+
+    def test_manual_test_green_non_ticket_origin_pauses_unconfirmed(self):
+        frame = self._frame(origin="review")
+        green = subprocess.CompletedProcess(args=["test"], returncode=0, stdout="", stderr="")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
+             mock.patch.object(lib, "run_scoped_tests", return_value=[green]), \
+             mock.patch.object(lib, "save_stack"), \
+             mock.patch.object(next_step, "do_await_green_unconfirmed") as await_unconfirmed:
+            next_step.step(
+                "model",
+                {"build_cmd": "true", "test_compile_cmd": "true"},
+                False,
+                lib.PIPELINE_CONFIG_FILE,
+                manual_test=True,
+                manual_test_refs=["tests/test_example.py::tests::example"],
+            )
+        self.assertEqual(next_step.GREEN_UNCONFIRMED_STATUS, frame.status)
+        self.assertEqual(["tests::example"], frame.unconfirmed_tests)
+        await_unconfirmed.assert_called_once()
+
+    def test_manual_test_accepts_nested_qualified_test_name(self):
+        frame = self._frame()
+        nested_name = "tests::submodule::ClassName::test_method"
+        red = subprocess.CompletedProcess(args=["test"], returncode=1, stdout="", stderr="")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
+             mock.patch.object(lib, "run_scoped_tests", return_value=[red]), \
+             mock.patch.object(lib, "save_stack"), \
+             mock.patch.object(next_step, "do_await_impl"):
+            next_step.step(
+                "model",
+                {"build_cmd": "true", "test_compile_cmd": "true"},
+                False,
+                lib.PIPELINE_CONFIG_FILE,
+                manual_test=True,
+                manual_test_refs=[f"tests/test_example.py::{nested_name}"],
+            )
+        self.assertEqual([nested_name], frame.test_names)
+
+
+class StatusGuidanceTests(unittest.TestCase):
+    def test_pending_guidance_mentions_manual_test_path(self):
+        frame = lib.CriterionFrame(
+            ticket="SA-1",
+            criterion="- [ ] do the thing",
+            plan_context="ctx",
+            test_files=None,
+            test_names=None,
+            status="pending",
+            origin="ticket",
+            verification="test",
+        )
+        printed: list[str] = []
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch("ticket_pipeline.status.render.print_line", side_effect=lambda text="": printed.append(text)):
+            status.show_status()
+        self.assertTrue(any("--manual-test --manual-test-ref" in line for line in printed))
+
+
+class NextStepArgValidationTests(unittest.TestCase):
+    def test_manual_test_ref_requires_manual_test_flag(self):
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", ["next_step", "--manual-test-ref", "tests/test_example.py::tests::example"]), \
+             mock.patch("sys.stderr", stderr):
+            with self.assertRaises(SystemExit) as cm:
+                next_step.main()
+        self.assertEqual(2, cm.exception.code)
+        self.assertIn("--manual-test-ref requires --manual-test", stderr.getvalue())
 
 
 if __name__ == "__main__":
