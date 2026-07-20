@@ -61,6 +61,19 @@ function Copy-DotfileDir {
     Write-Ok "$Dest (directory)"
 }
 
+function Remove-DeprecatedPath {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+    if (Test-Path $Path) {
+        Remove-Item -LiteralPath $Path -Force -Recurse
+        Write-Ok "Removed deprecated $Label at $Path"
+    } else {
+        Write-Skip "Deprecated $Label not present at $Path"
+    }
+}
+
 function Copy-MachineProfile {
     param(
         [string]$File,  # Filename within local/machines/$Machine/
@@ -89,16 +102,6 @@ function Copy-MachineProfile {
 
     Copy-Item -LiteralPath $machineFile -Destination $Dest -Force
     Write-Ok "$Dest (from machines\$Machine\$File)"
-}
-
-function Copy-Template {
-    param([string]$Template, [string]$Dest)
-    if (Test-Path $Dest) {
-        Write-Skip "$Dest already exists — skipping template copy"
-        return
-    }
-    Copy-Item -LiteralPath $Template -Destination $Dest
-    Write-Ok "Created $Dest from template"
 }
 
 function Test-WingetPackageInstalled {
@@ -330,13 +333,17 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
-# --- Copilot custom agents ------------------------------------
+# --- Copilot cleanup -----------------------------------------
 Write-Host "
-[Copilot Agents]" -ForegroundColor White
+[Copilot Cleanup]" -ForegroundColor White
 
-Copy-DotfileDir `
-    -Source (Join-Path $RepoRoot 'agents') `
-    -Dest   (Join-Path $vsCodeUserDir 'agents')
+Remove-DeprecatedPath `
+    -Path  (Join-Path $vsCodeUserDir 'agents') `
+    -Label 'VS Code agents directory'
+
+Remove-DeprecatedPath `
+    -Path  (Join-Path $env:USERPROFILE '.dotfiles\templates') `
+    -Label 'template directory'
 
 # --- Copilot prompts -----------------------------------------
 Write-Host "
@@ -345,14 +352,6 @@ Write-Host "
 Copy-DotfileDir `
     -Source (Join-Path $RepoRoot 'prompts') `
     -Dest   (Join-Path $vsCodeUserDir 'prompts')
-
-# --- Templates -----------------------------------------------
-Write-Host "
-[Templates]" -ForegroundColor White
-
-Copy-DotfileDir `
-    -Source (Join-Path $RepoRoot 'templates') `
-    -Dest   (Join-Path $env:USERPROFILE '.dotfiles\templates')
 
 # --- ticket-pipeline --------------------------------------------
 Write-Host "

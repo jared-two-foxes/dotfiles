@@ -23,6 +23,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 function Write-Step  { param($msg) Write-Host "  --> $msg" -ForegroundColor Cyan }
 function Write-Ok    { param($msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Skip  { param($msg) Write-Host " [SKIP] $msg" -ForegroundColor Yellow }
+function Write-Warn  { param($msg) Write-Host " [WARN] $msg" -ForegroundColor Yellow }
 function Write-Fail  { param($msg) Write-Host " [FAIL] $msg" -ForegroundColor Red }
 
 function New-Symlink {
@@ -49,13 +50,25 @@ function New-Symlink {
     Write-Ok "$Link -> $Target"
 }
 
+function Remove-DeprecatedPath {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+    if (Test-Path $Path) {
+        Remove-Item -LiteralPath $Path -Force -Recurse
+        Write-Ok "Removed deprecated $Label at $Path"
+    } else {
+        Write-Skip "Deprecated $Label not present at $Path"
+    }
+}
+
 function Copy-MachineProfile {
     param(
         [string]$File,  # Filename within local/machines/$Machine/
         [string]$Dest   # Destination path on system
     )
     $machineFile  = Join-Path $RepoRoot "local\machines\$Machine\$File"
-    $templateFile = Join-Path $RepoRoot "local\git\.gitconfig.local.template"  # generic fallback
 
     # Pick the most specific source available
     $source = if (Test-Path $machineFile) {
@@ -319,13 +332,17 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
-# --- Copilot custom agents ------------------------------------
+# --- Copilot cleanup -----------------------------------------
 Write-Host "
-[Copilot Agents]" -ForegroundColor White
+[Copilot Cleanup]" -ForegroundColor White
 
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'agents') `
-    -Link   (Join-Path $vsCodeUserDir 'agents')
+Remove-DeprecatedPath `
+    -Path  (Join-Path $vsCodeUserDir 'agents') `
+    -Label 'VS Code agents directory'
+
+Remove-DeprecatedPath `
+    -Path  (Join-Path $env:USERPROFILE '.dotfiles\templates') `
+    -Label 'template directory'
 
 # --- Copilot prompts -----------------------------------------
 Write-Host "
@@ -334,14 +351,6 @@ Write-Host "
 New-Symlink `
     -Target (Join-Path $RepoRoot 'prompts') `
     -Link   (Join-Path $vsCodeUserDir 'prompts')
-
-# --- Templates -----------------------------------------------
-Write-Host "
-[Templates]" -ForegroundColor White
-
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'templates') `
-    -Link   (Join-Path $env:USERPROFILE '.dotfiles\templates')
 
 # --- ticket-pipeline --------------------------------------------
 Write-Host "
