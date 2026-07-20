@@ -53,10 +53,13 @@ Also load ## Edge Cases from the provided context or .tdd-plan.md if present.
 Record which test files were created or modified and which acceptance
 criteria they cover. This is already part of your report output (below).
 
-Optionally, write .tdd-test-files.md at the workspace root (separate file,
-using the ## Test Files format from
-#file:${workspaceFolder}/templates/tdd-test-files-format.md) for
-human-readable audit. This file is not read by any prompt.
+Optionally, write .tdd-test-files.md at the workspace root (separate file)
+for human-readable audit using this format:
+
+## Test Files
+- `path/to/test_file`: [acceptance criteria covered]
+
+This file is not read by any prompt.
 
 ## Output
 
