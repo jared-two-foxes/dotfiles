@@ -28,3 +28,7 @@ __pycache__/
 
 # --- ticket-pipeline runtime state ---------------------------
 ticket-pipeline/.pipeline-log.jsonl
+
+pi/agent/auth.json
+
+docker/pi/.env

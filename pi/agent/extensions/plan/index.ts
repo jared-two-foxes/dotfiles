@@ -38,6 +38,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // and the first criterion, so we only require that the checkbox appears
 // somewhere after the heading, not immediately adjacent to it.
 const ACCEPTANCE_CRITERIA_PATTERN = /## Acceptance Criteria[\s\S]*?- \[ \] /;
+
+export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "write_plan",
     label: "Write Plan",
