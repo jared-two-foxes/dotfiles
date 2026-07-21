@@ -39,6 +39,15 @@ general N-test case; N=1 behaves exactly as it always has.
     verification == "refactor"              -> REFACTOR_SETUP (existing tests
                                                are the safety net - see below)
   top frame status == "pending",
+    --skip-test                             -> SKIP_TEST_GATE (skip Tester AI
+                                               and hand directly to Implementor;
+                                               no red/green loop)
+  top frame status == "pending",
+    --manual-test                           -> MANUAL_TEST_GATE (skip Tester AI;
+                                               use --manual-test-ref refs, or
+                                               existing_test refs if present;
+                                               run compile + scoped tests)
+  top frame status == "pending",
     verification == "test-refactor",
     check_test_refactor_satisfied            -> mark done, re-detect (POP)
                                              (mechanical pre-check: the
@@ -69,7 +78,10 @@ general N-test case; N=1 behaves exactly as it always has.
     missing test_files/test_names          -> WRITE_TEST (retry)
   top frame status == "test-written"       -> re-run every scoped test
                                                (recheck_test_frame):
-    any still red                          -> AWAIT_IMPL (always pauses)
+    any still red,
+      --skip-implementation passed         -> AWAIT_IMPL (pause for manual impl)
+    any still red,
+      no --skip-implementation             -> IMPLEMENT (AI implementation)
     all green, nothing unconfirmed         -> mark done, re-detect (POP)
     all green, something unconfirmed       -> becomes green-unconfirmed
                                                (see above)
@@ -180,6 +192,9 @@ without stopping, pausing only at a genuine human pause point.
 
 Usage:
     next_step [--model <model-id>] [--config <path>] [--continuous]
+              [--manual-test [--manual-test-ref <file::qualified_test_name> ...]]
+              [--skip-test]
+              [--skip-implementation]
               [--log-level <level>]
 """
 
@@ -253,9 +268,7 @@ def _record_base_commit_if_needed(
         log.warning("-- git_workflow: could not record base_commit (non-fatal): %s", e)
 
 
-def do_await_impl(
-    frame: "lib.CriterionFrame", test_results: list[tuple[str, str, subprocess.CompletedProcess]]
-) -> None:
+def do_await_impl(frame: "lib.CriterionFrame", test_results: list[tuple[str, str, subprocess.CompletedProcess]]) -> None:
     """
     test_results: one (file, name, CompletedProcess) tuple per test in
     the frame's group, same order as test_files/test_names - the caller
@@ -282,10 +295,9 @@ def do_await_impl(
             tag = " - unconfirmed, weak-test risk" if n in frame.unconfirmed_tests else ""
             render.print_line(f"     {f} :: {n}{tag}")
     render.print_line(f"   Criterion: {frame.criterion}")
-    render.print_line(
-        "   Run 'next_step' again to let the pipeline implement this automatically,"
-    )
-    render.print_line("   or implement it by hand and then re-run 'next_step'.")
+    render.print_line("   Manual implementation required (--skip-implementation is set).")
+    render.print_line("   Implement it by hand, then run 'next_step' to re-check.")
+    render.print_line("   (Or run 'next_step' without --skip-implementation for AI implementation.)")
     for f, n, r in red:
         output = ((r.stdout or "") + (r.stderr or "")).strip()
         if output:
@@ -579,7 +591,12 @@ def recheck_refactor_tests(
 
 def do_write_test(
     stack: list, frame: "lib.CriterionFrame", model: str, commands: dict,
-    accept_no_test: bool = False, git_cfg: "lib.GitConfig | None" = None,
+    accept_no_test: bool = False,
+    skip_implementation: bool = False,
+    continuous: bool = False,
+    max_attempts: int = 3,
+    accept_green: bool = False,
+    git_cfg: "lib.GitConfig | None" = None,
     feedback: str | None = None,
     previous_changed_files: list[str] | None = None,
 ) -> None:
@@ -589,9 +606,9 @@ def do_write_test(
     compile -> red/green -> test-quality review, sharing one bounded
     attempt budget. Almost always exactly one test; more than one only
     when the criterion needed genuinely separate tests (test-criterion.
-    prompt.md's Step 3). At least one test still red is always a pause
-    point (do_await_impl, never returns) - real work remains regardless
-    of how many siblings are already green.
+    prompt.md's Step 3). At least one test still red either pauses
+    (when --skip-implementation is set) or immediately enters the AI
+    implementation phase.
 
     The quality review is *gating* inside that loop: if it flags, the
     Tester gets the concern fed back and amends the test, up to the
@@ -711,7 +728,20 @@ def do_write_test(
     frame.status = "test-written"
     frame.unconfirmed_tests = unconfirmed
     lib.save_stack(stack)
-    do_await_impl(frame, test_results_zipped)
+    if skip_implementation:
+        do_await_impl(frame, test_results_zipped)
+        return
+    _run_implementation_phase(
+        stack,
+        frame,
+        model,
+        commands,
+        continuous,
+        max_attempts,
+        accept_green=accept_green,
+        accept_manual=False,
+        git_cfg=git_cfg,
+    )
 
 
 def _handle_no_test_written(
@@ -817,7 +847,15 @@ def _handle_no_test_written(
 
 
 def recheck_test_frame(
-    stack: list, frame: "lib.CriterionFrame", commands: dict, accept_green: bool
+    stack: list,
+    frame: "lib.CriterionFrame",
+    model: str,
+    commands: dict,
+    accept_green: bool,
+    continuous: bool,
+    max_attempts: int,
+    skip_implementation: bool,
+    git_cfg: "lib.GitConfig | None",
 ) -> None:
     """
     Re-verifies a frame already past its initial WRITE_TEST look (status
@@ -839,7 +877,20 @@ def recheck_test_frame(
     if red_names:
         frame.status = "test-written"
         lib.save_stack(stack)
-        do_await_impl(frame, test_results)
+        if skip_implementation:
+            do_await_impl(frame, test_results)
+            return
+        _run_implementation_phase(
+            stack,
+            frame,
+            model,
+            commands,
+            continuous,
+            max_attempts,
+            accept_green=False,
+            accept_manual=False,
+            git_cfg=git_cfg,
+        )
         return
 
     # Every test is green now.
@@ -871,6 +922,8 @@ def _run_feedback_retry(
     commands: dict,
     accept_no_test: bool,
     max_attempts: int,
+    skip_implementation: bool,
+    continuous: bool,
     git_cfg: "lib.GitConfig | None",
 ) -> None:
     """
@@ -936,10 +989,13 @@ def _run_feedback_retry(
             frame,
             model,
             commands,
-            accept_no_test,
-            git_cfg,
+            accept_no_test=accept_no_test,
             feedback=feedback,
             previous_changed_files=previous_changed_files,
+            skip_implementation=skip_implementation,
+            continuous=continuous,
+            max_attempts=max_attempts,
+            git_cfg=git_cfg,
         )
         return
 
@@ -974,7 +1030,17 @@ def _run_feedback_retry(
             feedback=feedback,
             previous_changed_files=previous_changed_files,
         )
-        recheck_test_frame(stack, frame, commands, accept_green=False)
+        recheck_test_frame(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_green=False,
+            continuous=continuous,
+            max_attempts=max_attempts,
+            skip_implementation=skip_implementation,
+            git_cfg=git_cfg,
+        )
         return
 
     lib.die_with_log(
@@ -1090,6 +1156,128 @@ def _run_implementation_phase(
     if continuous:
         return
     sys.exit(0)
+
+
+def _parse_manual_test_refs(
+    frame: "lib.CriterionFrame", manual_test_refs: list[str] | None
+) -> tuple[list[str], list[str]]:
+    # Precedence: explicit CLI refs first, then existing_test: refs from
+    # the criterion as a fallback for manual mode.
+    refs = manual_test_refs or frame.existing_test_refs or []
+    if not refs:
+        lib.die_with_log(
+            "manual-test",
+            "Manual test mode needs at least one test reference. Pass "
+            "--manual-test-ref <file::qualified_test_name> (repeatable), or "
+            "use a criterion with existing_test: refs.",
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+        )
+    test_files: list[str] = []
+    test_names: list[str] = []
+    for ref in refs:
+        file_path, sep, test_name = ref.partition("::")
+        # Strip optional markdown-style quoting/backticks from refs users
+        # copied out of plans/comments.
+        file_path = file_path.strip(" `")
+        test_name = test_name.strip(" `")
+        if not sep or not file_path or not test_name:
+            lib.die_with_log(
+                "manual-test",
+                f"Invalid manual test reference {ref!r}. Expected "
+                "<file>::<qualified_test_name>.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        test_files.append(file_path)
+        test_names.append(test_name)
+    return test_files, test_names
+
+
+def do_manual_test_authoring(
+    stack: list,
+    frame: "lib.CriterionFrame",
+    commands: dict,
+    manual_test_refs: list[str] | None,
+    model: str,
+    continuous: bool,
+    max_attempts: int,
+    skip_implementation: bool,
+    git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    _record_base_commit_if_needed(stack, frame, git_cfg)
+    test_files, test_names = _parse_manual_test_refs(frame, manual_test_refs)
+    frame.test_files = test_files
+    frame.test_names = test_names
+    compile_result = lib.run_command(commands["test_compile_cmd"], "manual test compile gate")
+    if compile_result.returncode != 0:
+        lib.die_with_log(
+            "manual-test",
+            f"Manual test compile gate failed (exit {compile_result.returncode}). "
+            "Fix the test(s) and re-run 'next_step --manual-test'.",
+            criterion=frame.criterion,
+            ticket=frame.ticket,
+        )
+    scoped_results = lib.run_scoped_tests(test_names, commands, "manual test red check", quiet=True)
+    red_names = [n for n, r in zip(test_names, scoped_results) if r.returncode != 0]
+    green_names = [n for n, r in zip(test_names, scoped_results) if r.returncode == 0]
+    # Ticket-origin criteria can trust a green-at-write-time sibling
+    # effect; validate-missed/review origins stay unconfirmed until
+    # explicit acceptance (same trust split as do_write_test).
+    unconfirmed = [] if frame.origin == "ticket" else green_names
+
+    if not red_names and not unconfirmed:
+        frame.status = "done"
+        frame.unconfirmed_tests = []
+        lib.save_stack(stack)
+        return
+    if not red_names and unconfirmed:
+        frame.status = GREEN_UNCONFIRMED_STATUS
+        frame.unconfirmed_tests = unconfirmed
+        lib.save_stack(stack)
+        do_await_green_unconfirmed(frame)
+        return
+
+    frame.status = "test-written"
+    frame.unconfirmed_tests = unconfirmed
+    lib.save_stack(stack)
+    test_results = list(zip(test_files, test_names, scoped_results))
+    if skip_implementation:
+        do_await_impl(frame, test_results)
+        return
+    _run_implementation_phase(
+        stack,
+        frame,
+        model,
+        commands,
+        continuous,
+        max_attempts,
+        accept_green=False,
+        accept_manual=False,
+        git_cfg=git_cfg,
+    )
+
+
+def do_skip_test_direct_implementation(
+    stack: list,
+    frame: "lib.CriterionFrame",
+    model: str,
+    commands: dict,
+    max_attempts: int,
+    accept_no_test: bool,
+    git_cfg: "lib.GitConfig | None" = None,
+) -> None:
+    import ticket_pipeline.implement_step as implement_step
+
+    _record_base_commit_if_needed(stack, frame, git_cfg)
+    implement_step.run_implement_direct_with_refine(frame, model, commands, max_attempts)
+    _handle_no_test_written(
+        stack,
+        frame,
+        model,
+        accept_no_test=accept_no_test,
+        skip_ai=False,
+    )
 
 
 def do_pop(frame: "lib.CriterionFrame", continuous: bool, model: str, step_models: dict[str, str], commands: dict, config_path: Path, git_cfg: "lib.GitConfig | None" = None) -> None:
@@ -1366,6 +1554,10 @@ def step(
     step_models: dict[str, str] | None = None,
     accept_green: bool = False, accept_manual: bool = False,
     accept_no_test: bool = False,
+    manual_test: bool = False,
+    manual_test_refs: list[str] | None = None,
+    skip_test: bool = False,
+    skip_implementation: bool = False,
     max_attempts: int = 3,
     git_cfg: "lib.GitConfig | None" = None,
 ) -> None:
@@ -1384,6 +1576,61 @@ def step(
     frame = stack[0]
     log.info("-- next_step: ticket=%s status=%s criterion=%s", frame.ticket, frame.status, frame.criterion)
 
+    if manual_test:
+        if frame.status != "pending":
+            lib.die_with_log(
+                "manual-test",
+                "Manual test mode only applies when the top frame is pending.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        if frame.verification in ("manual", "refactor"):
+            lib.die_with_log(
+                "manual-test",
+                f"Manual test mode is not valid for verification={frame.verification!r}.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        do_manual_test_authoring(
+            stack,
+            frame,
+            commands,
+            manual_test_refs,
+            model,
+            continuous,
+            max_attempts,
+            skip_implementation,
+            git_cfg,
+        )
+        return
+
+    if skip_test:
+        if frame.status != "pending":
+            lib.die_with_log(
+                "skip-test",
+                "Skip-test mode only applies when the top frame is pending.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        if frame.verification != "test":
+            lib.die_with_log(
+                "skip-test",
+                f"Skip-test mode is only valid for verification='test' (got {frame.verification!r}).",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        if skip_implementation:
+            lib.die_with_log(
+                "skip-implementation",
+                "--skip-implementation cannot be combined with --skip-test.",
+                criterion=frame.criterion,
+                ticket=frame.ticket,
+            )
+        do_skip_test_direct_implementation(
+            stack, frame, model, commands, max_attempts, accept_no_test, git_cfg
+        )
+        return
+
     if frame.status == lib.VALIDATING_STATUS:
         # A prior TICKET_VALIDATE attempt for this ticket died partway
         # through (lint/test-suite/smoke/unparseable review) and left
@@ -1395,7 +1642,15 @@ def step(
 
     if frame.status == FEEDBACK_READY_STATUS:
         _run_feedback_retry(
-            stack, frame, model, commands, accept_no_test, max_attempts, git_cfg
+            stack,
+            frame,
+            model,
+            commands,
+            accept_no_test,
+            max_attempts,
+            skip_implementation=skip_implementation,
+            continuous=continuous,
+            git_cfg=git_cfg,
         )
         return
 
@@ -1405,7 +1660,17 @@ def step(
         # have fixed the test(s) in the meantime, in which case this
         # becomes a normal AWAIT_IMPL case. Shared with the "test-written"
         # resume branch below - see recheck_test_frame.
-        recheck_test_frame(stack, frame, commands, accept_green)
+        recheck_test_frame(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_green,
+            continuous,
+            max_attempts,
+            skip_implementation,
+            git_cfg,
+        )
         return
 
     if frame.status == NOTHING_WRITTEN_STATUS:
@@ -1475,17 +1740,50 @@ def step(
             frame.unconfirmed_tests = []
             lib.save_stack(stack)
             return
-        do_write_test(stack, frame, model, commands, accept_no_test, git_cfg)
+        do_write_test(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_no_test=accept_no_test,
+            skip_implementation=skip_implementation,
+            continuous=continuous,
+            max_attempts=max_attempts,
+            accept_green=accept_green,
+            git_cfg=git_cfg,
+        )
         return
 
     if frame.status == "test-written":
         if not frame.test_files or not frame.test_names:
             log.warning("-- Frame is test-written but missing test_files/test_names - retrying WRITE_TEST.")
-            do_write_test(stack, frame, model, commands, accept_no_test, git_cfg)
+            do_write_test(
+                stack,
+                frame,
+                model,
+                commands,
+                accept_no_test=accept_no_test,
+                skip_implementation=skip_implementation,
+                continuous=continuous,
+                max_attempts=max_attempts,
+                accept_green=accept_green,
+                git_cfg=git_cfg,
+            )
             return
-        _run_implementation_phase(
-            stack, frame, model, commands, continuous, max_attempts,
-            accept_green, accept_manual, git_cfg
+        # Re-run the scoped tests first so green/unconfirmed cases still
+        # resolve exactly as before; _run_implementation_phase already
+        # did this pre-check too, so this keeps that behavior centralized
+        # while also honoring --skip-implementation in one place.
+        recheck_test_frame(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_green,
+            continuous,
+            max_attempts,
+            skip_implementation=skip_implementation,
+            git_cfg=git_cfg,
         )
         return
 
@@ -1565,6 +1863,34 @@ def main() -> None:
              "if the top frame isn't in that state, or if the mechanical check or "
              "AI re-check already confirmed it (nothing to override).",
     )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--manual-test",
+        action="store_true",
+        help="Use manually authored test(s) for the top pending test criterion "
+             "instead of invoking the Tester AI. Requires scoped test references "
+             "from --manual-test-ref or existing_test: tags.",
+    )
+    parser.add_argument(
+        "--manual-test-ref",
+        action="append",
+        default=[],
+        metavar="FILE::QUALIFIED_TEST",
+        help="Scoped test reference for --manual-test. Repeatable. Format: "
+             "<file>::<qualified_test_name>.",
+    )
+    mode_group.add_argument(
+        "--skip-test",
+        action="store_true",
+        help="Skip WRITE_TEST for the top pending verify:test criterion and hand "
+             "it directly to the Implementor with build-only gating.",
+    )
+    parser.add_argument(
+        "--skip-implementation",
+        action="store_true",
+        help="Require manual implementation for red tests (pause instead of "
+             "running the Implementor AI).",
+    )
     parser.add_argument(
         "--log-level",
         default="info",
@@ -1575,6 +1901,8 @@ def main() -> None:
              "progressively less.",
     )
     args = parser.parse_args()
+    if args.manual_test_ref and not args.manual_test:
+        parser.error("--manual-test-ref requires --manual-test")
     verbosity.setup_logging(args.log_level)
 
     config_path = Path(args.config)
@@ -1589,6 +1917,10 @@ def main() -> None:
             step_models=step_models,
             accept_green=args.accept_green, accept_manual=args.accept_manual,
             accept_no_test=args.accept_no_test,
+            manual_test=args.manual_test,
+            manual_test_refs=args.manual_test_ref,
+            skip_test=args.skip_test,
+            skip_implementation=args.skip_implementation,
             max_attempts=args.max_attempts,
             git_cfg=git_cfg,
         )

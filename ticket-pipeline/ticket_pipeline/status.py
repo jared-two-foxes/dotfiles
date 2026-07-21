@@ -225,7 +225,12 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
     if status == "pending":
         _print_guidance([
             "Run: scaffold next-step",
-            "(Writes a failing test for this criterion, then pauses for implementation.)",
+            "(Writes a failing test for this criterion, then AI-implements automatically when needed.)",
+            "Or skip test generation and hand directly to the Implementor:",
+            "  scaffold next-step --skip-test",
+            "Or write the test by hand, then run:",
+            "  scaffold next-step --manual-test --manual-test-ref <file>::<qualified_test_name>",
+            "  (replace placeholders with the real test reference)",
         ])
         return
 
@@ -239,7 +244,8 @@ def _dispatch_guidance(frame: "lib.CriterionFrame", ticket: str) -> None:
             return
         _print_guidance([
             "Run: scaffold next-step    (if still red, AI implements; if green, it advances)",
-            "Or implement by hand, then run: scaffold next-step",
+            "Or require manual implementation:",
+            "  scaffold next-step --skip-implementation",
         ])
         return
 

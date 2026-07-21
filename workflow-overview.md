@@ -129,8 +129,9 @@ point.
 | Red check | **[Mechanical]** | Runs just this one test. |
 
 **Outcome branches** (still within `WRITE_TEST`):
-- Red, as expected -> pause: **[Human]** can implement by hand, or re-run
-  `scaffold next-step` to let the pipeline implement automatically.
+- Red, as expected -> continue into implementation automatically
+  (**[AI]**, unless `--skip-implementation` is passed to require manual
+  implementation).
 - Green immediately, and this criterion came from the ticket's own
   original criteria -> trusted as a side-effect of a sibling
   criterion, mark done, continue (**[Mechanical]**).
@@ -139,6 +140,15 @@ point.
   finding) -> **not** trusted (much more likely a weak test than a
   vanished gap) - pauses: **[Human]** must inspect and either fix the
   test or explicitly confirm with `--accept-green`.
+
+Optional intentional manual-test path (for pending test criteria): write
+or edit the test by hand, then run `scaffold next-step --manual-test
+--manual-test-ref <file>::<qualified_test_name>` to run the same compile
+and scoped red/green gates without invoking the Tester AI.
+
+Optional non-TDD path (for pending test criteria): run
+`scaffold next-step --skip-test` to bypass test generation and hand the
+criterion directly to the Implementor (build-gated, no red/green loop).
 
 ### 3b. Manual criteria (no test at all)
 
@@ -230,7 +240,7 @@ so a crash partway through resumes validation on the next
 | `split-ticket` (ambiguous case only) | split-ticket | Judge whether/how to split an overly broad ticket |
 | `push-ticket` plan step | plan | Generate the full TDD plan from a ticket |
 | `push-ticket` narrow step | narrow-plan | Narrow to unsatisfied criteria; tag `verify:`/`existing_test:` |
-| `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one |
+| `next-step` WRITE_TEST | test-criterion | Write a new failing test, or modify a named existing one (unless `--manual-test` is used) |
 | `next-step` WRITE_TEST (advisory) | review-test-quality | Judge whether the test just (written/modified) is meaningful - never blocks |
 | `next-step` implementation phase | implement-criterion | Make a named failing test pass |
 | `next-step` implementation phase (manual) | implement-criterion-direct | Directly implement a no-test (manual) criterion |
@@ -249,7 +259,7 @@ read/write - is deterministic code with no model in the loop.
 | Pause | Trigger | Resolved by |
 |---|---|---|
 | `scaffold explore-ticket`'s questions | Always, by design | Answering at the terminal |
-| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `scaffold next-step` again |
+| `AWAIT_IMPL` | A test is red and `--skip-implementation` is used | Implementing by hand, then `scaffold next-step` |
 | `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `scaffold next-step --accept-green` |
 | `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `scaffold next-step --accept-manual` |
 | Stack clobber | Pushing a ticket while a different one is mid-flight | `--force` or `--prepend` |
