@@ -268,11 +268,7 @@ def _record_base_commit_if_needed(
         log.warning("-- git_workflow: could not record base_commit (non-fatal): %s", e)
 
 
-def do_await_impl(
-    frame: "lib.CriterionFrame",
-    test_results: list[tuple[str, str, subprocess.CompletedProcess]],
-    skip_implementation: bool = False,
-) -> None:
+def do_await_impl(frame: "lib.CriterionFrame", test_results: list[tuple[str, str, subprocess.CompletedProcess]]) -> None:
     """
     test_results: one (file, name, CompletedProcess) tuple per test in
     the frame's group, same order as test_files/test_names - the caller
@@ -299,15 +295,9 @@ def do_await_impl(
             tag = " - unconfirmed, weak-test risk" if n in frame.unconfirmed_tests else ""
             render.print_line(f"     {f} :: {n}{tag}")
     render.print_line(f"   Criterion: {frame.criterion}")
-    if skip_implementation:
-        render.print_line("   --skip-implementation is set: manual implementation required.")
-        render.print_line("   Implement it by hand, then run 'next_step' to re-check.")
-        render.print_line("   (Or run 'next_step' without --skip-implementation for AI implementation.)")
-    else:
-        render.print_line(
-            "   Run 'next_step' again to let the pipeline implement this automatically,"
-        )
-        render.print_line("   or implement it by hand and then re-run 'next_step'.")
+    render.print_line("   Manual implementation required (--skip-implementation is set).")
+    render.print_line("   Implement it by hand, then run 'next_step' to re-check.")
+    render.print_line("   (Or run 'next_step' without --skip-implementation for AI implementation.)")
     for f, n, r in red:
         output = ((r.stdout or "") + (r.stderr or "")).strip()
         if output:
@@ -601,13 +591,14 @@ def recheck_refactor_tests(
 
 def do_write_test(
     stack: list, frame: "lib.CriterionFrame", model: str, commands: dict,
-    accept_no_test: bool = False, git_cfg: "lib.GitConfig | None" = None,
-    feedback: str | None = None,
-    previous_changed_files: list[str] | None = None,
+    accept_no_test: bool = False,
     skip_implementation: bool = False,
     continuous: bool = False,
     max_attempts: int = 3,
     accept_green: bool = False,
+    git_cfg: "lib.GitConfig | None" = None,
+    feedback: str | None = None,
+    previous_changed_files: list[str] | None = None,
 ) -> None:
     """
     Writes (or retries writing) frame's test(s) through the unified
@@ -738,7 +729,7 @@ def do_write_test(
     frame.unconfirmed_tests = unconfirmed
     lib.save_stack(stack)
     if skip_implementation:
-        do_await_impl(frame, test_results_zipped, skip_implementation=True)
+        do_await_impl(frame, test_results_zipped)
         return
     _run_implementation_phase(
         stack,
@@ -747,9 +738,9 @@ def do_write_test(
         commands,
         continuous,
         max_attempts,
-        accept_green,
-        False,
-        git_cfg,
+        accept_green=accept_green,
+        accept_manual=False,
+        git_cfg=git_cfg,
     )
 
 
@@ -887,7 +878,7 @@ def recheck_test_frame(
         frame.status = "test-written"
         lib.save_stack(stack)
         if skip_implementation:
-            do_await_impl(frame, test_results, skip_implementation=True)
+            do_await_impl(frame, test_results)
             return
         _run_implementation_phase(
             stack,
@@ -998,13 +989,13 @@ def _run_feedback_retry(
             frame,
             model,
             commands,
-            accept_no_test,
-            git_cfg,
+            accept_no_test=accept_no_test,
             feedback=feedback,
             previous_changed_files=previous_changed_files,
             skip_implementation=skip_implementation,
             continuous=continuous,
             max_attempts=max_attempts,
+            git_cfg=git_cfg,
         )
         return
 
@@ -1252,7 +1243,7 @@ def do_manual_test_authoring(
     lib.save_stack(stack)
     test_results = list(zip(test_files, test_names, scoped_results))
     if skip_implementation:
-        do_await_impl(frame, test_results, skip_implementation=True)
+        do_await_impl(frame, test_results)
         return
     _run_implementation_phase(
         stack,
@@ -1631,7 +1622,7 @@ def step(
         if skip_implementation:
             lib.die_with_log(
                 "skip-implementation",
-                "Skip-implementation cannot be combined with --skip-test.",
+                "--skip-implementation cannot be combined with --skip-test.",
                 criterion=frame.criterion,
                 ticket=frame.ticket,
             )
@@ -1651,8 +1642,15 @@ def step(
 
     if frame.status == FEEDBACK_READY_STATUS:
         _run_feedback_retry(
-            stack, frame, model, commands, accept_no_test, max_attempts,
-            skip_implementation, continuous, git_cfg
+            stack,
+            frame,
+            model,
+            commands,
+            accept_no_test,
+            max_attempts,
+            skip_implementation=skip_implementation,
+            continuous=continuous,
+            git_cfg=git_cfg,
         )
         return
 
@@ -1747,12 +1745,12 @@ def step(
             frame,
             model,
             commands,
-            accept_no_test,
-            git_cfg,
+            accept_no_test=accept_no_test,
             skip_implementation=skip_implementation,
             continuous=continuous,
             max_attempts=max_attempts,
             accept_green=accept_green,
+            git_cfg=git_cfg,
         )
         return
 
@@ -1764,30 +1762,28 @@ def step(
                 frame,
                 model,
                 commands,
-                accept_no_test,
-                git_cfg,
+                accept_no_test=accept_no_test,
                 skip_implementation=skip_implementation,
                 continuous=continuous,
                 max_attempts=max_attempts,
                 accept_green=accept_green,
-            )
-            return
-        if skip_implementation:
-            recheck_test_frame(
-                stack,
-                frame,
-                model,
-                commands,
-                accept_green,
-                continuous,
-                max_attempts,
-                skip_implementation=True,
                 git_cfg=git_cfg,
             )
             return
-        _run_implementation_phase(
-            stack, frame, model, commands, continuous, max_attempts,
-            accept_green, accept_manual, git_cfg
+        # Re-run the scoped tests first so green/unconfirmed cases still
+        # resolve exactly as before; _run_implementation_phase already
+        # did this pre-check too, so this keeps that behavior centralized
+        # while also honoring --skip-implementation in one place.
+        recheck_test_frame(
+            stack,
+            frame,
+            model,
+            commands,
+            accept_green,
+            continuous,
+            max_attempts,
+            skip_implementation=skip_implementation,
+            git_cfg=git_cfg,
         )
         return
 

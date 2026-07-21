@@ -27,12 +27,12 @@ class NextStepDispatchTests(unittest.TestCase):
             verification=verification,
         )
 
-    def test_test_written_dispatches_to_implementation_phase(self):
+    def test_test_written_dispatches_to_recheck_phase(self):
         frame = self._frame()
         with mock.patch.object(lib, "load_stack", return_value=[frame]), \
-             mock.patch.object(next_step, "_run_implementation_phase") as run_impl:
+             mock.patch.object(next_step, "recheck_test_frame") as recheck:
             next_step.step("model", {"build_cmd": "true"}, False, lib.PIPELINE_CONFIG_FILE)
-        run_impl.assert_called_once()
+        recheck.assert_called_once()
 
     def test_awaiting_manual_dispatches_to_implementation_phase(self):
         frame = self._frame(verification="manual", status=next_step.MANUAL_PENDING_STATUS)
