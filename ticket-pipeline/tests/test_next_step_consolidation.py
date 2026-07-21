@@ -172,6 +172,7 @@ class CliHelpTests(unittest.TestCase):
         help_text = stdout.getvalue()
         self.assertIn("--manual-test", help_text)
         self.assertIn("--manual-test-ref", help_text)
+        self.assertIn("--skip-implementation", help_text)
 
 
 class ManualTestModeTests(unittest.TestCase):
@@ -187,14 +188,14 @@ class ManualTestModeTests(unittest.TestCase):
             verification="test",
         )
 
-    def test_pending_manual_test_sets_test_written_and_skips_tester_ai(self):
+    def test_pending_manual_test_sets_test_written_and_runs_implementor_by_default(self):
         frame = self._frame()
         red = subprocess.CompletedProcess(args=["test"], returncode=1, stdout="", stderr="")
         with mock.patch.object(lib, "load_stack", return_value=[frame]), \
              mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
              mock.patch.object(lib, "run_scoped_tests", return_value=[red]), \
              mock.patch.object(lib, "save_stack") as save_stack, \
-             mock.patch.object(next_step, "do_await_impl") as await_impl, \
+             mock.patch.object(next_step, "_run_implementation_phase") as run_impl, \
              mock.patch.object(next_step, "do_write_test") as do_write_test:
             next_step.step(
                 "model",
@@ -208,8 +209,29 @@ class ManualTestModeTests(unittest.TestCase):
         self.assertEqual(["tests/test_example.py"], frame.test_files)
         self.assertEqual(["tests::example"], frame.test_names)
         save_stack.assert_called()
-        await_impl.assert_called_once()
+        run_impl.assert_called_once()
         do_write_test.assert_not_called()
+
+    def test_pending_manual_test_with_skip_implementation_pauses_for_manual_impl(self):
+        frame = self._frame()
+        red = subprocess.CompletedProcess(args=["test"], returncode=1, stdout="", stderr="")
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
+             mock.patch.object(lib, "run_scoped_tests", return_value=[red]), \
+             mock.patch.object(lib, "save_stack"), \
+             mock.patch.object(next_step, "do_await_impl") as await_impl, \
+             mock.patch.object(next_step, "_run_implementation_phase") as run_impl:
+            next_step.step(
+                "model",
+                {"build_cmd": "true", "test_compile_cmd": "true"},
+                False,
+                lib.PIPELINE_CONFIG_FILE,
+                manual_test=True,
+                skip_implementation=True,
+                manual_test_refs=["tests/test_example.py::tests::example"],
+            )
+        await_impl.assert_called_once()
+        run_impl.assert_not_called()
 
     def test_manual_test_rejects_bad_ref_format(self):
         frame = self._frame()
@@ -271,7 +293,7 @@ class ManualTestModeTests(unittest.TestCase):
              mock.patch.object(lib, "run_command", return_value=subprocess.CompletedProcess(args=["compile"], returncode=0, stdout="", stderr="")), \
              mock.patch.object(lib, "run_scoped_tests", return_value=[red]), \
              mock.patch.object(lib, "save_stack"), \
-             mock.patch.object(next_step, "do_await_impl"):
+             mock.patch.object(next_step, "_run_implementation_phase"):
             next_step.step(
                 "model",
                 {"build_cmd": "true", "test_compile_cmd": "true"},
@@ -339,6 +361,21 @@ class SkipTestModeTests(unittest.TestCase):
                 )
         self.assertIn("only valid for verification='test'", die_with_log.call_args.args[1])
 
+    def test_skip_test_rejects_skip_implementation_combination(self):
+        frame = self._frame()
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch.object(lib, "die_with_log", side_effect=RuntimeError("bad combo")) as die_with_log:
+            with self.assertRaisesRegex(RuntimeError, "bad combo"):
+                next_step.step(
+                    "model",
+                    {"build_cmd": "true"},
+                    False,
+                    lib.PIPELINE_CONFIG_FILE,
+                    skip_test=True,
+                    skip_implementation=True,
+                )
+        self.assertIn("cannot be combined with --skip-test", die_with_log.call_args.args[1])
+
 
 class StatusGuidanceTests(unittest.TestCase):
     def test_pending_guidance_mentions_manual_test_path(self):
@@ -358,6 +395,23 @@ class StatusGuidanceTests(unittest.TestCase):
             status.show_status()
         self.assertTrue(any("--manual-test --manual-test-ref" in line for line in printed))
         self.assertTrue(any("--skip-test" in line for line in printed))
+
+    def test_test_written_guidance_mentions_skip_implementation(self):
+        frame = lib.CriterionFrame(
+            ticket="SA-1",
+            criterion="- [ ] do the thing",
+            plan_context="ctx",
+            test_files=["tests/test_example.py"],
+            test_names=["tests::example"],
+            status="test-written",
+            origin="ticket",
+            verification="test",
+        )
+        printed: list[str] = []
+        with mock.patch.object(lib, "load_stack", return_value=[frame]), \
+             mock.patch("ticket_pipeline.status.render.print_line", side_effect=lambda text="": printed.append(text)):
+            status.show_status()
+        self.assertTrue(any("--skip-implementation" in line for line in printed))
 
 
 class NextStepArgValidationTests(unittest.TestCase):

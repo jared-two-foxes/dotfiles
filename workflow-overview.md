@@ -129,8 +129,9 @@ point.
 | Red check | **[Mechanical]** | Runs just this one test. |
 
 **Outcome branches** (still within `WRITE_TEST`):
-- Red, as expected -> pause: **[Human]** can implement by hand, or re-run
-  `scaffold next-step` to let the pipeline implement automatically.
+- Red, as expected -> continue into implementation automatically
+  (**[AI]**, unless `--skip-implementation` is passed to require manual
+  implementation).
 - Green immediately, and this criterion came from the ticket's own
   original criteria -> trusted as a side-effect of a sibling
   criterion, mark done, continue (**[Mechanical]**).
@@ -258,7 +259,7 @@ read/write - is deterministic code with no model in the loop.
 | Pause | Trigger | Resolved by |
 |---|---|---|
 | `scaffold explore-ticket`'s questions | Always, by design | Answering at the terminal |
-| `AWAIT_IMPL` | A test is red | Implementing by hand, or running `scaffold next-step` again |
+| `AWAIT_IMPL` | A test is red and `--skip-implementation` is used | Implementing by hand, then `scaffold next-step` |
 | `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `scaffold next-step --accept-green` |
 | `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `scaffold next-step --accept-manual` |
 | Stack clobber | Pushing a ticket while a different one is mid-flight | `--force` or `--prepend` |

@@ -130,7 +130,10 @@ status == "pending",
 status == "test-written",
   missing test_files/test_names → WRITE_TEST (retry)
 status == "test-written"        → re-run scoped tests:
-                                    any red    → AWAIT_IMPL (always pauses)
+                                    any red,
+                                      --skip-implementation
+                                                → AWAIT_IMPL (manual impl pause)
+                                    any red    → IMPLEMENT (AI)
                                     all green,
                                       nothing unconfirmed    → done, POP
                                       something unconfirmed  → green-unconfirmed
@@ -181,6 +184,7 @@ to pop.
 | `--manual-test` | next-step | Use manually authored test(s) for the top pending test criterion instead of running the Tester AI. |
 | `--manual-test-ref <file::qualified_test_name>` | next-step | Scoped test reference for `--manual-test`; repeatable. |
 | `--skip-test` | next-step | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
+| `--skip-implementation` | next-step | Require manual implementation for red tests (pause in AWAIT_IMPL instead of running the Implementor AI). |
 | `--model <id>` | most commands | AI model to use (default: `opencode:gpt-5.4-mini`). |
 | `--config <path>` | next-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
 | `--max-attempts <n>` | next-step | Total implementation attempts, initial write + refines sharing one budget (default: 3). |
@@ -303,8 +307,8 @@ Key prompt files:
    (and `push-ticket` at seed time). The implementation phase never touches the
    stack directly; it only makes the top frame's test pass. This makes failure
    safe: if implementation exhausts its attempts, the frame is still
-   `test-written`, the test is still red, and `next-step` drops back into
-   AWAIT_IMPL.
+   `test-written`, the test is still red, and `next-step` either retries AI
+   implementation or pauses in AWAIT_IMPL when `--skip-implementation` is used.
 
 2. **Guard-first** — every precondition is re-checked from real state before
    any AI call spends money. `push-ticket` checks re-entrancy/clobber guards
