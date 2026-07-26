@@ -34,7 +34,7 @@ RUN set -eux; \
 
 FROM nginx:1.27-alpine AS runtime
 
-COPY /docker/landing-page/nginx.conf /etc/nginx/conf.d/default.conf
+COPY docker/landing-page/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/_site/ /usr/share/nginx/html/
 
 EXPOSE 80
