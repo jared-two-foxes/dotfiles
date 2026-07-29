@@ -1,24 +1,6 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-
-
-def _ensure_ticket_pipeline_importable() -> None:
-    for parent in Path(__file__).resolve().parents:
-        candidate = parent / "ticket-pipeline"
-        if not candidate.is_dir():
-            continue
-        if not (candidate / "pyproject.toml").is_file():
-            continue
-        candidate_str = str(candidate)
-        if candidate_str not in sys.path:
-            sys.path.insert(0, candidate_str)
-        return
-
-
-_ensure_ticket_pipeline_importable()
 
 from ticket_pipeline.lib import ai_client as shared_ai  # noqa: E402
 from ticket_pipeline.lib import tools as shared_tools  # noqa: E402

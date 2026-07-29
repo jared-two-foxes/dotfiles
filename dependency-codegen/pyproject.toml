@@ -3,7 +3,9 @@ name = "dependency-codegen"
 version = "0.1.0"
 description = "Dependency-driven code generation CLI using acceptance criteria."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "ticket-pipeline @ file:../ticket-pipeline",
+]
 
 [project.scripts]
 dep-scaffold = "dependency_codegen.cli:main"

@@ -55,7 +55,6 @@ def main() -> None:
         acceptance_criteria = _read_acceptance_criteria(args)
     except ValueError as exc:
         parser.error(str(exc))
-        return
 
     try:
         result = runner.generate_from_criteria(
