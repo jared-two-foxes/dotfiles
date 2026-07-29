@@ -8,8 +8,12 @@ from . import runner
 
 
 def _read_acceptance_criteria(args: argparse.Namespace) -> str:
-    provided = [bool(args.acceptance_criteria), bool(args.acceptance_criteria_file), bool(args.stdin)]
-    if sum(provided) > 1:
+    input_sources_provided = [
+        bool(args.acceptance_criteria),
+        bool(args.acceptance_criteria_file),
+        bool(args.stdin),
+    ]
+    if sum(input_sources_provided) > 1:
         raise ValueError("provide only one of --acceptance-criteria, --acceptance-criteria-file, or --stdin")
 
     if args.acceptance_criteria:

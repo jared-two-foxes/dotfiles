@@ -56,8 +56,10 @@ class GenerationFlowTests(unittest.TestCase):
             summary="done",
             written_paths=["a.py", "b.py"],
         )
-        with mock.patch.object(cli.runner, "generate_from_criteria", return_value=fake), \
-             mock.patch("sys.argv", ["dep-scaffold", "--acceptance-criteria", "ship feature"]):
+        with (
+            mock.patch.object(cli.runner, "generate_from_criteria", return_value=fake),
+            mock.patch("sys.argv", ["dep-scaffold", "--acceptance-criteria", "ship feature"]),
+        ):
             out = io.StringIO()
             with redirect_stdout(out):
                 cli.main()
