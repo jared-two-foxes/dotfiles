@@ -32,14 +32,19 @@ class GenerationFlowTests(unittest.TestCase):
     def test_generate_uses_shared_runtime(self):
         fake_plan = SimpleNamespace(text="plan")
         fake_impl = SimpleNamespace(text="implemented")
+        fake_executor = mock.Mock(return_value="ok")
         with mock.patch.object(runner.shared_ai, "run_prompt", return_value=fake_plan) as run_prompt, \
-             mock.patch.object(runner.shared_tools, "make_executor", return_value=lambda _name, _args: "") as make_executor, \
+             mock.patch.object(runner.shared_tools, "make_executor", return_value=fake_executor) as make_executor, \
              mock.patch.object(runner.shared_ai, "run_with_tools", return_value=fake_impl) as run_with_tools:
             result = runner.generate_from_criteria("acceptance", model="m", max_turns=7)
 
         run_prompt.assert_called_once()
-        make_executor.assert_called_once()
+        make_executor.assert_called_once_with(
+            written_paths=mock.ANY,
+            allow_write=True,
+        )
         run_with_tools.assert_called_once()
+        self.assertIs(run_with_tools.call_args.kwargs["executor"], fake_executor)
         self.assertEqual("plan", result.plan)
         self.assertEqual("implemented", result.summary)
 
