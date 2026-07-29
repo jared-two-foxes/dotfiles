@@ -1,0 +1,2 @@
+[console_scripts]
+dep-scaffold = dependency_codegen.cli:main

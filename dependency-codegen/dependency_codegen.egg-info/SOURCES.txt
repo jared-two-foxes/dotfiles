@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+dependency_codegen/__init__.py
+dependency_codegen/cli.py
+dependency_codegen/runner.py
+dependency_codegen.egg-info/PKG-INFO
+dependency_codegen.egg-info/SOURCES.txt
+dependency_codegen.egg-info/dependency_links.txt
+dependency_codegen.egg-info/entry_points.txt
+dependency_codegen.egg-info/requires.txt
+dependency_codegen.egg-info/top_level.txt
+tests/test_cli.py
