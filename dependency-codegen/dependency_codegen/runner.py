@@ -6,12 +6,16 @@ from pathlib import Path
 
 
 def _ensure_ticket_pipeline_importable() -> None:
-    repo_root = Path(__file__).resolve().parents[2]
-    candidate = repo_root / "ticket-pipeline"
-    if candidate.is_dir():
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "ticket-pipeline"
+        if not candidate.is_dir():
+            continue
+        if not (candidate / "pyproject.toml").is_file():
+            continue
         candidate_str = str(candidate)
         if candidate_str not in sys.path:
             sys.path.insert(0, candidate_str)
+        return
 
 
 _ensure_ticket_pipeline_importable()
