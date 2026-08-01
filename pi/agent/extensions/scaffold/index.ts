@@ -8,7 +8,13 @@
  */
 
 import { execFile } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Type } from "typebox";
@@ -48,24 +54,41 @@ function readLastLog(repoPath: string): unknown | null {
   }
 }
 
-function runScaffold(repoPath: string, args: string[], signal?: AbortSignal): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+function runScaffold(
+  repoPath: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
   return new Promise((resolve) => {
-    const child = execFile("scaffold", args, {
-      cwd: repoPath,
-      maxBuffer: 1024 * 1024 * 10,
-      signal,
-    }, (error, stdout, stderr) => {
-      const out = stdout?.toString() ?? "";
-      const err = stderr?.toString() ?? "";
-      if (error) {
-        resolve({ stdout: out, stderr: err, exitCode: typeof error.code === "number" ? error.code : null });
-        return;
-      }
-      resolve({ stdout: out, stderr: err, exitCode: 0 });
-    });
+    const child = execFile(
+      "scaffold",
+      args,
+      {
+        cwd: repoPath,
+        maxBuffer: 1024 * 1024 * 10,
+        signal,
+      },
+      (error, stdout, stderr) => {
+        const out = stdout?.toString() ?? "";
+        const err = stderr?.toString() ?? "";
+        if (error) {
+          resolve({
+            stdout: out,
+            stderr: err,
+            exitCode: typeof error.code === "number" ? error.code : null,
+          });
+          return;
+        }
+        resolve({ stdout: out, stderr: err, exitCode: 0 });
+      },
+    );
 
     child.on("error", () => {
-      resolve({ stdout: "", stderr: "Error: scaffold executable could not be launched.", exitCode: null });
+      resolve({
+        stdout: "",
+        stderr: "Error: scaffold executable could not be launched.",
+        exitCode: null,
+      });
     });
   });
 }
@@ -105,40 +128,53 @@ export default function (pi: ExtensionAPI) {
 
       if (!spec || !spec.trim()) {
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status: "failed",
-              stage: "pre",
-              exitCode: 2,
-              stack: null,
-              stackTopFrame: null,
-              lastLog: null,
-              declinedCriteria: null,
-              stdout: "",
-              stderr: "Error: spec must not be empty.",
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  status: "failed",
+                  stage: "pre",
+                  exitCode: 2,
+                  stack: null,
+                  stackTopFrame: null,
+                  lastLog: null,
+                  declinedCriteria: null,
+                  stdout: "",
+                  stderr: "Error: spec must not be empty.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
           isError: true,
         };
       }
 
       if (!ACCEPTANCE_CRITERIA_PATTERN.test(spec)) {
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status: "failed",
-              stage: "pre",
-              exitCode: 2,
-              stack: null,
-              stackTopFrame: null,
-              lastLog: null,
-              declinedCriteria: null,
-              stdout: "",
-              stderr: "Error: spec must include a '## Acceptance Criteria' section with at least one '- [ ]' checkbox bullet.",
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  status: "failed",
+                  stage: "pre",
+                  exitCode: 2,
+                  stack: null,
+                  stackTopFrame: null,
+                  lastLog: null,
+                  declinedCriteria: null,
+                  stdout: "",
+                  stderr:
+                    "Error: spec must include a '## Acceptance Criteria' section with at least one '- [ ]' checkbox bullet.",
+                },
+                null,
+                2,
+              ),
+            },
+          ],
           isError: true,
         };
       }
@@ -148,40 +184,52 @@ export default function (pi: ExtensionAPI) {
         repoStats = statSync(repo_path);
       } catch {
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status: "failed",
-              stage: "pre",
-              exitCode: 2,
-              stack: null,
-              stackTopFrame: null,
-              lastLog: null,
-              declinedCriteria: null,
-              stdout: "",
-              stderr: `Error: repo path does not exist: ${repo_path}`,
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  status: "failed",
+                  stage: "pre",
+                  exitCode: 2,
+                  stack: null,
+                  stackTopFrame: null,
+                  lastLog: null,
+                  declinedCriteria: null,
+                  stdout: "",
+                  stderr: `Error: repo path does not exist: ${repo_path}`,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
           isError: true,
         };
       }
 
       if (!repoStats.isDirectory()) {
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status: "failed",
-              stage: "pre",
-              exitCode: 2,
-              stack: null,
-              stackTopFrame: null,
-              lastLog: null,
-              declinedCriteria: null,
-              stdout: "",
-              stderr: `Error: repo path is not a directory: ${repo_path}`,
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  status: "failed",
+                  stage: "pre",
+                  exitCode: 2,
+                  stack: null,
+                  stackTopFrame: null,
+                  lastLog: null,
+                  declinedCriteria: null,
+                  stdout: "",
+                  stderr: `Error: repo path is not a directory: ${repo_path}`,
+                },
+                null,
+                2,
+              ),
+            },
+          ],
           isError: true,
         };
       }
@@ -191,7 +239,8 @@ export default function (pi: ExtensionAPI) {
       writeFileSync(specPath, spec, "utf-8");
 
       try {
-        const whereCommand = process.platform === "win32" ? "where.exe" : "which";
+        const whereCommand =
+          process.platform === "win32" ? "where.exe" : "which";
         const scaffoldPath = await new Promise<string | null>((resolve) => {
           execFile(whereCommand, ["scaffold"], {}, (error, stdout) => {
             resolve(error ? null : stdout.trim());
@@ -200,76 +249,135 @@ export default function (pi: ExtensionAPI) {
 
         if (!scaffoldPath) {
           return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: "failed",
-                stage: "pre",
-                exitCode: 127,
-                stack: null,
-                stackTopFrame: null,
-                lastLog: null,
-                declinedCriteria: null,
-                stdout: "",
-                stderr: "Error: scaffold is not available on PATH.",
-              }, null, 2),
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    status: "failed",
+                    stage: "pre",
+                    exitCode: 127,
+                    stack: null,
+                    stackTopFrame: null,
+                    lastLog: null,
+                    declinedCriteria: null,
+                    stdout: "",
+                    stderr: "Error: scaffold is not available on PATH.",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
             isError: true,
           };
         }
 
-        const pushResult = await runScaffold(repo_path, ["push-ticket", work_id, "--ticket-file-in", specPath], signal);
+        const pushResult = await runScaffold(
+          repo_path,
+          ["push-ticket", work_id, "--ticket-file-in", specPath],
+          signal,
+        );
         if (pushResult.exitCode !== 0) {
-          const stack = readJsonIfPresent(repo_path, ".criteria-stack.json") as Array<Record<string, unknown>> | null;
-          const declinedCriteria = readJsonIfPresent(repo_path, ".declined-criteria.json") as Array<Record<string, unknown>> | null;
+          const stack = readJsonIfPresent(
+            repo_path,
+            ".criteria-stack.json",
+          ) as Array<Record<string, unknown>> | null;
+          const declinedCriteria = readJsonIfPresent(
+            repo_path,
+            ".declined-criteria.json",
+          ) as Array<Record<string, unknown>> | null;
           const lastLog = readLastLog(repo_path);
           return {
-            content: [{
-              type: "text" as const,
-              text: JSON.stringify({
-                status: declinedCriteria && Array.isArray(declinedCriteria) && declinedCriteria.length > 0 ? "declined" : "failed",
-                stage: "push",
-                exitCode: pushResult.exitCode,
-                stack,
-                stackTopFrame: Array.isArray(stack) && stack.length > 0 ? stack[stack.length - 1] : null,
-                lastLog,
-                declinedCriteria,
-                stdout: truncateLines(pushResult.stdout, MAX_STDOUT_LINES),
-                stderr: truncateLines(pushResult.stderr, MAX_STDERR_LINES),
-              }, null, 2),
-            }],
+            content: [
+              {
+                type: "text" as const,
+                text: JSON.stringify(
+                  {
+                    status:
+                      declinedCriteria &&
+                      Array.isArray(declinedCriteria) &&
+                      declinedCriteria.length > 0
+                        ? "declined"
+                        : "failed",
+                    stage: "push",
+                    exitCode: pushResult.exitCode,
+                    stack,
+                    stackTopFrame:
+                      Array.isArray(stack) && stack.length > 0
+                        ? stack[stack.length - 1]
+                        : null,
+                    lastLog,
+                    declinedCriteria,
+                    stdout: truncateLines(pushResult.stdout, MAX_STDOUT_LINES),
+                    stderr: truncateLines(pushResult.stderr, MAX_STDERR_LINES),
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
           };
         }
 
-        const nextStepResult = await runScaffold(repo_path, ["next-step", "--continuous"], signal);
-        const stack = readJsonIfPresent(repo_path, ".criteria-stack.json") as Array<Record<string, unknown>> | null;
-        const declinedCriteria = readJsonIfPresent(repo_path, ".declined-criteria.json") as Array<Record<string, unknown>> | null;
+        const nextStepResult = await runScaffold(
+          repo_path,
+          ["next-step", "--continuous"],
+          signal,
+        );
+        const stack = readJsonIfPresent(
+          repo_path,
+          ".criteria-stack.json",
+        ) as Array<Record<string, unknown>> | null;
+        const declinedCriteria = readJsonIfPresent(
+          repo_path,
+          ".declined-criteria.json",
+        ) as Array<Record<string, unknown>> | null;
         const lastLog = readLastLog(repo_path);
 
         let status: "done" | "paused" | "failed" | "declined" = "done";
         if (nextStepResult.exitCode !== 0) {
           status = "failed";
-        } else if (declinedCriteria && Array.isArray(declinedCriteria) && declinedCriteria.length > 0) {
+        } else if (
+          declinedCriteria &&
+          Array.isArray(declinedCriteria) &&
+          declinedCriteria.length > 0
+        ) {
           status = "declined";
         } else if (Array.isArray(stack) && stack.length > 0) {
           status = "paused";
         }
 
         return {
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              status,
-              stage: "next-step",
-              exitCode: nextStepResult.exitCode,
-              stack,
-              stackTopFrame: Array.isArray(stack) && stack.length > 0 ? stack[stack.length - 1] : null,
-              lastLog,
-              declinedCriteria,
-              stdout: truncateLines(nextStepResult.stdout, MAX_STDOUT_LINES),
-              stderr: truncateLines(nextStepResult.stderr, MAX_STDERR_LINES),
-            }, null, 2),
-          }],
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify(
+                {
+                  status,
+                  stage: "next-step",
+                  exitCode: nextStepResult.exitCode,
+                  stack,
+                  stackTopFrame:
+                    Array.isArray(stack) && stack.length > 0
+                      ? stack[stack.length - 1]
+                      : null,
+                  lastLog,
+                  declinedCriteria,
+                  stdout: truncateLines(
+                    nextStepResult.stdout,
+                    MAX_STDOUT_LINES,
+                  ),
+                  stderr: truncateLines(
+                    nextStepResult.stderr,
+                    MAX_STDERR_LINES,
+                  ),
+                },
+                null,
+                2,
+              ),
+            },
+          ],
         };
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
