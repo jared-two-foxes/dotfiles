@@ -14,3 +14,7 @@
    design notes, ad-hoc observations) and wants it turned into scaffold-ready
    work items without going through Linear first, load the to-tickets skill
    with `/skill:to-tickets`.
+
+   When the user asks you to make source code changes, load the via-scaffold
+   skill with `/skill:via-scaffold`. The scaffold_run tool it describes is the
+   only sanctioned path for source mutation; the agent is read-only otherwise.
