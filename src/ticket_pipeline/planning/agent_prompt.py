@@ -66,7 +66,7 @@ def _fallback_extract_criteria(ticket_content: str) -> list[str]:
         stripped = line.strip()
         if stripped.startswith("- [ ]") or stripped.startswith("- [x]"):
             criterion = re.sub(r"^-\s*\[[ xX]\]\s*", "", stripped)
-            criterion = re.sub(r"\s*<!--.*?-->\s*$", "", criterion).strip()
+            criterion = re.sub(r"\s*<!--[\s\S]*?-->\s*$", "", criterion).strip()
             if criterion:
                 criteria.append(criterion)
         elif stripped.startswith("- ") and not stripped.startswith("- ["):
