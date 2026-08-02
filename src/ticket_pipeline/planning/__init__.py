@@ -18,6 +18,7 @@ Models:
 Strategy interface:
     PlanningStrategy      — Protocol (structural subtyping)
     PlanningError         — raised by strategies on unrecoverable failure
+    PlanningInputRequired — raised when agent requires user input in 'fail' mode
 
 Parsing adapter (mechanical format only):
     parse_gap_plan        — .gap-plan.md text → list[PlannedCriterion]
@@ -37,15 +38,17 @@ from .models import (
     PlannedCriterion,
 )
 from .parsing import parse_gap_plan
-from .strategy import PlanningError, PlanningStrategy
+from .strategy import PlanningError, PlanningInputRequired, PlanningStrategy
 
 __all__ = [
     "build_ticket_frames",
     "parse_gap_plan",
     "PlanningDiagnostic",
     "PlanningError",
+    "PlanningInputRequired",
     "PlanningRequest",
     "PlanningResult",
     "PlannedCriterion",
     "PlanningStrategy",
 ]
+

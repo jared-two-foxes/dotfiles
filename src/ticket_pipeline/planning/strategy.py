@@ -24,6 +24,25 @@ class PlanningError(RuntimeError):
     """
 
 
+class PlanningInputRequired(PlanningError):
+    """
+    Raised by AgentPlanningStrategy when the agent calls ask_user_input
+    and user_input is configured to ``"fail"``.
+
+    Callers may catch this and re-run with an answer injected via the
+    user_input_callback, or surface the question to the user and retry.
+
+    Attributes
+    ----------
+    question:
+        The question the agent needs answered to proceed.
+    """
+
+    def __init__(self, question: str) -> None:
+        self.question = question
+        super().__init__(f"Planning requires user input: {question}")
+
+
 class PlanningStrategy(Protocol):
     """
     The mechanism used to turn a ticket and repository context into a
