@@ -174,7 +174,10 @@ function buildNextStepFlags(params: NextStepParams): string[] {
   if (params.manual_test) {
     flags.push("--manual-test");
   }
-  if (params.manual_test_refs !== undefined && params.manual_test_refs.length > 0) {
+  if (
+    params.manual_test_refs !== undefined &&
+    params.manual_test_refs.length > 0
+  ) {
     for (const ref of params.manual_test_refs) {
       flags.push("--manual-test-ref", ref);
     }
@@ -321,13 +324,10 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       retry_policy: Type.Optional(
-        Type.Union(
-          [Type.Literal("fixed-budget"), Type.Literal("endless")],
-          {
-            description:
-              "Pass --retry-policy to next-step. Used when mode is 'run', 'resume', or 'feedback'.",
-          },
-        ),
+        Type.Union([Type.Literal("fixed-budget"), Type.Literal("endless")], {
+          description:
+            "Pass --retry-policy to next-step. Used when mode is 'run', 'resume', or 'feedback'.",
+        }),
       ),
       accept_green: Type.Optional(
         Type.Boolean({
@@ -458,7 +458,10 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Cross-parameter validation
-      if (mode === "feedback" && (!params.feedback_text || !params.feedback_text.trim())) {
+      if (
+        mode === "feedback" &&
+        (!params.feedback_text || !params.feedback_text.trim())
+      ) {
         return {
           content: [
             {
@@ -502,7 +505,8 @@ export default function (pi: ExtensionAPI) {
                     lastLog: null,
                     declinedCriteria: null,
                     stdout: "",
-                    stderr: "Error: work_id must be provided when mode is 'run'.",
+                    stderr:
+                      "Error: work_id must be provided when mode is 'run'.",
                   },
                   null,
                   2,
@@ -622,8 +626,7 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const whereCommand =
-        process.platform === "win32" ? "where.exe" : "which";
+      const whereCommand = process.platform === "win32" ? "where.exe" : "which";
       const scaffoldPath = await new Promise<string | null>((resolve) => {
         execFile(whereCommand, ["scaffold"], {}, (error, stdout) => {
           resolve(error ? null : stdout.trim());
@@ -658,11 +661,7 @@ export default function (pi: ExtensionAPI) {
 
       // --- status mode: run scaffold status and return output ---
       if (mode === "status") {
-        const statusResult = await runScaffold(
-          repo_path,
-          ["status"],
-          signal,
-        );
+        const statusResult = await runScaffold(repo_path, ["status"], signal);
         return {
           content: [
             {
@@ -732,8 +731,14 @@ export default function (pi: ExtensionAPI) {
                         : null,
                     lastLog,
                     declinedCriteria,
-                    stdout: truncateLines(feedbackResult.stdout, MAX_STDOUT_LINES),
-                    stderr: truncateLines(feedbackResult.stderr, MAX_STDERR_LINES),
+                    stdout: truncateLines(
+                      feedbackResult.stdout,
+                      MAX_STDOUT_LINES,
+                    ),
+                    stderr: truncateLines(
+                      feedbackResult.stderr,
+                      MAX_STDERR_LINES,
+                    ),
                   },
                   null,
                   2,
@@ -810,8 +815,14 @@ export default function (pi: ExtensionAPI) {
                           : null,
                       lastLog,
                       declinedCriteria,
-                      stdout: truncateLines(pushResult.stdout, MAX_STDOUT_LINES),
-                      stderr: truncateLines(pushResult.stderr, MAX_STDERR_LINES),
+                      stdout: truncateLines(
+                        pushResult.stdout,
+                        MAX_STDOUT_LINES,
+                      ),
+                      stderr: truncateLines(
+                        pushResult.stderr,
+                        MAX_STDERR_LINES,
+                      ),
                     },
                     null,
                     2,
@@ -850,11 +861,7 @@ export default function (pi: ExtensionAPI) {
         nextStepArgs.push("--log-level", params.log_level);
       }
 
-      const nextStepResult = await runScaffold(
-        repo_path,
-        nextStepArgs,
-        signal,
-      );
+      const nextStepResult = await runScaffold(repo_path, nextStepArgs, signal);
       const stack = readJsonIfPresent(
         repo_path,
         ".criteria-stack.json",
@@ -894,14 +901,8 @@ export default function (pi: ExtensionAPI) {
                     : null,
                 lastLog,
                 declinedCriteria,
-                stdout: truncateLines(
-                  nextStepResult.stdout,
-                  MAX_STDOUT_LINES,
-                ),
-                stderr: truncateLines(
-                  nextStepResult.stderr,
-                  MAX_STDERR_LINES,
-                ),
+                stdout: truncateLines(nextStepResult.stdout, MAX_STDOUT_LINES),
+                stderr: truncateLines(nextStepResult.stderr, MAX_STDERR_LINES),
               },
               null,
               2,

@@ -54,45 +54,45 @@ separate command needed.
 
 ### Ticket Review (manual, situational)
 
-| Command | Description |
-|---|---|
-| `review-ticket <id>` | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the ticket. |
+| Command                    | Description                                                                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `review-ticket <id>`       | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the ticket.  |
 | `propose-ticket-edit <id>` | Rewrite a ticket to resolve review-ticket's flagged concerns. Output to `.ticket-proposed-<id>.md` by default. Never touches Linear. |
 
 These commands are available for manual use on Linear tickets or when a ticket needs post-hoc correction. Ticket quality (review, context exploration, criteria verification) is handled upstream by the `to-tickets` or `planner` skills before any ticket reaches `push-ticket`.
 
 ### Seed & Run the Criteria Loop
 
-| Command | Description |
-|---|---|
+| Command            | Description                                                                                                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push-ticket <id>` | Fetch a Linear ticket, run plan+narrow, seed `.criteria-stack.json` with one frame per remaining acceptance criterion. The criteria stack handles any number of criteria from a single ticket — splitting is not automatic. |
-| `next-step` | Advance the criteria stack by exactly one phase. No ticket-id argument — reads from the stack itself. Re-run it to keep moving; `--continuous` keeps going until a genuine human-only pause. |
+| `next-step`        | Advance the criteria stack by exactly one phase. No ticket-id argument — reads from the stack itself. Re-run it to keep moving; `--continuous` keeps going until a genuine human-only pause.                                |
 
 ### Ticket Restructuring (manual — not part of push-ticket)
 
-| Command | Description |
-|---|---|
-| `split-ticket <id>` | Assess a ticket for complexity and propose child tickets if too large. Standalone — never creates tickets in Linear itself. Saves
- report to `.ticket-split-<id>.md`. |
-| `create-child-tickets <id>` | Turn split-ticket's proposed children into real Linear sub-issues. |
-| `update-ticket <id>` | Push a locally revised ticket file back to the live Linear ticket. |
+| Command                            | Description                                                                                                                       |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `split-ticket <id>`                | Assess a ticket for complexity and propose child tickets if too large. Standalone — never creates tickets in Linear itself. Saves |
+| report to `.ticket-split-<id>.md`. |
+| `create-child-tickets <id>`        | Turn split-ticket's proposed children into real Linear sub-issues.                                                                |
+| `update-ticket <id>`               | Push a locally revised ticket file back to the live Linear ticket.                                                                |
 
 ### Utilities
 
-| Command | Description |
-|---|---|
-| `list-models` | List models available from the configured AI provider. |
-| `reset-pipeline` | Clear `.criteria-stack.json` and all scratch files. Dry-run by default; `--yes` to execute. Never removes `.dev-pipeline.toml` or
- `.pipeline-log.jsonl`. |
+| Command                | Description                                                                                                                       |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `list-models`          | List models available from the configured AI provider.                                                                            |
+| `reset-pipeline`       | Clear `.criteria-stack.json` and all scratch files. Dry-run by default; `--yes` to execute. Never removes `.dev-pipeline.toml` or |
+| `.pipeline-log.jsonl`. |
 
 ### Advanced / Internal
 
-| Command | Description |
-|---|---|
-| `copilot-login` | One-time device-flow OAuth for the GitHub Copilot provider. |
-| `fetch-ticket <id>` | Fetch and render a single Linear ticket by id. |
-| `bench` | Run a pipeline block N times per model and report pass-rate/cost. |
-| `bench-block` | Run one pipeline block once against fixed fixtures (used by bench). |
+| Command             | Description                                                         |
+| ------------------- | ------------------------------------------------------------------- |
+| `copilot-login`     | One-time device-flow OAuth for the GitHub Copilot provider.         |
+| `fetch-ticket <id>` | Fetch and render a single Linear ticket by id.                      |
+| `bench`             | Run a pipeline block N times per model and report pass-rate/cost.   |
+| `bench-block`       | Run one pipeline block once against fixed fixtures (used by bench). |
 
 ## The Criteria-Stack State Machine
 
@@ -176,51 +176,51 @@ to pop.
 
 ### Key Flags
 
-| Flag | Command | Effect |
-|---|---|---|
-| `--continuous` | next-step | Advance through every automatable transition without pausing; stop only at genuine human input points. |
-| `--accept-green` | next-step | Accept unconfirmed green tests (validate-missed/review origin criteria whose tests passed without implementation). |
-| `--accept-manual` | next-step | Accept a manual-verification criterion as satisfied, overriding the git-changed-files floor check. |
-| `--manual-test` | next-step | Use manually authored test(s) for the top pending test criterion instead of running the Tester AI. |
-| `--manual-test-ref <file::qualified_test_name>` | next-step | Scoped test reference for `--manual-test`; repeatable. |
-| `--skip-test` | next-step | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
-| `--skip-implementation` | next-step | Require manual implementation for red tests (pause in AWAIT_IMPL instead of running the Implementor AI). |
-| `--accept-no-test` | next-step | Accept criteria without tests as satisfied without forcing a test-writing step. |
-| `--retry-policy {fixed-budget,endless}` | next-step | Set the retry policy for continued implementation attempts. |
-| `--no-compile-tool` | next-step | Disable the compile tool during next-step execution. |
-| `--no-reset-on-retry` | next-step | Keep the repo state intact across retry attempts instead of resetting it. |
-| `--strategy {tdd,direct}` | push-ticket / next-step | Choose the implementation strategy for the target scaffold command. |
-| `--explore` | push-ticket | Start an interactive exploration session for the ticket instead of the standard plan+narrow flow. |
-| `--planning-strategy {mechanical,agent}` | push-ticket | Choose the planning strategy used by push-ticket. |
-| `--model <id>` | most commands | AI model to use (default: `opencode:gpt-5.4-mini`). |
-| `--config <path>` | next-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
-| `--max-attempts <n>` | next-step | Total implementation attempts, initial write + refines sharing one budget (default: 3). |
-| `--force` | push-ticket | Abandon an in-progress stack for a different ticket; replace entirely. |
-| `--prepend` | push-ticket | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after. |
-| `--validate-only` | push-ticket | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly. |
-| `--from-gap-plan` | push-ticket | Reuse existing `.gap-plan.md` instead of re-running plan+narrow. |
-| `--ticket-file-in <path>` | review-ticket, propose-ticket-edit, push-ticket | Read ticket from a local file instead of fetching from Linear. |
-| `--log-level <level>` | most commands | `trace`/`debug`/`info`/`warning`/`error`/`critical`. `debug` shows per-tool-call activity; `trace` adds raw
- request/response payloads. |
+| Flag                                            | Command                                         | Effect                                                                                                                       |
+| ----------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--continuous`                                  | next-step                                       | Advance through every automatable transition without pausing; stop only at genuine human input points.                       |
+| `--accept-green`                                | next-step                                       | Accept unconfirmed green tests (validate-missed/review origin criteria whose tests passed without implementation).           |
+| `--accept-manual`                               | next-step                                       | Accept a manual-verification criterion as satisfied, overriding the git-changed-files floor check.                           |
+| `--manual-test`                                 | next-step                                       | Use manually authored test(s) for the top pending test criterion instead of running the Tester AI.                           |
+| `--manual-test-ref <file::qualified_test_name>` | next-step                                       | Scoped test reference for `--manual-test`; repeatable.                                                                       |
+| `--skip-test`                                   | next-step                                       | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
+| `--skip-implementation`                         | next-step                                       | Require manual implementation for red tests (pause in AWAIT_IMPL instead of running the Implementor AI).                     |
+| `--accept-no-test`                              | next-step                                       | Accept criteria without tests as satisfied without forcing a test-writing step.                                              |
+| `--retry-policy {fixed-budget,endless}`         | next-step                                       | Set the retry policy for continued implementation attempts.                                                                  |
+| `--no-compile-tool`                             | next-step                                       | Disable the compile tool during next-step execution.                                                                         |
+| `--no-reset-on-retry`                           | next-step                                       | Keep the repo state intact across retry attempts instead of resetting it.                                                    |
+| `--strategy {tdd,direct}`                       | push-ticket / next-step                         | Choose the implementation strategy for the target scaffold command.                                                          |
+| `--explore`                                     | push-ticket                                     | Start an interactive exploration session for the ticket instead of the standard plan+narrow flow.                            |
+| `--planning-strategy {mechanical,agent}`        | push-ticket                                     | Choose the planning strategy used by push-ticket.                                                                            |
+| `--model <id>`                                  | most commands                                   | AI model to use (default: `opencode:gpt-5.4-mini`).                                                                          |
+| `--config <path>`                               | next-step                                       | Path to pipeline config (default: `.dev-pipeline.toml`).                                                                     |
+| `--max-attempts <n>`                            | next-step                                       | Total implementation attempts, initial write + refines sharing one budget (default: 3).                                      |
+| `--force`                                       | push-ticket                                     | Abandon an in-progress stack for a different ticket; replace entirely.                                                       |
+| `--prepend`                                     | push-ticket                                     | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after.               |
+| `--validate-only`                               | push-ticket                                     | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly.         |
+| `--from-gap-plan`                               | push-ticket                                     | Reuse existing `.gap-plan.md` instead of re-running plan+narrow.                                                             |
+| `--ticket-file-in <path>`                       | review-ticket, propose-ticket-edit, push-ticket | Read ticket from a local file instead of fetching from Linear.                                                               |
+| `--log-level <level>`                           | most commands                                   | `trace`/`debug`/`info`/`warning`/`error`/`critical`. `debug` shows per-tool-call activity; `trace` adds raw                  |
+| request/response payloads.                      |
 
 ## CriterionFrame Fields
 
 Each entry in `.criteria-stack.json` has:
 
-| Field | Type | Description |
-|---|---|---|
-| `ticket` | str | Linear ticket ID, e.g. `"SA-42"` |
-| `criterion` | str | Verbatim bullet from the gap plan, e.g. `"- [ ] ..."` |
-| `plan_context` | str | Implementation Plan lines relevant to this criterion, extracted at push time |
-| `test_files` | list[str] \| None | Set once the test-writer runs; parallel to `test_names`. Usually length 1. |
-| `test_names` | str \| None | Fully-qualified test names, parallel to `test_files` |
-| `status` | str | `"pending"` / `"test-written"` / `"green-unconfirmed"` / `"awaiting-manual-impl"` / `"done"` / `"validating"` |
-| `origin` | str | `"ticket"` (initial push) / `"validate-missed"` (re-narrow found it) / `"review"` (code review found it) / `"ticket-validate"`
- (sentinel) |
-| `verification` | str | `"test"` (default, red/green) / `"manual"` (no meaningful test) |
-| `existing_test_refs` | list[str] | `"file::test_name"` references to existing tests this criterion modifies rather than creating new ones |
-| `unconfirmed_tests` | list[str] | Subset of `test_names` currently green without implementation (origin != `"ticket"`, observed green at first
- WRITE_TEST). Only ever shrinks. |
+| Field                           | Type              | Description                                                                                                                    |
+| ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ticket`                        | str               | Linear ticket ID, e.g. `"SA-42"`                                                                                               |
+| `criterion`                     | str               | Verbatim bullet from the gap plan, e.g. `"- [ ] ..."`                                                                          |
+| `plan_context`                  | str               | Implementation Plan lines relevant to this criterion, extracted at push time                                                   |
+| `test_files`                    | list[str] \| None | Set once the test-writer runs; parallel to `test_names`. Usually length 1.                                                     |
+| `test_names`                    | str \| None       | Fully-qualified test names, parallel to `test_files`                                                                           |
+| `status`                        | str               | `"pending"` / `"test-written"` / `"green-unconfirmed"` / `"awaiting-manual-impl"` / `"done"` / `"validating"`                  |
+| `origin`                        | str               | `"ticket"` (initial push) / `"validate-missed"` (re-narrow found it) / `"review"` (code review found it) / `"ticket-validate"` |
+| (sentinel)                      |
+| `verification`                  | str               | `"test"` (default, red/green) / `"manual"` (no meaningful test)                                                                |
+| `existing_test_refs`            | list[str]         | `"file::test_name"` references to existing tests this criterion modifies rather than creating new ones                         |
+| `unconfirmed_tests`             | list[str]         | Subset of `test_names` currently green without implementation (origin != `"ticket"`, observed green at first                   |
+| WRITE_TEST). Only ever shrinks. |
 
 ### Origin-Based Trust
 
@@ -236,54 +236,54 @@ Each entry in `.criteria-stack.json` has:
 
 ### Cross-Invocation State
 
-| File | Role |
-|---|---|
-| `.criteria-stack.json` | The work queue. Sole source of truth across `next-step` invocations. Only `next-step` (and `push-ticket` at seed time) writes
- to it. |
-| `.declined-criteria.json` | Ledger of criteria rejected by the mechanical grounding check (symbols/tokens in the criterion that don't exist in the
- codebase). Append-only; makes declines sticky across runs. |
-| `.dev-pipeline.toml` | Project-local build/test/lint command overrides. Your configuration, not pipeline output — `reset-pipeline` never removes it. |
-| `.pipeline-log.jsonl` | Diagnostic event log. Never removed by reset. |
+| File                                                       | Role                                                                                                                          |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `.criteria-stack.json`                                     | The work queue. Sole source of truth across `next-step` invocations. Only `next-step` (and `push-ticket` at seed time) writes |
+| to it.                                                     |
+| `.declined-criteria.json`                                  | Ledger of criteria rejected by the mechanical grounding check (symbols/tokens in the criterion that don't exist in the        |
+| codebase). Append-only; makes declines sticky across runs. |
+| `.dev-pipeline.toml`                                       | Project-local build/test/lint command overrides. Your configuration, not pipeline output — `reset-pipeline` never removes it. |
+| `.pipeline-log.jsonl`                                      | Diagnostic event log. Never removed by reset.                                                                                 |
 
 ### Transient Scratch (regenerated fresh, never trusted across runs)
 
-| File | Role |
-|---|---|
-| `.ticket.md` | Ticket text fetched from Linear |
-| `.tdd-plan.md` | Implementation plan (AI-generated) |
-| `.gap-plan.md` | Narrowed plan with remaining acceptance criteria |
-| `.ticket-review-<id>.md` | review-ticket report |
-| `.ticket-proposed-<id>.md` | propose-ticket-edit output |
-| `.ticket-split-<id>.md` | split-ticket report |
-| `.ticket-children-<id>.json` | create-child-tickets manifest |
+| File                         | Role                                             |
+| ---------------------------- | ------------------------------------------------ |
+| `.ticket.md`                 | Ticket text fetched from Linear                  |
+| `.tdd-plan.md`               | Implementation plan (AI-generated)               |
+| `.gap-plan.md`               | Narrowed plan with remaining acceptance criteria |
+| `.ticket-review-<id>.md`     | review-ticket report                             |
+| `.ticket-proposed-<id>.md`   | propose-ticket-edit output                       |
+| `.ticket-split-<id>.md`      | split-ticket report                              |
+| `.ticket-children-<id>.json` | create-child-tickets manifest                    |
 
 ## Configuration: .dev-pipeline.toml
 
 Overrides the auto-detected toolchain's default commands. Keys:
 
-| Key | Role |
-|---|---|
-| `build_cmd` | Compile/build the project |
-| `test_compile_cmd` | Compile tests without running them |
-| `test_cmd` | Run the full test suite |
-| `test_filter_cmd` | Run a scoped test by name (`{filter}` is substituted with the qualified test name) |
-| `fmt_fix_cmd` | Auto-fix formatting |
-| `clippy_fix_cmd` | Auto-fix lint issues |
-| `fmt_check_cmd` | Check formatting without fixing |
-| `clippy_cmd` | Run lint checks |
-| `smoke_cmd` | Optional smoke test command (if unset, smoke gate is skipped) |
+| Key                | Role                                                                               |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| `build_cmd`        | Compile/build the project                                                          |
+| `test_compile_cmd` | Compile tests without running them                                                 |
+| `test_cmd`         | Run the full test suite                                                            |
+| `test_filter_cmd`  | Run a scoped test by name (`{filter}` is substituted with the qualified test name) |
+| `fmt_fix_cmd`      | Auto-fix formatting                                                                |
+| `clippy_fix_cmd`   | Auto-fix lint issues                                                               |
+| `fmt_check_cmd`    | Check formatting without fixing                                                    |
+| `clippy_cmd`       | Run lint checks                                                                    |
+| `smoke_cmd`        | Optional smoke test command (if unset, smoke gate is skipped)                      |
 
 ### Auto-Detected Toolchains
 
 Detection by marker file at project root (first match wins):
 
-| Priority | Toolchain | Marker(s) | Notes |
-|---|---|---|---|
-| 1 | Bazel | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Takes priority (monorepo wrapping) |
-| 2 | Rust (cargo) | `Cargo.toml` | Default fallback if nothing detected |
-| 3 | CMake/ctest | `CMakeLists.txt` | |
-| 4 | SvelteKit (npm) | `svelte.config.js`, `svelte.config.ts` | More specific than generic TS |
-| 5 | TypeScript/Node (npm) | `package.json` | Generic fallback |
+| Priority | Toolchain             | Marker(s)                                      | Notes                                |
+| -------- | --------------------- | ---------------------------------------------- | ------------------------------------ |
+| 1        | Bazel                 | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Takes priority (monorepo wrapping)   |
+| 2        | Rust (cargo)          | `Cargo.toml`                                   | Default fallback if nothing detected |
+| 3        | CMake/ctest           | `CMakeLists.txt`                               |                                      |
+| 4        | SvelteKit (npm)       | `svelte.config.js`, `svelte.config.ts`         | More specific than generic TS        |
+| 5        | TypeScript/Node (npm) | `package.json`                                 | Generic fallback                     |
 
 ## The prompts/ Directory
 
@@ -295,18 +295,18 @@ Loaded fresh on every run by `pipeline_lib.load_prompt_body()`.
 
 Key prompt files:
 
-| File | Drives |
-|---|---|
-| `plan.prompt.md` | The planning step (full implementation plan from ticket) |
-| `narrow-plan.prompt.md` | The narrowing step (gap plan: what's left to do) — also tags `verification: manual` and `existing_test:` refs |
-| `test-criterion.prompt.md` | WRITE_TEST phase (write a failing test for one criterion) |
-| `implement-criterion.prompt.md` | next-step's implementation phase (make the failing test pass) |
-| `implement-criterion-direct.prompt.md` | next-step's implementation phase for manual-verification frames (no target test) |
-| `review-singlepass.prompt.md` | TICKET_VALIDATE's code review gate |
-| `review-test-quality.prompt.md` | Gating test-quality review inside WRITE_TEST's retry loop (advisory fallback on budget exhaustion) |
-| `review-ticket.prompt.md` | review-ticket command |
-| `propose-ticket-edit.prompt.md` | propose-ticket-edit command |
-| `split-ticket.prompt.md` | split-ticket complexity check |
+| File                                   | Drives                                                                                                        |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `plan.prompt.md`                       | The planning step (full implementation plan from ticket)                                                      |
+| `narrow-plan.prompt.md`                | The narrowing step (gap plan: what's left to do) — also tags `verification: manual` and `existing_test:` refs |
+| `test-criterion.prompt.md`             | WRITE_TEST phase (write a failing test for one criterion)                                                     |
+| `implement-criterion.prompt.md`        | next-step's implementation phase (make the failing test pass)                                                 |
+| `implement-criterion-direct.prompt.md` | next-step's implementation phase for manual-verification frames (no target test)                              |
+| `review-singlepass.prompt.md`          | TICKET_VALIDATE's code review gate                                                                            |
+| `review-test-quality.prompt.md`        | Gating test-quality review inside WRITE_TEST's retry loop (advisory fallback on budget exhaustion)            |
+| `review-ticket.prompt.md`              | review-ticket command                                                                                         |
+| `propose-ticket-edit.prompt.md`        | propose-ticket-edit command                                                                                   |
+| `split-ticket.prompt.md`               | split-ticket complexity check                                                                                 |
 
 ## Architectural Principles
 
