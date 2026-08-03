@@ -185,6 +185,13 @@ to pop.
 | `--manual-test-ref <file::qualified_test_name>` | next-step | Scoped test reference for `--manual-test`; repeatable. |
 | `--skip-test` | next-step | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
 | `--skip-implementation` | next-step | Require manual implementation for red tests (pause in AWAIT_IMPL instead of running the Implementor AI). |
+| `--accept-no-test` | next-step | Accept criteria without tests as satisfied without forcing a test-writing step. |
+| `--retry-policy {fixed-budget,endless}` | next-step | Set the retry policy for continued implementation attempts. |
+| `--no-compile-tool` | next-step | Disable the compile tool during next-step execution. |
+| `--no-reset-on-retry` | next-step | Keep the repo state intact across retry attempts instead of resetting it. |
+| `--strategy {tdd,direct}` | push-ticket / next-step | Choose the implementation strategy for the target scaffold command. |
+| `--explore` | push-ticket | Start an interactive exploration session for the ticket instead of the standard plan+narrow flow. |
+| `--planning-strategy {mechanical,agent}` | push-ticket | Choose the planning strategy used by push-ticket. |
 | `--model <id>` | most commands | AI model to use (default: `opencode:gpt-5.4-mini`). |
 | `--config <path>` | next-step | Path to pipeline config (default: `.dev-pipeline.toml`). |
 | `--max-attempts <n>` | next-step | Total implementation attempts, initial write + refines sharing one budget (default: 3). |
