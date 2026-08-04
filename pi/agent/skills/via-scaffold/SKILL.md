@@ -12,9 +12,9 @@ not use edit/write on source files. Source authoring goes through the
 steps, not source authoring.
 
 > This skill orchestrates one repo per scaffold_run call. It does NOT
-detect that a change in repo A broke repo B. If a change touches a
-shared contract or a repo others depend on, you must run the dependent
-repos' tests yourself and report.
+> detect that a change in repo A broke repo B. If a change touches a
+> shared contract or a repo others depend on, you must run the dependent
+> repos' tests yourself and report.
 
 ## Prerequisites
 
@@ -24,7 +24,7 @@ repos' tests yourself and report.
 - **Caveat — scaffold re-fetches the ticket by id at its final
   `TICKET_VALIDATE` step.** Pass a real Linear ticket id as `work_id` if you
   want validate to pass; a synthetic slug completes the TDD work (red→green)
-but the final validate re-fetch fails. For a change with no Linear ticket,
+  but the final validate re-fetch fails. For a change with no Linear ticket,
   create a throwaway one first and use its id.
 
 ## How to orchestrate a change
@@ -36,18 +36,41 @@ but the final validate re-fetch fails. For a change with no Linear ticket,
    a. Compose a spec (see format below).
    b. Call the `scaffold_run` tool with `repo_path`, `work_id`, and `spec`.
    c. Read the structured result:
-      - `status: "done"` → all criteria passed, move on.
-      - `status: "paused"` → a human decision is needed in-repo. Read
-        `stackTopFrame.status` and `lastLog` to determine what input is
-        needed; report it, do not blindly retry.
-      - `status: "failed"` → a real error. Read `stderr` and `lastLog`
-        for the error and report.
-      - `status: "declined"` → scaffold's grounding check rejected a
-        criterion (`declinedCriteria` is non-null). The spec wording needs
-        adjusting, not a retry.
+   - `status: "done"` → all criteria passed, move on.
+   - `status: "paused"` → a human decision is needed in-repo. Read
+     `stackTopFrame.status` and `lastLog` to determine what input is
+     needed; report it, do not blindly retry.
+   - `status: "failed"` → a real error. Read `stderr` and `lastLog`
+     for the error and report.
+   - `status: "declined"` → scaffold's grounding check rejected a
+     criterion (`declinedCriteria` is non-null). The spec wording needs
+     adjusting, not a retry.
+
+### Incremental vs. Continuous Execution
+
+By default, `scaffold_run` runs in **incremental mode** (`continuous: false` or omitted), omitting `--continuous` from `next-step` — each call advances exactly one implementation phase, returning intermediate status (`stackTopFrame.status`) and logs for live progress reporting. This provides visibility but requires more round-trips.
+
+For **fast, opaque execution**, pass `continuous: true` to run all phases in a single blocking call:
+
+1. Call `scaffold_run` with `continuous: true`, `repo_path`, `work_id`, and `spec`.
+2. Wait for completion; the call blocks until human-only pauses or completion.
+
+**Incremental pattern (default):**
+
+1. Call `scaffold_run` with `repo_path`, `work_id`, and `spec` (omit `continuous` or pass `continuous: false`).
+2. Read the result:
+   - `status: "done"` → all criteria satisfied, done.
+   - `status: "paused"` → mid-run; work remains. Read `stackTopFrame.status` (e.g., `"write_test"`, `"await_impl"`) and `lastLog` to report progress, then call again.
+   - `status: "failed"` or `"declined"` → stop; report the error.
+3. Repeat until `status == "done"`.
+
+**Tradeoff:** Incremental mode requires more round-trips and higher token cost per criterion, but gives you live status updates (test written, awaiting implementation, test passed, etc.) and lets you interleave progress reports. Continuous mode (`continuous: true`) is faster but opaque until completion.
+
+**Retry-budget equivalence:** Both modes consume the same per-phase retry budget (verified against scaffold CLI source). Incremental driving does not deplete retries faster.
+
 3. **Between a producer and its consumers**, if the consumer regenerates a
    client from a contract (e.g. OpenAPI), run the producer's export and the
-   consumer's generator via bash *before* scaffold_run in the consumer
+   consumer's generator via bash _before_ scaffold_run in the consumer
    (build step, not source authoring).
 4. **Report per-repo outcomes** when done.
 

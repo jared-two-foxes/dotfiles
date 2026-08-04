@@ -395,6 +395,15 @@ export default function (pi: ExtensionAPI) {
             "Pass --config to next-step. Used when mode is 'run', 'resume', or 'feedback'.",
         }),
       ),
+      continuous: Type.Optional(
+        Type.Boolean({
+          description:
+            "Control next-step execution mode. When true, pass --continuous to next-step " +
+            "for uninterrupted execution until human-decision pause. When false (default), omit --continuous " +
+            "to advance one implementation phase per call, enabling incremental feedback via stackTopFrame.status " +
+            "and lastLog between calls. Used when mode is 'run', 'resume', or 'feedback'.",
+        }),
+      ),
     }),
     async execute(_toolCallId, params, signal) {
       const { repo_path, work_id, spec, mode = "run" } = params;
@@ -853,7 +862,11 @@ export default function (pi: ExtensionAPI) {
         config: params.config,
       });
 
-      const nextStepArgs = ["next-step", "--continuous", ...nextStepExtraFlags];
+      const nextStepArgs = ["next-step"];
+      if (params.continuous === true) {
+        nextStepArgs.push("--continuous");
+      }
+      nextStepArgs.push(...nextStepExtraFlags);
       if (params.model) {
         nextStepArgs.push("--model", params.model);
       }
