@@ -53,7 +53,7 @@ function truncateLines(text: string, maxLines: number): string {
 }
 
 function readJsonIfPresent(repoPath: string, filename: string): unknown | null {
-  const filePath = join(repoPath, filename);
+  const filePath = join(repoPath, ".scaffold", filename);
   try {
     const content = readFileSync(filePath, "utf8");
     if (!content || !content.trim()) return null;
@@ -64,7 +64,7 @@ function readJsonIfPresent(repoPath: string, filename: string): unknown | null {
 }
 
 function readLastLog(repoPath: string): unknown | null {
-  const filePath = join(repoPath, ".pipeline-log.jsonl");
+  const filePath = join(repoPath, ".scaffold", ".pipeline-log.jsonl");
   try {
     const content = readFileSync(filePath, "utf8");
     const lines = content.split(/\r?\n/).filter(Boolean);
