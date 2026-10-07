@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "dcp": {
+    "autoCompress": true,
+    "threshold": 2000,
+    "preserveLast": 5,
+    "commands": {
+      "context": "Show current context statistics",
+      "stats": "Show token usage and context window status",
+      "sweep": "Remove obsolete tool outputs from context",
+      "manual": "Show manual compression options",
+      "compress": "Compress current context to essential information",
+      "decompress": "Restore compressed context",
+      "recompress": "Re-compress with different settings"
+    }
+  }
+}
