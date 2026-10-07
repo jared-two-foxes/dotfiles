@@ -33,3 +33,8 @@ pi/agent/auth.json
 
 docker/pi/.env
 pi/agent/sessions/
+
+# OpenCode local runtime state (use installed scripts)
+opencode/latch.json
+opencode/logs/
+opencode/backups/

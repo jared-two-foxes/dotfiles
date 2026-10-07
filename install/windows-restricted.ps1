@@ -333,6 +333,12 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
+# --- OpenCode ------------------------------------------------
+Write-Host "
+[OpenCode Configuration]" -ForegroundColor White
+
+& (Join-Path $PSScriptRoot 'opencode.ps1') -Mode Copy -Force:$Force -WhatIf:$WhatIfPreference
+
 # --- Copilot cleanup -----------------------------------------
 Write-Host "
 [Copilot Cleanup]" -ForegroundColor White
