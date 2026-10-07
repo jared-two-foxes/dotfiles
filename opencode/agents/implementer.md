@@ -82,7 +82,7 @@ The pipeline-runner detects this signal and escalates accordingly.
 
 ### Role Boundary
 
-Your role is to make failing tests pass. You do not validate whether your changes satisfy acceptance criteria — that is the Validator's sole responsibility. Your output is code changes only.
+Your role is to make failing tests pass. You do not validate whether your changes satisfy acceptance criteria — the pipeline-runner maps each criterion to concrete evidence, and review-cli independently reviews the diff. Your output is code changes only.
 
 ## Rules
 
@@ -90,7 +90,7 @@ Your role is to make failing tests pass. You do not validate whether your change
 - Do not redefine requirements
 - Prefer minimal coherent solutions
 - Use the toolchain commands provided in your invocation context
-- Focus on making the required code changes; the orchestrator owns verification command execution and log capture.
+- Focus on making the required code changes; the pipeline-runner owns verification command execution and log capture.
 
 ## Output Format
 
@@ -101,6 +101,6 @@ Begin every response with the following line, before any other content:
 ## Verification Boundary
 
 - Do not rely on running verification commands yourself to complete the phase.
-- The orchestrator will run `FMT_FIX_CMD`, `BUILD_CMD`, `TEST_CMD`, `FMT_CHECK_CMD`, `LINT_CMD`, and `TYPECHECK_CMD` as applicable after your implementation attempt.
-- If useful, you may mention which commands the orchestrator should expect to run, but the source of truth is the orchestrator-owned `IMPLEMENTATION_LOGS`.
-- **Your sole output is code changes. Do not assess whether those changes satisfy acceptance criteria — that is the Validator's role.**
+- The pipeline-runner will run `FMT_FIX_CMD`, `BUILD_CMD`, `TEST_CMD`, `FMT_CHECK_CMD`, `LINT_CMD`, and `TYPECHECK_CMD` as applicable after your implementation attempt.
+- If useful, you may mention which commands the orchestrator should expect to run, but the source of truth is the pipeline-runner-owned `IMPLEMENTATION_LOGS`.
+- **Your sole output is code changes. Do not assess whether those changes satisfy acceptance criteria — the pipeline-runner owns acceptance-evidence checks, and review-cli provides independent diff review.**
