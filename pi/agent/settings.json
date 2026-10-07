@@ -1,9 +1,9 @@
 {
-  "lastChangelogVersion": "0.80.7",
+  "lastChangelogVersion": "1.0.4",
   "theme": "dark",
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "high",
   "packages": [
     "npm:pi-ollama-cloud"
   ]

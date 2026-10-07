@@ -32,28 +32,28 @@
             "keys": "shift+enter"
         },
         {
-            "id": "Terminal.ClosePane",
-            "keys": "ctrl+w"
+            "id": "User.sendInput.237E8A98",
+            "keys": "alt+enter"
         },
         {
             "id": null,
             "keys": "alt+h"
         },
         {
-            "id": "User.sendInput.237E8A98",
-            "keys": "alt+enter"
+            "id": "Terminal.ClosePane",
+            "keys": "ctrl+w"
         },
         {
-            "id": null,
-            "keys": "ctrl+shift+d"
+            "id": "Terminal.OpenNewTab",
+            "keys": "ctrl+t"
         },
         {
             "id": "Terminal.PrevTab",
             "keys": "ctrl+shift+tab"
         },
         {
-            "id": "Terminal.OpenNewTab",
-            "keys": "ctrl+t"
+            "id": null,
+            "keys": "ctrl+shift+d"
         },
         {
             "id": null,
@@ -92,7 +92,7 @@
             "cursorShape": "bar",
             "font": 
             {
-                "face": "CaskaydiaCove Nerd Font",
+                "face": "FiraCode Nerd Font",
                 "size": 13
             },
             "opacity": 95,
