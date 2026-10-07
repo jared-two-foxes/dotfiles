@@ -53,7 +53,7 @@ function truncateLines(text: string, maxLines: number): string {
 }
 
 function readJsonIfPresent(repoPath: string, filename: string): unknown | null {
-  const filePath = join(repoPath, filename);
+  const filePath = join(repoPath, ".scaffold", filename);
   try {
     const content = readFileSync(filePath, "utf8");
     if (!content || !content.trim()) return null;
@@ -64,7 +64,7 @@ function readJsonIfPresent(repoPath: string, filename: string): unknown | null {
 }
 
 function readLastLog(repoPath: string): unknown | null {
-  const filePath = join(repoPath, ".pipeline-log.jsonl");
+  const filePath = join(repoPath, ".scaffold", ".pipeline-log.jsonl");
   try {
     const content = readFileSync(filePath, "utf8");
     const lines = content.split(/\r?\n/).filter(Boolean);
@@ -393,6 +393,15 @@ export default function (pi: ExtensionAPI) {
         Type.String({
           description:
             "Pass --config to next-step. Used when mode is 'run', 'resume', or 'feedback'.",
+        }),
+      ),
+      continuous: Type.Optional(
+        Type.Boolean({
+          description:
+            "Control next-step execution mode. When true, pass --continuous to next-step " +
+            "for uninterrupted execution until human-decision pause. When false (default), omit --continuous " +
+            "to advance one implementation phase per call, enabling incremental feedback via stackTopFrame.status " +
+            "and lastLog between calls. Used when mode is 'run', 'resume', or 'feedback'.",
         }),
       ),
     }),
@@ -853,7 +862,11 @@ export default function (pi: ExtensionAPI) {
         config: params.config,
       });
 
-      const nextStepArgs = ["next-step", "--continuous", ...nextStepExtraFlags];
+      const nextStepArgs = ["next-step"];
+      if (params.continuous === true) {
+        nextStepArgs.push("--continuous");
+      }
+      nextStepArgs.push(...nextStepExtraFlags);
       if (params.model) {
         nextStepArgs.push("--model", params.model);
       }

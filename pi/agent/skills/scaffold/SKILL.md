@@ -50,6 +50,16 @@ Step 2 repeats for each acceptance criterion. When the last criterion for
 a ticket is popped, `next-step` automatically runs `TICKET_VALIDATE` — no
 separate command needed.
 
+### Incremental vs. Continuous Execution
+
+When orchestrating with the **`scaffold_run` tool** (vs. direct CLI), you can
+control execution granularity via the `continuous` parameter:
+
+- **`continuous: false` (default)** → each `scaffold_run` call advances exactly one phase, returning intermediate status (`stackTopFrame.status`) and logs for live progress reporting. Repeat calls until done.
+- **`continuous: true`** → `next-step` runs with `--continuous`, executing all phases until human-only pauses (red test → implement → verify) in a single blocking call.
+
+See the **via-scaffold skill** for orchestration patterns using the default incremental mode for visibility.
+
 ## Command Reference
 
 ### Ticket Review (manual, situational)
