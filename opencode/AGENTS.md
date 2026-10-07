@@ -10,7 +10,8 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `skills/` contains the global skills.
 - `opencode.jsonc` contains MCP, model and plugin configuration (JSON with comments).
 - `dcp.jsonc` contains plugin configuration.
-- `scripts/` contains the latch and optional daily-summary helpers.
+- `scripts/` contains the review subprocess adapter, latch and optional daily-summary helpers.
+- `tools/review_changes.ts` exposes review-cli to OpenCode.
 - `scratch-notes/` and the Recallium package archive are retained reference material.
 
 The full Windows installer deploys directory junctions and file symlinks to
@@ -20,8 +21,8 @@ Run `setup.ps1` for an OpenCode-only installation, or `setup.ps1 -Copy` for copi
 Existing conflicting configuration is preserved unless `-Force` is supplied;
 forced replacements are backed up. See README.md for commands and dependencies.
 
-Keep the existing workflow and model choices intact during migration. Review
-integration is separate work. Agent escalation edits affect the tracked source
+Review-cli replaces review-only subagents. Preserve explicit mechanical checks
+and per-criterion evidence in the pipeline runner; incomplete reviews cannot approve. Agent escalation edits affect the tracked source
 in link mode, and installed copies in copy mode. Check and restore agent changes
 before committing.
 
@@ -46,19 +47,20 @@ Check current state without toggling:
 & "$env:USERPROFILE\.config\opencode\scripts\toggle-github-latch.ps1" -Status
 ```
 
-**Affected agents:** `build`, `design`, `pipeline-runner`, `tester`, `linear-orchestrator` (claude-sonnet-4.6), `implementer` (gpt-5.3-codex), `code-reviewer` (gpt-5.4).
-
-The latch replaces **all occurrences** of the model strings throughout each file — frontmatter, fallback tables, escalation tables, and restore rules — so the retry/escalation systems cannot attempt to use github-copilot models when latched to opencode.
-
-**Unaffected agents:** `validator`, `reuse-checker`, `refactorer`, `daily-summary` (all `ollama/qwen3-coder:latest`).
+The latch changes remaining agent model references only. Review provider/model
+selection uses the tool argument or REVIEW_MODEL and is not modified by the latch.
+The binary requires its own provider credentials in the process environment.
 
 > **Note:** opencode does not hot-reload. Restart after toggling.
 
 ## Agent files
 
 Primary agents: `build`, `design`, `linear-orchestrator`, `daily-summary`.
-Subagents: `pipeline-runner`, `tester`, `implementer`, `refactorer`,
-`reuse-checker`, `code-reviewer`, `security-reviewer`, `validator`.
+Subagents: `pipeline-runner`, `tester`, `implementer`.
+
+Code quality, reuse, structural recommendations and security inspection are
+consolidated into review_changes. The runner owns check logs and criterion evidence.
+The old five review agent files are retired; do not add parallel review agents.
 
 Pipeline-runner edits agent model frontmatter during escalation. Preserve its
 restore rules; agent bodies and model choices are imported without redesign.
