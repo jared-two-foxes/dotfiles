@@ -45,3 +45,6 @@
 # Create ~/.gitconfig.local (or local/git/.gitconfig.local from repo template)
 [include]
     path = ~/.gitconfig.local
+[user]
+	name = jared-two-foxes
+	email = jared@twofoxes.co.nz

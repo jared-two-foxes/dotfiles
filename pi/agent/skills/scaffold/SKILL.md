@@ -1,363 +1,268 @@
 ---
 name: scaffold
 description: >
-  Knowledge of the ticket-pipeline TDD code generation tool — the `scaffold` CLI
-  and its subcommands (push-ticket, next-step, review-ticket,
-  propose-ticket-edit, split-ticket,
-  create-child-tickets, update-ticket, reset-pipeline, list-models, bench),
-  the criteria-stack state machine and its phases (WRITE_TEST, AWAIT_IMPL,
-  TICKET_VALIDATE, etc.), and pipeline state files (.criteria-stack.json,
-  .tdd-plan.md, .gap-plan.md, .dev-pipeline.toml, .declined-criteria.json,
-  .pipeline-log.jsonl). Use when questions relate to the TDD pipeline, the
-  criteria stack, scaffold commands, pipeline workflow or state files, or the
-  relationship between ticket-pipeline and the prompts/ directory.
+  Knowledge of the scaffold CLI — a ticket access and criteria-stack
+  management tool. Scaffold fetches Linear tickets, displays criteria-stack
+  status, and manages the criteria stack (push, pop, list, clear). It no
+  longer performs code generation, test writing, grounding, or TDD loops —
+  those responsibilities have migrated to review-cli (grounding and
+  validation) and the agent's own editing tools (test and implementation
+  writing). Use when questions relate to fetching Linear tickets, inspecting
+  or manipulating the criteria stack, or the .scaffold/ state files.
 ---
 
-# scaffold — Ticket-Pipeline TDD Tool
+# scaffold — Ticket Access & Criteria-Stack Management
 
-A Linear-ticket-driven TDD pipeline. It fetches tickets from Linear, plans
-and narrows them against the actual codebase, then drives a per-criterion
-red-green cycle: write a failing test, pause for implementation, detect
-green mechanically, repeat — until every acceptance criterion is satisfied,
-at which point a full ticket-validation gate runs (re-narrow, lint, full
-test suite, smoke, code review).
+Scaffold is a lightweight CLI for two things:
 
-## Entry Point
+1. **Fetching Linear tickets** — retrieve a ticket by identifier and print
+   its rendered markdown.
+2. **Managing the criteria stack** — a local, file-backed stack of criterion
+   frames that tracks which acceptance criteria are pending for a ticket.
 
-All commands are invoked via the `scaffold` dispatcher:
+Scaffold does **not** write tests, implement code, narrow plans, run
+validation gates, or drive a TDD loop. Those responsibilities now belong to
+`review-cli` (grounding checks and validation) and the agent's own editing
+tools (test and implementation writing).
+
+## Entry point
 
 ```
 scaffold <command> [args...]
-scaffold --help              # list all commands grouped by category
+scaffold --help              # list all commands
 scaffold <command> --help    # command-specific options
 ```
 
-`pip install -e .` from the ticket-pipeline source registers `scaffold` as a
-console script. Each subcommand forwards to a Python module's own `main()`;
-`scaffold <name> --help` shows that subcommand's real argparse flags.
-
-## The Core TDD Loop
-
-The everyday workflow is two gestures, run repeatedly:
+Three commands:
 
 ```
-scaffold push-ticket <ticket-id>    # 1. seed the criteria stack
-scaffold next-step                  # 2. write a test, implement, or re-check/pop
-scaffold next-step --continuous     #    optional: keep going until human input is required
+scaffold fetch-ticket <ticket-id>   # Fetch and print a Linear ticket
+scaffold status                     # Show ticket and criteria stack status
+scaffold stack <subcommand>         # Manage criteria stack operations
 ```
 
-Step 2 repeats for each acceptance criterion. When the last criterion for
-a ticket is popped, `next-step` automatically runs `TICKET_VALIDATE` — no
-separate command needed.
-
-### Incremental vs. Continuous Execution
-
-When orchestrating with the **`scaffold_run` tool** (vs. direct CLI), you can
-control execution granularity via the `continuous` parameter:
-
-- **`continuous: false` (default)** → each `scaffold_run` call advances exactly one phase, returning intermediate status (`stackTopFrame.status`) and logs for live progress reporting. Repeat calls until done.
-- **`continuous: true`** → `next-step` runs with `--continuous`, executing all phases until human-only pauses (red test → implement → verify) in a single blocking call.
-
-See the **via-scaffold skill** for orchestration patterns using the default incremental mode for visibility.
-
-## Command Reference
-
-### Ticket Review (manual, situational)
-
-| Command                    | Description                                                                                                                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `review-ticket <id>`       | Check a ticket's claims against the actual codebase. Read-only report saved to `.ticket-review-<id>.md`. Never rewrites the ticket.  |
-| `propose-ticket-edit <id>` | Rewrite a ticket to resolve review-ticket's flagged concerns. Output to `.ticket-proposed-<id>.md` by default. Never touches Linear. |
-
-These commands are available for manual use on Linear tickets or when a ticket needs post-hoc correction. Ticket quality (review, context exploration, criteria verification) is handled upstream by the `to-tickets` or `planner` skills before any ticket reaches `push-ticket`.
-
-### Seed & Run the Criteria Loop
-
-| Command            | Description                                                                                                                                                                                                                 |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `push-ticket <id>` | Fetch a Linear ticket, run plan+narrow, seed `.criteria-stack.json` with one frame per remaining acceptance criterion. The criteria stack handles any number of criteria from a single ticket — splitting is not automatic. |
-| `next-step`        | Advance the criteria stack by exactly one phase. No ticket-id argument — reads from the stack itself. Re-run it to keep moving; `--continuous` keeps going until a genuine human-only pause.                                |
-
-### Ticket Restructuring (manual — not part of push-ticket)
-
-| Command                            | Description                                                                                                                       |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `split-ticket <id>`                | Assess a ticket for complexity and propose child tickets if too large. Standalone — never creates tickets in Linear itself. Saves |
-| report to `.ticket-split-<id>.md`. |
-| `create-child-tickets <id>`        | Turn split-ticket's proposed children into real Linear sub-issues.                                                                |
-| `update-ticket <id>`               | Push a locally revised ticket file back to the live Linear ticket.                                                                |
-
-### Utilities
-
-| Command                | Description                                                                                                                       |
-| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `list-models`          | List models available from the configured AI provider.                                                                            |
-| `reset-pipeline`       | Clear `.criteria-stack.json` and all scratch files. Dry-run by default; `--yes` to execute. Never removes `.dev-pipeline.toml` or |
-| `.pipeline-log.jsonl`. |
-
-### Advanced / Internal
-
-| Command             | Description                                                         |
-| ------------------- | ------------------------------------------------------------------- |
-| `copilot-login`     | One-time device-flow OAuth for the GitHub Copilot provider.         |
-| `fetch-ticket <id>` | Fetch and render a single Linear ticket by id.                      |
-| `bench`             | Run a pipeline block N times per model and report pass-rate/cost.   |
-| `bench-block`       | Run one pipeline block once against fixed fixtures (used by bench). |
-
-## The Criteria-Stack State Machine
-
-`.criteria-stack.json` is the pipeline's sole cross-invocation source of
-truth — a JSON array of `CriterionFrame` objects. `next-step` reads the top
-frame and dispatches based on its `status` field (re-detected fresh from
-real state every step — status is a hint, never a trust boundary).
-
-### Phase Dispatch (top frame)
+## Command: fetch-ticket
 
 ```
-stack empty                     → done, nothing to do
-status == "validating"          → TICKET_VALIDATE (resume a crashed validation)
-status == "green-unconfirmed"   → re-run scoped tests:
-                                    any red    → normal AWAIT_IMPL (someone fixed it)
-                                    all green,
-                                      nothing unconfirmed    → done, POP
-                                      some unconfirmed,
-                                        --accept-green       → done, POP
-                                        no --accept-green    → pause (exit 0)
-verification == "manual" AND
-  status in ("pending",
-    "awaiting-manual-impl")     → MANUAL_CRITERION (no test — see below)
-status == "pending"             → WRITE_TEST
-status == "pending",
---manual-test passed            → MANUAL_TEST_GATE
-                                   (skip Tester AI; use provided
-                                    --manual-test-ref refs, or
-                                    existing_test refs if present;
-                                    run compile + scoped tests)
-status == "pending",
---skip-test passed              → SKIP_TEST_GATE
-                                   (skip WRITE_TEST and hand directly
-                                    to Implementor with build-only gate)
-status == "test-written",
-  missing test_files/test_names → WRITE_TEST (retry)
-status == "test-written"        → re-run scoped tests:
-                                    any red,
-                                      --skip-implementation
-                                                → AWAIT_IMPL (manual impl pause)
-                                    any red    → IMPLEMENT (AI)
-                                    all green,
-                                      nothing unconfirmed    → done, POP
-                                      something unconfirmed  → green-unconfirmed
-status == "done"                → POP
+scaffold fetch-ticket <ticket-id>
 ```
 
-### POP → TICKET_VALIDATE
+Fetches a Linear ticket by its human-readable identifier (e.g. `SA-456`)
+and prints rendered markdown to stdout. The output includes a metadata
+table (state, priority, assignee, labels, dates, URL) and the ticket's
+description.
 
-When POP removes the last frame for a ticket (or empties the stack),
-`TICKET_VALIDATE` runs automatically:
+### API key
 
-1. **Sentinel frame** — a `"validating"` status frame is pushed first, so a
-   crash mid-validation is resumable on the next `next-step` call.
-2. **Re-narrow safety net** — fresh fetch + plan + narrow. If the re-narrow
-   still finds unmet criteria, they're pushed as new frames (origin =
-   `validate-missed`) instead of failing outright.
-3. **Lint gate** — format check + lint check (toolchain-specific commands).
-4. **Full test suite** — the entire test suite, not just scoped tests.
-5. **Smoke test** — optional, only if `smoke_cmd` is configured in
-   `.dev-pipeline.toml`.
-6. **Code review** — AI reviews all changed files against the original plan.
-   `APPROVED` → remove sentinel, ticket is done. `CHANGES REQUESTED` →
-   review findings pushed as new frames (origin = `review`).
+The Linear API key is read from `~/.secrets/linear-key` (a plain text file
+containing the key).
 
-### Manual-Verification Criteria
+### Output format
 
-Criteria tagged `verification: "manual"` (documentation, config, CI changes
-— no meaningful red/green) skip WRITE_TEST/AWAIT_IMPL entirely. The
-mechanical floor is whether the files named in the criterion/plan_context
-actually appear in `git diff` / untracked files. A match pops immediately;
-no match pauses. If no file can be identified, `--accept-manual` is required
-to pop.
+```
+# SA-456 — Ticket title
 
-### Exit Codes (next-step)
+| Field    | Value |
+|----------|-------|
+| State    | In Progress |
+| Priority | High |
+| Assignee | Jane Doe |
+| Labels   | bug, backend |
+| Created  | 2025-01-15 |
+| Updated  | 2025-01-20 |
+| URL      | https://linear.app/... |
 
-- **0** — every human pause point (red test awaiting implementation, review
-  findings pushed, stack empty). "Go implement something", not "something broke".
-- **Non-zero** — genuine pipeline failure (compile error exhausted retries,
-  lint/test-suite/smoke failure, unparseable review).
+## Description
 
-### Key Flags
+[ticket description markdown]
+```
 
-| Flag                                            | Command                                         | Effect                                                                                                                       |
-| ----------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--continuous`                                  | next-step                                       | Advance through every automatable transition without pausing; stop only at genuine human input points.                       |
-| `--accept-green`                                | next-step                                       | Accept unconfirmed green tests (validate-missed/review origin criteria whose tests passed without implementation).           |
-| `--accept-manual`                               | next-step                                       | Accept a manual-verification criterion as satisfied, overriding the git-changed-files floor check.                           |
-| `--manual-test`                                 | next-step                                       | Use manually authored test(s) for the top pending test criterion instead of running the Tester AI.                           |
-| `--manual-test-ref <file::qualified_test_name>` | next-step                                       | Scoped test reference for `--manual-test`; repeatable.                                                                       |
-| `--skip-test`                                   | next-step                                       | Skip WRITE_TEST for a pending `verification: test` criterion and hand it directly to the Implementor with build-only gating. |
-| `--skip-implementation`                         | next-step                                       | Require manual implementation for red tests (pause in AWAIT_IMPL instead of running the Implementor AI).                     |
-| `--accept-no-test`                              | next-step                                       | Accept criteria without tests as satisfied without forcing a test-writing step.                                              |
-| `--retry-policy {fixed-budget,endless}`         | next-step                                       | Set the retry policy for continued implementation attempts.                                                                  |
-| `--no-compile-tool`                             | next-step                                       | Disable the compile tool during next-step execution.                                                                         |
-| `--no-reset-on-retry`                           | next-step                                       | Keep the repo state intact across retry attempts instead of resetting it.                                                    |
-| `--strategy {tdd,direct}`                       | push-ticket / next-step                         | Choose the implementation strategy for the target scaffold command.                                                          |
-| `--explore`                                     | push-ticket                                     | Start an interactive exploration session for the ticket instead of the standard plan+narrow flow.                            |
-| `--planning-strategy {mechanical,agent}`        | push-ticket                                     | Choose the planning strategy used by push-ticket.                                                                            |
-| `--model <id>`                                  | most commands                                   | AI model to use (default: `opencode:gpt-5.4-mini`).                                                                          |
-| `--config <path>`                               | next-step                                       | Path to pipeline config (default: `.dev-pipeline.toml`).                                                                     |
-| `--max-attempts <n>`                            | next-step                                       | Total implementation attempts, initial write + refines sharing one budget (default: 3).                                      |
-| `--force`                                       | push-ticket                                     | Abandon an in-progress stack for a different ticket; replace entirely.                                                       |
-| `--prepend`                                     | push-ticket                                     | Insert a new ticket's frames ahead of an in-progress stack as a prerequisite; in-progress stack resumes after.               |
-| `--validate-only`                               | push-ticket                                     | Skip fetch/plan/narrow; push a "validating" sentinel so the next `next-step` runs the full validation gate directly.         |
-| `--from-gap-plan`                               | push-ticket                                     | Reuse existing `.gap-plan.md` instead of re-running plan+narrow.                                                             |
-| `--ticket-file-in <path>`                       | review-ticket, propose-ticket-edit, push-ticket | Read ticket from a local file instead of fetching from Linear.                                                               |
-| `--log-level <level>`                           | most commands                                   | `trace`/`debug`/`info`/`warning`/`error`/`critical`. `debug` shows per-tool-call activity; `trace` adds raw                  |
-| request/response payloads.                      |
+### Errors
 
-## CriterionFrame Fields
+- Ticket not found → stderr message, exit 1
+- HTTP error → `HTTP <code>: <body>` on stderr, exit 1
 
-Each entry in `.criteria-stack.json` has:
+## Command: status
 
-| Field                           | Type              | Description                                                                                                                    |
-| ------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ticket`                        | str               | Linear ticket ID, e.g. `"SA-42"`                                                                                               |
-| `criterion`                     | str               | Verbatim bullet from the gap plan, e.g. `"- [ ] ..."`                                                                          |
-| `plan_context`                  | str               | Implementation Plan lines relevant to this criterion, extracted at push time                                                   |
-| `test_files`                    | list[str] \| None | Set once the test-writer runs; parallel to `test_names`. Usually length 1.                                                     |
-| `test_names`                    | str \| None       | Fully-qualified test names, parallel to `test_files`                                                                           |
-| `status`                        | str               | `"pending"` / `"test-written"` / `"green-unconfirmed"` / `"awaiting-manual-impl"` / `"done"` / `"validating"`                  |
-| `origin`                        | str               | `"ticket"` (initial push) / `"validate-missed"` (re-narrow found it) / `"review"` (code review found it) / `"ticket-validate"` |
-| (sentinel)                      |
-| `verification`                  | str               | `"test"` (default, red/green) / `"manual"` (no meaningful test)                                                                |
-| `existing_test_refs`            | list[str]         | `"file::test_name"` references to existing tests this criterion modifies rather than creating new ones                         |
-| `unconfirmed_tests`             | list[str]         | Subset of `test_names` currently green without implementation (origin != `"ticket"`, observed green at first                   |
-| WRITE_TEST). Only ever shrinks. |
+```
+scaffold status
+```
 
-### Origin-Based Trust
+Shows the top of the criteria stack — the currently active ticket and
+criterion. No arguments.
 
-- **`origin == "ticket"`** — green-at-write-time is trusted unconditionally.
-  One criterion's implementation can legitimately satisfy a sibling as a
-  side effect.
-- **Any other origin** (`validate-missed`, `review`) — green-at-write-time is
-  NOT trusted. The test is recorded in `unconfirmed_tests` and requires
-  `--accept-green` to pop, preventing a false-green → pop → re-validate →
-  false-green infinite loop.
+### Output (stack has frames)
 
-## Key Files
+```
+Ticket: SA-1
+Criteria remaining: 3
 
-### Cross-Invocation State
+Current criterion:
+- [pending | ticket] - [ ] First criterion text
+```
 
-| File                                                       | Role                                                                                                                          |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `.criteria-stack.json`                                     | The work queue. Sole source of truth across `next-step` invocations. Only `next-step` (and `push-ticket` at seed time) writes |
-| to it.                                                     |
-| `.declined-criteria.json`                                  | Ledger of criteria rejected by the mechanical grounding check (symbols/tokens in the criterion that don't exist in the        |
-| codebase). Append-only; makes declines sticky across runs. |
-| `.dev-pipeline.toml`                                       | Project-local build/test/lint command overrides. Your configuration, not pipeline output — `reset-pipeline` never removes it. |
-| `.pipeline-log.jsonl`                                      | Diagnostic event log. Never removed by reset.                                                                                 |
+### Output (stack empty)
 
-### Transient Scratch (regenerated fresh, never trusted across runs)
+```
+No active ticket. Stack is empty.
+```
 
-| File                         | Role                                             |
-| ---------------------------- | ------------------------------------------------ |
-| `.ticket.md`                 | Ticket text fetched from Linear                  |
-| `.tdd-plan.md`               | Implementation plan (AI-generated)               |
-| `.gap-plan.md`               | Narrowed plan with remaining acceptance criteria |
-| `.ticket-review-<id>.md`     | review-ticket report                             |
-| `.ticket-proposed-<id>.md`   | propose-ticket-edit output                       |
-| `.ticket-split-<id>.md`      | split-ticket report                              |
-| `.ticket-children-<id>.json` | create-child-tickets manifest                    |
+## Command: stack
 
-## Configuration: .dev-pipeline.toml
+```
+scaffold stack <subcommand> [options]
+```
 
-Overrides the auto-detected toolchain's default commands. Keys:
+Manages the criteria stack. Four subcommands:
 
-| Key                | Role                                                                               |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| `build_cmd`        | Compile/build the project                                                          |
-| `test_compile_cmd` | Compile tests without running them                                                 |
-| `test_cmd`         | Run the full test suite                                                            |
-| `test_filter_cmd`  | Run a scoped test by name (`{filter}` is substituted with the qualified test name) |
-| `fmt_fix_cmd`      | Auto-fix formatting                                                                |
-| `clippy_fix_cmd`   | Auto-fix lint issues                                                               |
-| `fmt_check_cmd`    | Check formatting without fixing                                                    |
-| `clippy_cmd`       | Run lint checks                                                                    |
-| `smoke_cmd`        | Optional smoke test command (if unset, smoke gate is skipped)                      |
+### stack list
 
-### Auto-Detected Toolchains
+```
+scaffold stack list
+```
 
-Detection by marker file at project root (first match wins):
+Prints the full stack as a JSON array (newest first / top of stack at
+index 0). Each frame is an object with these fields:
 
-| Priority | Toolchain             | Marker(s)                                      | Notes                                |
-| -------- | --------------------- | ---------------------------------------------- | ------------------------------------ |
-| 1        | Bazel                 | `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` | Takes priority (monorepo wrapping)   |
-| 2        | Rust (cargo)          | `Cargo.toml`                                   | Default fallback if nothing detected |
-| 3        | CMake/ctest           | `CMakeLists.txt`                               |                                      |
-| 4        | SvelteKit (npm)       | `svelte.config.js`, `svelte.config.ts`         | More specific than generic TS        |
-| 5        | TypeScript/Node (npm) | `package.json`                                 | Generic fallback                     |
+```json
+[
+  {
+    "ticket": "SA-1",
+    "criterion": "- [ ] First",
+    "status": "pending",
+    "origin": "ticket",
+    "plan_context": ""
+  }
+]
+```
 
-## The prompts/ Directory
+### stack push
 
-The pipeline's AI steps (plan, narrow, test-criterion, implement-criterion,
-review, etc.) are driven by prompt templates in a `prompts/` directory that
-lives as a sibling of the `ticket-pipeline/` source tree. Each `.prompt.md`
-file contains the role/steps/rules body injected into the model's prompt.
-Loaded fresh on every run by `pipeline_lib.load_prompt_body()`.
+```
+scaffold stack push --ticket <id> --criterion <text> \
+  [--status <status>] [--origin <origin>] [--plan-context <context>]
+```
 
-Key prompt files:
+Pushes a new criterion frame onto the top of the stack (index 0).
 
-| File                                   | Drives                                                                                                        |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `plan.prompt.md`                       | The planning step (full implementation plan from ticket)                                                      |
-| `narrow-plan.prompt.md`                | The narrowing step (gap plan: what's left to do) — also tags `verification: manual` and `existing_test:` refs |
-| `test-criterion.prompt.md`             | WRITE_TEST phase (write a failing test for one criterion)                                                     |
-| `implement-criterion.prompt.md`        | next-step's implementation phase (make the failing test pass)                                                 |
-| `implement-criterion-direct.prompt.md` | next-step's implementation phase for manual-verification frames (no target test)                              |
-| `review-singlepass.prompt.md`          | TICKET_VALIDATE's code review gate                                                                            |
-| `review-test-quality.prompt.md`        | Gating test-quality review inside WRITE_TEST's retry loop (advisory fallback on budget exhaustion)            |
-| `review-ticket.prompt.md`              | review-ticket command                                                                                         |
-| `propose-ticket-edit.prompt.md`        | propose-ticket-edit command                                                                                   |
-| `split-ticket.prompt.md`               | split-ticket complexity check                                                                                 |
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--ticket` | yes | — | Ticket id (e.g. `SA-123`) |
+| `--criterion` | yes | — | Criterion text (typically a `- [ ] ...` checkbox bullet) |
+| `--status` | no | `pending` | Frame status |
+| `--origin` | no | `ticket` | Frame origin |
+| `--plan-context` | no | `""` | Optional context string |
 
-## Architectural Principles
+Output: `Pushed 1 frame.`
 
-1. **Single-owner rule** — only `next-step` writes to `.criteria-stack.json`
-   (and `push-ticket` at seed time). The implementation phase never touches the
-   stack directly; it only makes the top frame's test pass. This makes failure
-   safe: if implementation exhausts its attempts, the frame is still
-   `test-written`, the test is still red, and `next-step` either retries AI
-   implementation or pauses in AWAIT_IMPL when `--skip-implementation` is used.
+### stack pop
 
-2. **Guard-first** — every precondition is re-checked from real state before
-   any AI call spends money. `push-ticket` checks re-entrancy/clobber guards
-   before touching any file. `next-step` checks stack state, frame status, and
-   scoped-test redness before running the Implementor.
+```
+scaffold stack pop
+```
 
-3. **Status is a hint, never a trust boundary** — `next-step` re-detects
-   real state at the top of every step. A frame stored as `"test-written"`
-   might have been fixed by a human; the phase check re-runs the tests and
-   dispatches based on what's actually red/green, not what's stored.
+Removes and prints the top frame as a JSON object. If the stack is empty,
+prints `Stack is empty.`
 
-4. **Test tamper guard** — the implementation phase snapshots each test function's
-   source (brace-counting extraction) before the first attempt and verifies
-   it byte-for-byte unchanged after every attempt. Modifying the test to
-   make it pass is a hard, mechanical failure. Pipeline bookkeeping files
-   (`.criteria-stack.json`, scratch files) are also write-protected.
+### stack clear
 
-5. **No shell for the model** — the pipeline's in-process tool layer
-   (`tools.py`) provides `read_file`, `write_file`, `search_files`,
-   `list_dir`, and `ask_user_prompt`. `run_command` is explicitly offered
-   but always refused — there is no shell behind the tool layer, ever.
-   Build/test verification is handled by the pipeline scripts between steps,
-   not by the model.
+```
+scaffold stack clear
+```
 
-6. **Grounding check** — before any criterion becomes a stack frame, a
-   mechanical (no-AI) check verifies that symbols/tokens mentioned in the
-   criterion actually exist in the codebase. Criteria that fail are recorded
-   in `.declined-criteria.json` and never pushed, preventing the AI from
-   working against phantom requirements.
+Removes all frames from the stack. Output: `Stack cleared.`
 
-7. **Sentinel-based crash recovery** — `TICKET_VALIDATE` pushes a
-   `"validating"` sentinel frame before doing anything fallible (network
-   fetch, AI calls, lint, test suite, smoke). If the process dies
-   mid-validation, the sentinel survives on the stack and the next
-   `next-step` call resumes validation from scratch.
+## CriterionFrame fields
+
+Every frame on the stack has these fields:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `ticket` | string | *(required)* | Linear ticket identifier |
+| `criterion` | string | *(required)* | The acceptance criterion text |
+| `status` | string | `pending` | Current state of the criterion |
+| `origin` | string | `ticket` | Where the criterion came from |
+| `plan_context` | string | `""` | Optional context for implementation |
+
+## State files
+
+All state lives under `.scaffold/` in the current working directory:
+
+| File | Purpose |
+|------|---------|
+| `.scaffold/.criteria-stack.json` | The criteria stack — a JSON array of `CriterionFrame` objects, top of stack at index 0 |
+| `.scaffold/.criteria-stack.lock` | File lock for concurrent access safety |
+
+### Stack file format
+
+The stack file is a JSON array. The first element (index 0) is the top of
+the stack (the currently active criterion). Frames are pushed to the front
+and popped from the front.
+
+```json
+[
+  {"ticket": "SA-1", "criterion": "- [ ] Second", "status": "pending", "origin": "ticket", "plan_context": ""},
+  {"ticket": "SA-1", "criterion": "- [ ] First", "status": "pending", "origin": "ticket", "plan_context": ""}
+]
+```
+
+### Concurrency safety
+
+Stack operations use file locking (`fcntl` on Unix, `msvcrt` on Windows)
+to prevent concurrent modification. Writes are atomic (temp file + rename
+with `fsync`).
+
+### Validation on load
+
+When the stack file is loaded, each entry is validated:
+- Must be a JSON object
+- Must have string `ticket` and `criterion` fields (non-empty after trim)
+- Optional fields (`status`, `origin`, `plan_context`) must be strings if
+  present
+
+Invalid entries raise `ValueError` with a descriptive message.
+
+## What scaffold does NOT do
+
+The following capabilities have been removed from scaffold and migrated to
+other tools:
+
+| Former capability | Now handled by |
+|-------------------|----------------|
+| Test writing (WRITE_TEST phase) | Agent (`edit`/`write` tools) |
+| Implementation (AWAIT_IMPL phase) | Agent (`edit`/`write` tools) |
+| Code generation | Agent (`edit`/`write` tools) |
+| Plan narrowing / grounding | `review-cli` + agent |
+| Ticket validation gate | `review-cli` |
+| Code review | `review-cli` |
+| Pipeline state machine | *(removed — no state machine)* |
+| push-ticket, next-step, review-ticket | *(removed — use `stack push` instead)* |
+| .tdd-plan.md, .gap-plan.md, .pipeline-log.jsonl | *(removed)* |
+
+Scaffold is now a thin ticket-access and stack-management layer. The
+criteria stack is a simple data structure — there is no phase machine,
+no automatic phase transitions, and no AI-driven workflow inside scaffold.
+
+## Relationship to review-cli and the agent
+
+The tools form a divided workflow:
+
+| Tool | Role |
+|------|------|
+| `scaffold` | Fetch tickets, manage the criteria stack (what to work on) |
+| Agent (`edit`/`write`) | Write tests and implementation code (do the work) |
+| `review-cli` | Grounding checks and code review (verify the work) |
+
+A typical workflow might be:
+
+1. `scaffold fetch-ticket SA-42` — read the ticket
+2. `scaffold stack push --ticket SA-42 --criterion "- [ ] Add cache invalidation"` — queue a criterion
+3. Use `review-cli` to ground the criterion against the codebase
+4. Agent writes the test and implementation using `edit`/`write`
+5. Use `review-cli` to review the diff
+6. `scaffold stack pop` — criterion is done, remove it from the stack
+7. `scaffold status` — check what's next
+
+Scaffold tracks the list of work; review-cli verifies it; the agent does the
+work directly. See the `tdd` skill (`/skill:tdd`) for the full TDD workflow
+that orchestrates all three together.
