@@ -50,12 +50,19 @@ foreach ($entry in $entries) {
 }
 # Remove retired agents from copy installs as well as existing directory links.
 # Back up each legacy file before replacing its old role with review-cli.
-$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator')
+$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator', 'daily-summary')
 foreach ($agent in $retiredAgents) {
     $legacyAgent = Join-Path $ConfigDir "agents/$agent.md"
     if ($null -ne (Get-Item -LiteralPath $legacyAgent -Force -ErrorAction SilentlyContinue)) {
         # If the entire agents directory is already a conflict, backing it up covers this file.
         if ($conflicts -notcontains (Join-Path $ConfigDir 'agents')) { $conflicts += $legacyAgent }
+    }
+}
+# Scheduling helpers for the retired daily-summary agent must not survive copy upgrades.
+foreach ($script in @('run-daily-summary.ps1', 'register-scheduled-task.ps1')) {
+    $legacyScript = Join-Path $ConfigDir "scripts/$script"
+    if ($null -ne (Get-Item -LiteralPath $legacyScript -Force -ErrorAction SilentlyContinue)) {
+        if ($conflicts -notcontains (Join-Path $ConfigDir 'scripts')) { $conflicts += $legacyScript }
     }
 }
 # A legacy JSON config would compete with the managed JSONC config.

@@ -1,7 +1,7 @@
 # OpenCode configuration
 
 Imported from the standalone local OpenCode repository. The implementation/planning agents and seven imported skills remain.
-Review-only subagents are replaced by review-cli; scheduled tasks remain optional.
+Review-only subagents are replaced by review-cli.
 
 ## Install
 
@@ -55,7 +55,6 @@ tracked agent files. In copy mode they edit installed copies.
 
 ```powershell
 & "$env:USERPROFILE\.config\opencode\scripts\toggle-github-latch.ps1" -Status
-& "$env:USERPROFILE\.config\opencode\scripts\register-scheduled-task.ps1" -Time "23:59"
 ```
 
 AGENTS.md is maintenance guidance for this directory and is not deployed as global
@@ -119,3 +118,15 @@ pwsh -NoProfile -File tests/install-opencode.ps1
 
 The subprocess tests use a protocol fixture; they do not spend provider credits or
 measure live model review quality.
+
+## Removing the former daily summary
+
+The daily-summary agent and its scheduling helpers are retired. Forced installer
+upgrades back up and remove their old installed copies. If you previously
+registered the Windows task, remove that registration once on that machine:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'OpenCode Daily Summary' -Confirm:$false
+```
+
+Existing summary logs are retained.
