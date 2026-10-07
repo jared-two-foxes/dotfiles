@@ -10,7 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $SourceDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'opencode'
-$entries = @('agents', 'skills', 'scripts', 'opencode.jsonc', 'dcp.jsonc')
+$entries = @('agents', 'skills', 'scripts', 'tools', 'opencode.jsonc', 'dcp.jsonc')
 
 function Test-DeploymentMatches {
     param([string]$Source, [string]$Destination)
@@ -46,6 +46,16 @@ foreach ($entry in $entries) {
     $existing = Get-Item -LiteralPath $destination -Force -ErrorAction SilentlyContinue
     if ($null -ne $existing -and -not (Test-DeploymentMatches $source $destination)) {
         $conflicts += $destination
+    }
+}
+# Remove retired agents from copy installs as well as existing directory links.
+# Back up each legacy file before replacing its old role with review-cli.
+$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator')
+foreach ($agent in $retiredAgents) {
+    $legacyAgent = Join-Path $ConfigDir "agents/$agent.md"
+    if ($null -ne (Get-Item -LiteralPath $legacyAgent -Force -ErrorAction SilentlyContinue)) {
+        # If the entire agents directory is already a conflict, backing it up covers this file.
+        if ($conflicts -notcontains (Join-Path $ConfigDir 'agents')) { $conflicts += $legacyAgent }
     }
 }
 # A legacy JSON config would compete with the managed JSONC config.

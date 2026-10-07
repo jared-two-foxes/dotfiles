@@ -19,7 +19,7 @@ try {
     & $installer -Mode Copy -ConfigDir $config -WhatIf
     Assert-True (-not (Test-Path $config)) 'WhatIf created configuration'
     & $installer -Mode Copy -ConfigDir $config
-    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 12) 'Agent files missing'
+    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 7) 'Agent files missing'
     Assert-True (-not (Get-Item (Join-Path $config 'agents')).LinkType) 'Copy mode made a link'
     Assert-True (-not (Test-Path (Join-Path $config 'AGENTS.md'))) 'Repository instructions deployed globally'
     Set-Content (Join-Path $config 'latch.json') '{"state":"custom"}'
@@ -27,12 +27,19 @@ try {
     & $installer -Mode Copy -ConfigDir $config
     Assert-True (-not (Test-Path (Join-Path $config 'backups'))) 'Identical copy was not idempotent'
     Assert-True ((Get-Content (Join-Path $config 'latch.json') -Raw) -match 'custom') 'Rerun reset latch'
+    Set-Content (Join-Path $config 'agents/validator.md') 'retired'
+    # An old agent can remain in an otherwise up-to-date copy install.
+    & $installer -Mode Copy -ConfigDir $config -Force
+    Assert-True (-not (Test-Path (Join-Path $config 'agents/validator.md'))) 'Copy upgrade retained retired agent'
+    Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter validator.md).Count -eq 1) 'Retired copy was not backed up'
     Set-Content (Join-Path $config 'opencode.json') '{"legacy":true}'
     & $installer -Mode Link -ConfigDir $config
     Assert-True (Test-Path (Join-Path $config 'opencode.json')) 'Unforced install changed conflict'
     Assert-True (-not (Get-Item (Join-Path $config 'agents')).LinkType) 'Unforced install partially deployed'
     & $installer -Mode Link -ConfigDir $config -Force
     Assert-True (-not (Test-Path (Join-Path $config 'opencode.json'))) 'Legacy JSON competes with JSONC'
+    Assert-True (-not (Test-Path (Join-Path $config 'agents/validator.md'))) 'Retired agent survived migration'
+    Assert-True (Test-Path (Join-Path $config 'tools/review_changes.ts')) 'Review tool not deployed'
     Assert-True ([bool](Get-Item (Join-Path $config 'agents')).LinkType) 'Link mode failed'
     Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter opencode.json).Count -eq 1) 'Legacy config not backed up'
     $backups = @(Get-ChildItem (Join-Path $config 'backups')).Count
