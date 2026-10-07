@@ -74,7 +74,7 @@ Report to the user: ticket ID, title, one-line description summary, and current 
 
 ## Phase 3 — Discovery
 
-Load codebase and memory context inline.
+Load codebase context inline.
 
 ### 3a — File Tree
 
@@ -97,11 +97,7 @@ CODEBASE_CONTEXT = CODEBASE_TREE
                  + key source file contents (up to 5 files)
 ```
 
-### 3c — Recallium Memory Search
-
-Call `search_memories` via the Recallium MCP, querying on `PROJECT_NAME` and keywords from the ticket title/description. Store as `RECALLIUM_CONTEXT`.
-
-### 3d — Toolchain Detection
+### 3c — Toolchain Detection
 
 Load the `toolchain-detection` skill. Extract:
 - `TOOLCHAIN` (BUILD_CMD, TEST_CMD, FMT_FIX_CMD, FMT_CHECK_CMD, LINT_CMD, TYPECHECK_CMD)
@@ -111,7 +107,7 @@ Load the `toolchain-detection` skill. Extract:
 
 ## Phase 4 — Spec Generation
 
-Using `CODEBASE_CONTEXT`, `RECALLIUM_CONTEXT`, and the ticket content, produce a structured `PRECOMPUTED_PLAN`:
+Using `CODEBASE_CONTEXT` and the ticket content, produce a structured `PRECOMPUTED_PLAN`:
 
 ```
 === PRECOMPUTED_PLAN ===
@@ -134,8 +130,6 @@ complexity_estimate: trivial | complex
 
 Guidelines:
 - Acceptance criteria must be specific and testable.
-- Do not contradict anything in `RECALLIUM_CONTEXT` without explicit justification.
-- Do not propose approaches `RECALLIUM_CONTEXT` flags as previously failed.
 - Prefer iterative, minimal changes.
 - `trivial`: <50 lines changed, no auth/secrets/payment/data-migration concerns, one tightly-coupled scope.
 - `complex`: everything else.
@@ -170,10 +164,6 @@ PRECOMPUTED_PLAN: [full PRECOMPUTED_PLAN block]
 
 CODEBASE_CONTEXT: [full CODEBASE_CONTEXT]
 
-RECALLIUM_CONTEXT: [full RECALLIUM_CONTEXT]
-
-PROJECT_NAME: [PROJECT_NAME]
-
 TOOLCHAIN: [full TOOLCHAIN]
 
 GIT_WORKFLOW: [GIT_WORKFLOW]
@@ -195,10 +185,6 @@ Wait for pipeline-runner to return a `PIPELINE_RESULT` block.
    - Files modified
    - Any future work items
 
-Then ask: **"Have the changes been committed and pushed successfully? (yes / no)"**
-- **yes** → load the `pipeline-completion-store` skill and store a Recallium completion memory.
-- **no** → inform the user the changes are local.
-
 ### If `STATUS: FAILED` or `STATUS: ABORTED`
 
 1. Leave the ticket In Progress — **do not mark it Done**
@@ -217,6 +203,4 @@ Then ask: **"Have the changes been committed and pushed successfully? (yes / no)
 - Bash commands must be read-only (Get-ChildItem, git remote get-url) — never write or destructive.
 - Do not skip Phase 5 user confirmation — the gate must always be presented.
 - Never mark a ticket Done unless `PIPELINE_RESULT.STATUS = PASSED`.
-- If `RECALLIUM_CONTEXT` contains a prior failed approach, note it in the spec and explain why this attempt differs.
-- `PROJECT_NAME` must be derived before invoking pipeline-runner — never pass a placeholder.
 - If the Linear MCP is unavailable, report clearly and stop.

@@ -31,13 +31,24 @@ try {
     Set-Content (Join-Path $config 'agents/daily-summary.md') 'retired summary'
     Set-Content (Join-Path $config 'scripts/run-daily-summary.ps1') 'retired launcher'
     Set-Content (Join-Path $config 'scripts/register-scheduled-task.ps1') 'retired registration'
-    # An old agent can remain in an otherwise up-to-date copy install.
+    foreach ($skill in @('recallium', 'pipeline-completion-store')) {
+        $legacySkill = Join-Path $config "skills/$skill"
+        New-Item -ItemType Directory -Path $legacySkill | Out-Null
+        Set-Content (Join-Path $legacySkill 'SKILL.md') "retired $skill"
+    }
+    # Retired agents, scripts and skills can remain in an otherwise current copy install.
     & $installer -Mode Copy -ConfigDir $config -Force
     Assert-True (-not (Test-Path (Join-Path $config 'agents/validator.md'))) 'Copy upgrade retained retired agent'
     Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter validator.md).Count -eq 1) 'Retired copy was not backed up'
     foreach ($legacy in @('agents/daily-summary.md', 'scripts/run-daily-summary.ps1', 'scripts/register-scheduled-task.ps1')) {
         Assert-True (-not (Test-Path (Join-Path $config $legacy))) "Retired daily-summary file survived: $legacy"
         Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter (Split-Path -Leaf $legacy)).Count -eq 1) "Retired daily-summary file was not backed up: $legacy"
+    }
+    foreach ($skill in @('recallium', 'pipeline-completion-store')) {
+        Assert-True (-not (Test-Path (Join-Path $config "skills/$skill"))) "Retired memory skill survived: $skill"
+        $backup = @(Get-ChildItem (Join-Path $config 'backups') -Recurse -Directory -Filter $skill)
+        Assert-True ($backup.Count -eq 1) "Retired memory skill was not backed up: $skill"
+        Assert-True ((Get-Content (Join-Path $backup[0].FullName 'SKILL.md') -Raw).Trim() -eq "retired $skill") "Retired skill backup changed: $skill"
     }
     Set-Content (Join-Path $config 'opencode.json') '{"legacy":true}'
     & $installer -Mode Link -ConfigDir $config

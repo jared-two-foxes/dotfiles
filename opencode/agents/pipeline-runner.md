@@ -1,5 +1,5 @@
 ---
-description: Core TDD pipeline subagent — invoked by the Design agent; handles retry budget, tier escalation, verification commands, and mid-workflow Recallium stores
+description: Core TDD pipeline subagent — invoked by the Design agent; handles retry budget, tier escalation, verification commands
 mode: subagent
 hidden: true
 model: opencode/claude-haiku-4-5
@@ -33,8 +33,6 @@ Set by the invoking orchestrator in the prompt:
 | `TOOLCHAIN` | Structured object with: `BUILD_CMD`, `TEST_CMD`, `FMT_FIX_CMD`, `FMT_CHECK_CMD`, `LINT_CMD`, `TYPECHECK_CMD` — absent keys mean no command |
 | `GIT_WORKFLOW` | `trunk-based` or `pr-based` |
 | `CODEBASE_CONTEXT` | File tree and specific file contents for the current task |
-| `RECALLIUM_CONTEXT` | Memory search results relevant to the current task |
-| `PROJECT_NAME` | Recallium project name |
 | `PRECOMPUTED_PLAN` | Full precomputed plan — required |
 | `REVIEW_ONLY_MODE` | _(optional)_ `true` — skips to Phase 6 |
 | `REPOSITORY_PATH` | Git repository path; defaults to the session worktree |
@@ -286,24 +284,6 @@ Keep the returned review id, baseline, target and snapshot in REVIEW_RESULT.
 Any edit after approval (including formatter fixes) invalidates it: re-run checks
 and call review_changes again. Do not run write-capable agents concurrently with
 review. A repository-change error requires fresh checks and a new review.
-
-## Recallium Mid-Workflow Stores
-
-Call `store_memory` immediately when any of the following occur:
-
-| Trigger | `memory_type` | Required content |
-|---|---|---|
-| A non-obvious architectural decision is made | `decision` | Decision, rationale, alternatives |
-| An approach is tried and rejected (implementation fails) | `working-notes` | What was tried, exact error or failure reason |
-| A reusable pattern is established | `working-notes` | Files demonstrating it, when to apply it |
-| A repo-wide convention is confirmed | `working-notes` | What it is and why |
-
-Required on every `store_memory` call:
-- `project_name`: the `PROJECT_NAME` passed to you
-- Include relevant file paths
-- Include enough rationale that a future session can act on it without re-reading this conversation
-
-Do **not** store the final "completed feature" memory — that is the orchestrator's responsibility after push confirmation.
 
 ## Provider Fallback Strategy
 

@@ -65,6 +65,13 @@ foreach ($script in @('run-daily-summary.ps1', 'register-scheduled-task.ps1')) {
         if ($conflicts -notcontains (Join-Path $ConfigDir 'scripts')) { $conflicts += $legacyScript }
     }
 }
+# Retired memory-service skills must not survive copy-based upgrades.
+foreach ($skill in @('recallium', 'pipeline-completion-store')) {
+    $legacySkill = Join-Path $ConfigDir "skills/$skill"
+    if ($null -ne (Get-Item -LiteralPath $legacySkill -Force -ErrorAction SilentlyContinue)) {
+        if ($conflicts -notcontains (Join-Path $ConfigDir 'skills')) { $conflicts += $legacySkill }
+    }
+}
 # A legacy JSON config would compete with the managed JSONC config.
 $legacyConfig = Join-Path $ConfigDir 'opencode.json'
 if ($null -ne (Get-Item -LiteralPath $legacyConfig -Force -ErrorAction SilentlyContinue)) {

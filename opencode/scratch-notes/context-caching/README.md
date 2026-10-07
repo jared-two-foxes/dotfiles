@@ -46,7 +46,7 @@ This directory contains three implementation options for enabling automatic LLM 
 
 | Aspect | Details |
 |--------|---------|
-| **Why cache?** | Large stable blocks (CODEBASE_CONTEXT, RECALLIUM_CONTEXT, TOOLCHAIN) are reused across 4+ agent phases |
+| **Why cache?** | Large stable blocks (CODEBASE_CONTEXT, TOOLCHAIN) are reused across 4+ agent phases |
 | **How much savings?** | ~90% token reduction, ~90% latency improvement for cached blocks |
 | **All providers?** | Yes — Claude, OpenAI, Ollama, and others all support automatic context caching |
 | **Config needed?** | No — works automatically; Option B formalizes it |
