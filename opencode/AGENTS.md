@@ -10,7 +10,7 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `skills/` contains the global skills.
 - `opencode.jsonc` contains MCP, model and plugin configuration (JSON with comments).
 - `dcp.jsonc` contains plugin configuration.
-- `scripts/` contains the review subprocess adapter, latch and optional daily-summary helpers.
+- `scripts/` contains the review subprocess adapter and latch helper.
 - `tools/review_changes.ts` exposes review-cli to OpenCode.
 - `scratch-notes/` and the Recallium package archive are retained reference material.
 
@@ -55,7 +55,7 @@ The binary requires its own provider credentials in the process environment.
 
 ## Agent files
 
-Primary agents: `build`, `design`, `linear-orchestrator`, `daily-summary`.
+Primary agents: `build`, `design`, `linear-orchestrator`.
 Subagents: `pipeline-runner`, `tester`, `implementer`.
 
 Code quality, reuse, structural recommendations and security inspection are
@@ -100,53 +100,3 @@ Plugin config is deployed as `~/.config/opencode/dcp.jsonc`. Key settings:
 | `autoCompress` | `true` | Automatically compress when threshold is exceeded |
 | `threshold` | `2000` | Line count threshold for auto-compression |
 | `preserveLast` | `5` | Number of recent messages to preserve during sweep |
-
-## Scheduled Tasks
-
-An optional Windows Task Scheduler job can run the `daily-summary` agent. Installation does not register it automatically.
-
-### Scripts
-
-| Script | Purpose |
-|---|---|
-| `scripts/run-daily-summary.ps1` | Launcher invoked by Task Scheduler. Runs the agent, captures output, writes a dated log file. |
-| `scripts/register-scheduled-task.ps1` | One-time setup script. Registers (or replaces) the scheduled task. |
-
-### Register the task
-
-Run once from the installed configuration (PowerShell 7+):
-
-```powershell
-& "$env:USERPROFILE\.config\opencode\scripts\register-scheduled-task.ps1"
-```
-
-Default schedule: **23:59 daily**.
-
-### Change the scheduled time
-
-Re-run the registration script with the `-Time` parameter:
-
-```powershell
-& "$env:USERPROFILE\.config\opencode\scripts\register-scheduled-task.ps1" -Time "22:00"
-```
-
-The task is replaced in-place (`-Force`), so no manual cleanup is needed.
-
-### Log files
-
-Each run writes a dated log to:
-
-```
-$env:USERPROFILE\.config\opencode\logs\daily-summary-YYYY-MM-DD.log
-```
-
-Log lines are timestamped: `[YYYY-MM-DD HH:mm:ss] <message>`.
-
-### Recallium dependency
-
-The `daily-summary` agent reads memory context from Recallium (`localhost:8001`). The launcher performs a TCP pre-flight check before starting the agent:
-
-- If Recallium **is** reachable → the agent runs with full memory context.
-- If Recallium **is not** reachable → a `WARNING` is written to the log and the agent runs anyway (it handles the absence of memory context gracefully). The task does **not** abort.
-
-Recallium must be running at 23:59 for the summary to include memory context. Start it before the scheduled time if needed.
