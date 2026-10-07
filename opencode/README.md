@@ -58,6 +58,16 @@ tracked agent files. In copy mode they edit installed copies.
 AGENTS.md is maintenance guidance for this directory and is not deployed as global
 OpenCode instructions. scratch-notes/ is retained in Git but not installed. The former standalone .git directory is not imported.
 
+## Implementation models
+
+Implementer defaults to `opencode/gpt-6-luna` through OpenCode Zen. The pipeline
+runner uses the same model for startup recovery and resets after escalation.
+Its Tier 2 and model-error fallback are `opencode/gpt-6.1-sol`; the existing
+three Tier 1 / two Tier 2 invocation limits and global retry budget still apply.
+Both models require access through the Zen account connected in OpenCode.
+The legacy Copilot latch does not swap these models. Review-cli model selection
+remains independent via `REVIEW_MODEL` or a tool argument.
+
 ## Review integration
 
 `review_changes` is a global OpenCode tool backed by a shell-free Node subprocess

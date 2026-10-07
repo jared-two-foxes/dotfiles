@@ -2,7 +2,7 @@
 description: Makes failing tests pass while preserving architecture and repo conventions — invoked by the orchestrator during the implementation phase
 mode: subagent
 hidden: true
-model: opencode/deepseek-v4-flash
+model: opencode/gpt-6-luna
 temperature: 0.2
 permission:
   edit: allow
@@ -38,14 +38,14 @@ permission:
 
 The orchestrator manages tier escalation by editing the `model:` field in this file before each invocation. The current model is always whatever is set in the frontmatter above. Do not assume a tier — read the frontmatter.
 
-| Tier | Copilot model | Zen fallback | Max invocations | When to escalate |
+| Tier | Zen model | Zen fallback | Max invocations | When to escalate |
 |---|---|---|---|---|
-| 1 | `opencode/deepseek-v4-flash` | `opencode/claude-sonnet-4-6` | 3 | Default. Free/cheap model for routine implementation. Zen fallback is Sonnet for strong recovery. |
-| 2 | `opencode/claude-opus-4.7` | `opencode/claude-opus-4.7` | 2 | Tier 1 exhausted. Ceiling — hardest problems only. |
+| 1 | `opencode/gpt-6-luna` | `opencode/gpt-6.1-sol` | 3 | Default. Low-cost model for routine implementation; GPT-6.1 Sol provides recovery. |
+| 2 | `opencode/gpt-6.1-sol` | `opencode/gpt-6.1-sol` | 2 | Tier 1 exhausted. Higher-cost recovery for difficult implementation failures. |
 
 **Stall timeout:** 300s (Tier 1), 600s (Tier 2). If no result within timeout, the orchestrator treats this as a stall, increments the global retry counter, and escalates tier.
 
-**Restore rule:** After the ticket completes (success or failure), the orchestrator must reset `model:` in this file to `opencode/deepseek-v4-flash` (Tier 1).
+**Restore rule:** After the ticket completes (success or failure), the orchestrator must reset `model:` in this file to `opencode/gpt-6-luna` (Tier 1).
 
 ## Responsibilities
 
