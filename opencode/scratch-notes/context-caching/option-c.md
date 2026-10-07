@@ -213,7 +213,7 @@ Ollama does not expose cache metrics. Verify by comparing latency:
 `markdown
 ### 1f — Context Caching (Optional Advanced)
 
-After building \CODEBASE_CONTEXT\ and \RECALLIUM_CONTEXT\:
+After building \CODEBASE_CONTEXT\:
 
 **Only if your context exceeds 50 KB and you expect 8+ subagent invocations:**
 

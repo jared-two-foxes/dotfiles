@@ -39,14 +39,6 @@
         "LINEAR_API_KEY": "{file:~/.secrets/linear-key}"
       }
     },
-    "recallium": {
-      "type": "local",
-      "enabled": true,
-      "command": ["npx", "-y", "recallium"],
-      "environment": {
-        "RECALLIUM_SERVER_URL": "http://localhost:8001/mcp"
-      }
-    },
     "stripe": {
       "type": "local",
       "enabled": true,

@@ -1,6 +1,6 @@
 ---
 name: toolchain-detection
-description: Use when an agent needs to read the project's build, test, lint, format, and typecheck commands from AGENTS.md. Call this after project-detection — PROJECT_NAME must already be set. Extracts BUILD_CMD, TEST_CMD, FMT_CHECK_CMD, FMT_FIX_CMD, LINT_CMD, TYPECHECK_CMD, and GIT_WORKFLOW from the ## Toolchain table.
+description: Use when an agent needs to read the project's build, test, lint, format, and typecheck commands from AGENTS.md. Extracts BUILD_CMD, TEST_CMD, FMT_CHECK_CMD, FMT_FIX_CMD, LINT_CMD, TYPECHECK_CMD, and GIT_WORKFLOW from the ## Toolchain table.
 ---
 
 # Toolchain Detection

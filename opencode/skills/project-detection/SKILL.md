@@ -1,6 +1,6 @@
 ---
 name: project-detection
-description: Use when an agent needs to derive the current project name (PROJECT_NAME) from the git remote URL. Covers PowerShell (pwsh) and bash normalization. Use at session start before any Recallium or toolchain operations that require PROJECT_NAME.
+description: Use when an agent needs to derive the current project name (PROJECT_NAME) from the git remote URL. Covers PowerShell (pwsh) and bash normalization. Use for project identification and reporting; no external service is required.
 ---
 
 # Project Detection
@@ -42,4 +42,4 @@ git remote get-url origin 2>/dev/null
 
 ## After Detection
 
-Include `PROJECT_NAME` in your opening response or Phase 0 report to the user. It is now available for Recallium memory scoping, session summaries, and reporting.
+Include `PROJECT_NAME` in your opening response or Phase 0 report to the user. Use it for project identification and reporting.

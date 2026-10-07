@@ -1,6 +1,6 @@
 # OpenCode configuration
 
-Imported from the standalone local OpenCode repository. The implementation/planning agents and seven imported skills remain.
+Imported from the standalone local OpenCode repository. The implementation/planning agents and five skills remain.
 Review-only subagents are replaced by review-cli.
 
 ## Install
@@ -44,9 +44,7 @@ from the installed skills directory. No actual secret values are included.
 - Install/authenticate OpenCode and the model providers you use.
 - Node/npm/npx are required by the configured MCP servers and plugin setup.
 - Configure ~/.secrets/linear-key and ~/.secrets/stripe-key for the enabled MCPs.
-- Recallium is configured at http://localhost:8001/mcp; Ollama uses localhost:11434.
-- The bundled recallium-1.2.6.tgz is retained for reference; the MCP configuration
-  continues to use npx recallium, as in the uploaded setup.
+- Ollama uses localhost:11434.
 
 Run helpers from ~/.config/opencode/scripts/ so latch state and agent files refer
 to the same installation. latch.example.json seeds local latch.json once; installer
@@ -58,8 +56,7 @@ tracked agent files. In copy mode they edit installed copies.
 ```
 
 AGENTS.md is maintenance guidance for this directory and is not deployed as global
-OpenCode instructions. scratch-notes/ and the package archive are retained in Git
-but not installed. The former standalone .git directory is not imported.
+OpenCode instructions. scratch-notes/ is retained in Git but not installed. The former standalone .git directory is not imported.
 
 ## Review integration
 

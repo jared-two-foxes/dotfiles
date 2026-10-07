@@ -12,7 +12,7 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `dcp.jsonc` contains plugin configuration.
 - `scripts/` contains the review subprocess adapter and latch helper.
 - `tools/review_changes.ts` exposes review-cli to OpenCode.
-- `scratch-notes/` and the Recallium package archive are retained reference material.
+- `scratch-notes/` contains reference material.
 
 The full Windows installer deploys directory junctions and file symlinks to
 `~/.config/opencode/`. The restricted installer deploys copies. Do not use hard
@@ -68,7 +68,6 @@ restore rules; agent bodies and model choices are imported without redesign.
 ## opencode.jsonc notes
 
 - MCP secrets use `{file:~/.secrets/<name>}` syntax — the file must exist on the host machine; it is not stored in this repo.
-- `recallium` MCP requires a local server running on `http://localhost:8001/mcp`.
 - `compaction`, `explore`, and `general` built-in agents are overridden to use `opencode/gemini-3.1-pro`.
 
 ## Dynamic Context Pruning (DCP)

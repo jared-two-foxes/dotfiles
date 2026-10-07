@@ -20,7 +20,6 @@ Add this block to the root JSON object:
   "description": "Stable context blocks are passed verbatim across agent invocations to enable LLM API caching (~90% token reduction)",
   "stable_blocks": [
     "CODEBASE_CONTEXT",
-    "RECALLIUM_CONTEXT",
     "TOOLCHAIN",
     "PROJECT_NAME",
     "GIT_WORKFLOW"
@@ -50,7 +49,6 @@ Add this block to the root JSON object:
     "description": "Stable context blocks are passed verbatim across agent invocations to enable LLM API caching (~90% token reduction)",
     "stable_blocks": [
       "CODEBASE_CONTEXT",
-      "RECALLIUM_CONTEXT",
       "TOOLCHAIN",
       "PROJECT_NAME",
       "GIT_WORKFLOW"
@@ -92,7 +90,7 @@ Context caching is enabled by default via \opencode.json\:
 \\\json
 "context_caching": {
   "enabled": true,
-  "stable_blocks": ["CODEBASE_CONTEXT", "RECALLIUM_CONTEXT", "TOOLCHAIN", "PROJECT_NAME", "GIT_WORKFLOW"],
+  "stable_blocks": ["CODEBASE_CONTEXT", "TOOLCHAIN", "PROJECT_NAME", "GIT_WORKFLOW"],
   "cache_scope": "pipeline_run"
 }
 \\\

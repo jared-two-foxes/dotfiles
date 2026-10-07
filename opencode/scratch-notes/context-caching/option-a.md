@@ -18,7 +18,6 @@ Add explicit context preservation instructions to pipeline-runner.md so subagent
 The following input blocks are **cacheable and stable** throughout the entire pipeline run and must be passed **verbatim** (without modification, summarization, or truncation) to all subagent invocations:
 
 - CODEBASE_CONTEXT — file tree and key source file contents (loaded once, reused across 4+ phases)
-- RECALLIUM_CONTEXT — memory search results (immutable during pipeline run)
 - TOOLCHAIN — build, test, lint, and format commands (immutable during pipeline run)
 - PROJECT_NAME — project identifier (immutable)
 - GIT_WORKFLOW — version control workflow (	runk-based or pr-based, immutable)
@@ -33,7 +32,7 @@ Modern LLM APIs automatically cache large repeated context blocks:
 ### Agent Contract
 
 When invoking subagents (tester, implementer, refactorer, code-reviewer, validator, security-reviewer, reuse-checker):
-1. Do not paraphrase or summarize CODEBASE_CONTEXT, RECALLIUM_CONTEXT, or TOOLCHAIN
+1. Do not paraphrase or summarize CODEBASE_CONTEXT or TOOLCHAIN
 2. Pass these blocks exactly as received
 3. Prepend these stable blocks to every subagent invocation before the task-specific content
 
@@ -42,7 +41,6 @@ When invoking subagents (tester, implementer, refactorer, code-reviewer, validat
 \\\
 [STABLE CONTEXT BLOCK]
 CODEBASE_CONTEXT: [exact, verbatim]
-RECALLIUM_CONTEXT: [exact, verbatim]
 TOOLCHAIN: [exact, verbatim]
 PROJECT_NAME: [exact]
 GIT_WORKFLOW: [exact]
@@ -68,7 +66,6 @@ For complex tickets, invoke the 	ester subagent with:
 - CODEBASE_CONTEXT
 - TOOLCHAIN
 - PROJECT_NAME
-- RECALLIUM_CONTEXT
 
 **Task-specific content:**
 - Acceptance criteria from PRECOMPUTED_PLAN
@@ -89,7 +86,6 @@ Invoke implementer with:
 - CODEBASE_CONTEXT
 - TOOLCHAIN
 - PROJECT_NAME
-- RECALLIUM_CONTEXT
 
 **Task-specific content:**
 - Acceptance criteria from PRECOMPUTED_PLAN
@@ -113,7 +109,6 @@ efactorer subagent with:
 - CODEBASE_CONTEXT
 - TOOLCHAIN
 - PROJECT_NAME
-- RECALLIUM_CONTEXT
 
 **Task-specific content:**
 - Implementation files (paths + contents from FILES_MODIFIED)
@@ -134,7 +129,6 @@ Both receive stable context (pass verbatim):
 - CODEBASE_CONTEXT
 - TOOLCHAIN
 - PROJECT_NAME
-- RECALLIUM_CONTEXT
 
 **Reuse-checker receives additionally:**
 - Newly written/modified files (paths + contents)
@@ -159,7 +153,6 @@ Invoke code-reviewer with:
 - CODEBASE_CONTEXT
 - TOOLCHAIN
 - PROJECT_NAME
-- RECALLIUM_CONTEXT
 
 **Task-specific content:**
 - The validated implementation (paths + contents)
@@ -178,7 +171,7 @@ See **Context Caching & Reuse** section for invocation structure.
 
 ## Expected Outcome
 
-- ~90% reduction in tokens for cached blocks (CODEBASE_CONTEXT, RECALLIUM_CONTEXT, TOOLCHAIN)
+- ~90% reduction in tokens for cached blocks (CODEBASE_CONTEXT, TOOLCHAIN)
 - ~90% latency improvement for cached block processing
 - No API changes or provider-specific syntax required
 - Works with Claude, OpenAI, Ollama, and any provider that supports context caching
