@@ -270,8 +270,10 @@ finding details (message, severity, path, line, recommendation) in follow-up wor
 | INDETERMINATE | Record reason; never approve. Allow one retry with a higher explicit budget/model if appropriate, then return FAILED. Do not send budget/provider failures to implementer as code defects. |
 | ERROR | Stop and return FAILED with the setup/protocol/repository-change error. Never use old agents as a silent fallback. |
 
-The tool defaults to `REVIEW_MODEL` or `opencode/gpt-5.6-terra`; overrides are
-explicit tool arguments, not edits to agent files. It uses separate provider
+The tool defaults to `REVIEW_MODEL` or `opencode/claude-sonnet-5`; overrides are
+explicit tool arguments, not edits to agent files. Keep review in a different
+model family from the GPT implementer; do not fall back to a GPT reviewer on
+Claude setup/provider errors. Surface the failure instead. It uses separate provider
 credentials inherited from the environment. Existing OpenCode login does not
 necessarily supply them to the binary.
 
