@@ -8,7 +8,7 @@ export default tool({
     baseRef: tool.schema.string().describe('Fixed task-start commit SHA, or explicit review baseline'),
     headRef: tool.schema.string().optional().describe('Optional committed target; omit to review the working tree, including untracked files'),
     requirements: tool.schema.string().describe('Full acceptance criteria, plan, edge cases and review scope; plain text, not a file path'),
-    model: tool.schema.string().optional().describe('Review provider/model; defaults to REVIEW_MODEL or opencode/gpt-5.6-terra'),
+    model: tool.schema.string().optional().describe('Review provider/model; defaults to REVIEW_MODEL or opencode/claude-sonnet-5'),
     wallClockBudgetSecs: tool.schema.number().int().min(1).max(600).optional(),
     maxTurns: tool.schema.number().int().min(1).max(100).optional(),
   },

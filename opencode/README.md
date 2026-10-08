@@ -58,6 +58,16 @@ tracked agent files. In copy mode they edit installed copies.
 AGENTS.md is maintenance guidance for this directory and is not deployed as global
 OpenCode instructions. scratch-notes/ is retained in Git but not installed. The former standalone .git directory is not imported.
 
+## Implementation models
+
+Implementer defaults to `opencode/gpt-6-luna` through OpenCode Zen. The pipeline
+runner uses the same model for startup recovery and resets after escalation.
+Its Tier 2 and model-error fallback are `opencode/gpt-6.1-sol`; the existing
+three Tier 1 / two Tier 2 invocation limits and global retry budget still apply.
+Both models require access through the Zen account connected in OpenCode.
+The legacy Copilot latch does not swap these models. Review-cli model selection
+remains independent via `REVIEW_MODEL` or a tool argument.
+
 ## Review integration
 
 `review_changes` is a global OpenCode tool backed by a shell-free Node subprocess
@@ -79,7 +89,12 @@ The binary must be on the OpenCode process PATH, or set REVIEW_CLI_BIN to its fu
 executable path. Restart OpenCode after changing environment variables.
 
 The review model is independent of the orchestrator and implementer models. Set
-REVIEW_MODEL (default opencode/gpt-5.6-terra) or supply an explicit tool model.
+REVIEW_MODEL (default opencode/claude-sonnet-5) or supply an explicit tool model.
+Use a review-cli build with Anthropic Messages support for Claude on Zen.
+Reinstall the binary with the cargo install command above and `--force` to update
+an existing installation. Claude Sonnet 5 provides a different model family from
+the GPT Implementer. Existing REVIEW_MODEL values override this default; unset
+old GPT overrides or set REVIEW_MODEL=opencode/claude-sonnet-5.
 For the default provider, export OPENCODE_API_KEY; openai/<model> uses OPENAI_API_KEY,
 ollama/<model> uses the local Ollama endpoint, and copilot/<model> uses credentials
 supported by review-cli. OpenCode's stored login is not automatically forwarded.

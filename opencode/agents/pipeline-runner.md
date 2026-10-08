@@ -47,7 +47,7 @@ Track escalations in `ESCALATED_AGENTS` (initialize to empty at the start of eve
 | Agent | Tier 1 default |
 |---|---|---|
 | `tester` | `opencode/gpt-5.3-codex` |
-| `implementer` | `opencode/deepseek-v4-flash` |
+| `implementer` | `opencode/gpt-6-luna` |
 
 ## Global Retry Budget and Hard Abort
 
@@ -90,7 +90,7 @@ Agents to check (Tier 1 defaults from the table above):
 | Agent | Expected Tier 1 default |
 |---|---|---|
 | `tester` | `opencode/gpt-5.3-codex` |
-| `implementer` | `opencode/deepseek-v4-flash` |
+| `implementer` | `opencode/gpt-6-luna` |
 
 After checking the remaining agents, resolve `REPOSITORY_PATH` to the Git root.
 For normal execution, before ANY tester/implementer invocation:
@@ -129,8 +129,8 @@ On tester stall or error: increment `RETRY_COUNT`; apply Zen fallback strategy a
 
 | Tier | Model | Zen fallback | Max invocations |
 |---|---|---|---|---|
-| 1 | `opencode/deepseek-v4-flash` | `opencode/claude-sonnet-4-6` | 3 |
-| 2 | `opencode/claude-opus-4.7` | `opencode/claude-opus-4.7` | 2 |
+| 1 | `opencode/gpt-6-luna` | `opencode/gpt-6.1-sol` | 3 |
+| 2 | `opencode/gpt-6.1-sol` | `opencode/gpt-6.1-sol` | 2 |
 
 Ensure implementer is at Tier 1 before the first invocation.
 
@@ -270,8 +270,10 @@ finding details (message, severity, path, line, recommendation) in follow-up wor
 | INDETERMINATE | Record reason; never approve. Allow one retry with a higher explicit budget/model if appropriate, then return FAILED. Do not send budget/provider failures to implementer as code defects. |
 | ERROR | Stop and return FAILED with the setup/protocol/repository-change error. Never use old agents as a silent fallback. |
 
-The tool defaults to `REVIEW_MODEL` or `opencode/gpt-5.6-terra`; overrides are
-explicit tool arguments, not edits to agent files. It uses separate provider
+The tool defaults to `REVIEW_MODEL` or `opencode/claude-sonnet-5`; overrides are
+explicit tool arguments, not edits to agent files. Keep review in a different
+model family from the GPT implementer; do not fall back to a GPT reviewer on
+Claude setup/provider errors. Surface the failure instead. It uses separate provider
 credentials inherited from the environment. Existing OpenCode login does not
 necessarily supply them to the binary.
 
@@ -296,7 +298,7 @@ When any subagent returns a rate-limit, quota-exceeded, or provider-unavailable 
 | Agent | Primary | Fallback |
 |---|---|---|---|
 | `tester` | `opencode/gpt-5.3-codex` | `opencode/claude-sonnet-4-6` |
-| `implementer` | `opencode/deepseek-v4-flash` | `opencode/claude-sonnet-4-6` |
+| `implementer` | `opencode/gpt-6-luna` | `opencode/gpt-6.1-sol` |
 
 ## Exit: Reset and Return
 

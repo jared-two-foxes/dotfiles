@@ -79,3 +79,27 @@ test('cancellation is never approval', async (t) => {
   const f = await fixture(t); const controller = new AbortController(); controller.abort();
   assert.equal((await reviewChanges(f.args, {abort:controller.signal}, f.options)).status, 'ERROR');
 });
+
+
+test('Claude Zen is the default reviewer; environment and explicit model overrides retain precedence', async (t) => {
+  const previous = process.env.REVIEW_MODEL;
+  t.after(() => {
+    if (previous === undefined) delete process.env.REVIEW_MODEL;
+    else process.env.REVIEW_MODEL = previous;
+  });
+  const f = await fixture(t);
+  delete process.env.REVIEW_MODEL;
+  for (const [environment, explicit, expected] of [
+    [undefined, undefined, 'opencode/claude-sonnet-5'],
+    ['opencode/claude-haiku-5-5', undefined, 'opencode/claude-haiku-5-5'],
+    ['opencode/claude-haiku-5-5', 'anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-5'],
+  ]) {
+    if (environment === undefined) delete process.env.REVIEW_MODEL;
+    else process.env.REVIEW_MODEL = environment;
+    const result = await reviewChanges({...f.args, model:explicit}, {}, f.options);
+    assert.equal(result.status, 'APPROVED');
+    assert.equal(result.model, expected);
+    const capture = JSON.parse(await readFile(path.join(f.dir, '.capture')));
+    assert.equal(capture.argv[capture.argv.indexOf('--model') + 1], expected);
+  }
+});

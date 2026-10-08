@@ -94,7 +94,7 @@ export async function reviewChanges(args, context = {}, options = {}) {
     await writeFile(requirementsPath, args.requirements, { mode: 0o600 });
     await writeFile(requestPath, JSON.stringify({ schema: 'review.request/v1', repository_path: repository,
       base_ref: base, head_ref: head, requirements: requirementsPath }), { mode: 0o600 });
-    const model = args.model ?? process.env.REVIEW_MODEL ?? 'opencode/gpt-5.6-terra';
+    const model = args.model ?? process.env.REVIEW_MODEL ?? 'opencode/claude-sonnet-5';
     if (typeof model !== 'string' || !model.trim()) throw new Error('Review model must be nonempty');
     const executable = options.executable ?? process.env.REVIEW_CLI_BIN ?? 'review-cli';
     const cliArgs = [...(options.prefixArgs ?? []), 'run', '--request', requestPath, '--format', 'json',
