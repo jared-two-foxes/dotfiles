@@ -74,11 +74,18 @@ The primary `design` agent now runs an interactive technical-design conversation
 It inspects relevant code, raises consequential decisions (especially data structures,
 algorithms and interfaces), and seeks explicit agreement before producing changes.
 
-After design approval, it can generate a JSON `operations` document for the
-standalone [executor](https://github.com/jared-two-foxes/executor) CLI. It does
-not invoke executor, write source files, or automatically launch other agents.
-The design summary and acceptance criteria remain separate from the JSON and
-can be supplied to the independent `review-phase` agent after application.
+After design approval, it loads the reusable `executor` skill from
+`opencode/skills/executor/SKILL.md` to generate an `operations` document for
+the standalone [executor](https://github.com/jared-two-foxes/executor) CLI.
+The skill contains executor-specific input guidance so the Design agent
+does not duplicate the operation schema. The executor repository's README and
+Rust input types remain authoritative for the supported interface.
+
+The Design agent does not invoke executor, write source files, or automatically
+launch other agents. Its design summary and acceptance criteria remain separate
+from the JSON and can be supplied to the independent `review-phase` agent
+after application. The skill is deployed with the other OpenCode skills by
+the existing installer in both link and copy modes.
 
 For example, save the generated JSON as `changes.json`, then from the target
 Git repository root run:
