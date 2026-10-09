@@ -1,0 +1,61 @@
+{
+  "schema_version": "execution-result/v1",
+  "plan_id": "greeting-plan",
+  "plan_revision": 1,
+  "design_id": "greeting-design",
+  "design_revision": 1,
+  "requirements_id": "greeting-requirements",
+  "requirements_revision": 1,
+  "attempt_id": "greeting-exec-1",
+  "completed_at": "2026-01-01T00:01:00Z",
+  "status": "succeeded",
+  "base_commit": "de3391c1fa6318c0ab884424ec145997027dc4a9",
+  "resulting_commit": "aee91f4a8488a097568bc1c7e959ffae309dbfa7",
+  "operations": [
+    {
+      "name": "validate_manifest",
+      "status": "completed"
+    },
+    {
+      "name": "validate_approval",
+      "status": "completed"
+    },
+    {
+      "name": "check_repository",
+      "status": "completed"
+    },
+    {
+      "name": "validate_patch",
+      "status": "completed"
+    },
+    {
+      "name": "create_worktree",
+      "status": "completed"
+    },
+    {
+      "name": "check_apply",
+      "status": "completed"
+    },
+    {
+      "name": "apply_patch",
+      "status": "completed"
+    },
+    {
+      "name": "verify_tree",
+      "status": "completed"
+    },
+    {
+      "name": "create_commit",
+      "status": "completed"
+    },
+    {
+      "name": "publish_revision",
+      "status": "completed"
+    }
+  ],
+  "publication": {
+    "published_for_review": true,
+    "ref": "refs/workflow/greeting-plan/r1/greeting-exec-1"
+  },
+  "error": null
+}

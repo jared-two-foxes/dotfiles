@@ -1,0 +1,28 @@
+diff --git a/greeting.py b/greeting.py
+index d2821505fc7bcd7bca408d6422e43150d6adbfce..dce765b32ec36e37229ce5242054ffa7b2457886 100644
+--- a/greeting.py
++++ b/greeting.py
+@@ -1,2 +1,2 @@
+ def greet(name):
+-    return "Hello, " + name
++    return "Hello, " + name.strip()
+diff --git a/test_greeting.py b/test_greeting.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..ecc31c9272b565970ef6f1d5c785db5aac10a7e4
+--- /dev/null
++++ b/test_greeting.py
+@@ -0,0 +1,14 @@
++import unittest
++from greeting import greet
++
++
++class GreetingTests(unittest.TestCase):
++    def test_plain_name(self):
++        self.assertEqual(greet("Ada"), "Hello, Ada")
++
++    def test_space_padding(self):
++        self.assertEqual(greet(" Ada "), "Hello, Ada")
++
++
++if __name__ == "__main__":
++    unittest.main()

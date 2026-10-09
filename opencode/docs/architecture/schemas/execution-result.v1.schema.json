@@ -1,0 +1,554 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.local.invalid/opencode/execution-result.v1.schema.json",
+  "title": "execution-result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "plan_id",
+    "plan_revision",
+    "design_id",
+    "design_revision",
+    "requirements_id",
+    "requirements_revision",
+    "attempt_id",
+    "completed_at",
+    "status",
+    "base_commit",
+    "resulting_commit",
+    "operations",
+    "publication",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "execution-result/v1"
+    },
+    "plan_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "plan_revision": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "design_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "design_revision": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requirements_id": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requirements_revision": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "attempt_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+    },
+    "completed_at": {
+      "type": "string",
+      "minLength": 1,
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "succeeded",
+        "failed"
+      ]
+    },
+    "base_commit": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "resulting_commit": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": [
+              "validate_manifest",
+              "validate_approval",
+              "check_repository",
+              "validate_patch",
+              "create_worktree",
+              "check_apply",
+              "apply_patch",
+              "verify_tree",
+              "create_commit",
+              "publish_revision"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "failed",
+              "attempted"
+            ]
+          }
+        }
+      },
+      "minItems": 1
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "published_for_review",
+        "ref"
+      ],
+      "properties": {
+        "published_for_review": {
+          "type": "boolean"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^refs/workflow/[A-Za-z0-9_-]+/r[1-9][0-9]*/[A-Za-z0-9_-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/error"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "succeeded"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+          },
+          "plan_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "design_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+          },
+          "design_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requirements_id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+          },
+          "requirements_revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "base_commit": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "resulting_commit": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[0-9a-f]{40}$"
+          },
+          "error": {
+            "const": null
+          },
+          "publication": {
+            "properties": {
+              "published_for_review": {
+                "const": true
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "operations": {
+            "minItems": 10,
+            "maxItems": 10,
+            "prefixItems": [
+              {
+                "properties": {
+                  "name": {
+                    "const": "validate_manifest"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "validate_approval"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "check_repository"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "validate_patch"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "create_worktree"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "check_apply"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "apply_patch"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "verify_tree"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "create_commit"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "name": {
+                    "const": "publish_revision"
+                  },
+                  "status": {
+                    "const": "completed"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "failed"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "$ref": "#/$defs/error"
+          },
+          "publication": {
+            "properties": {
+              "published_for_review": {
+                "const": false
+              },
+              "ref": {
+                "const": null
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "classification",
+        "operation",
+        "message",
+        "diagnostic_artifact"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "MANIFEST_INVALID",
+            "APPROVAL_INVALID",
+            "INTEGRITY_MISMATCH",
+            "REPOSITORY_MISMATCH",
+            "BASE_MISMATCH",
+            "STATE_MISMATCH",
+            "PATH_REJECTED",
+            "OPERATION_REJECTED",
+            "PATCH_INVALID",
+            "PATCH_NOT_APPLICABLE",
+            "DEPENDENCY_UNAVAILABLE",
+            "LOCK_UNAVAILABLE",
+            "IO_FAILURE",
+            "PUBLICATION_FAILED",
+            "INTERRUPTED",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "plan_invalid",
+            "environment",
+            "unknown"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "validate_manifest",
+            "validate_approval",
+            "check_repository",
+            "validate_patch",
+            "create_worktree",
+            "check_apply",
+            "apply_patch",
+            "verify_tree",
+            "create_commit",
+            "publish_revision"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "diagnostic_artifact": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "MANIFEST_INVALID",
+                  "APPROVAL_INVALID",
+                  "INTEGRITY_MISMATCH",
+                  "REPOSITORY_MISMATCH",
+                  "BASE_MISMATCH",
+                  "STATE_MISMATCH",
+                  "PATH_REJECTED",
+                  "OPERATION_REJECTED",
+                  "PATCH_INVALID",
+                  "PATCH_NOT_APPLICABLE"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "classification": {
+                "const": "plan_invalid"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "DEPENDENCY_UNAVAILABLE",
+                  "LOCK_UNAVAILABLE",
+                  "IO_FAILURE",
+                  "PUBLICATION_FAILED",
+                  "INTERRUPTED"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "classification": {
+                "const": "environment"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "code": {
+                "const": "INTERNAL_ERROR"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "classification": {
+                "const": "unknown"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

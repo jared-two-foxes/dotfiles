@@ -1,0 +1,21 @@
+{
+  "schema": "review.result/v1",
+  "status": "CHANGES_REQUESTED",
+  "reason": "REVIEW_COMPLETED",
+  "review_id": "greeting-review-1",
+  "completed_at": "2026-01-01T00:02:00Z",
+  "findings": [
+    {
+      "blocking": true,
+      "message": "AC-2 requires tab and newline padding coverage; only space padding is asserted.",
+      "severity": "medium",
+      "path": "test_greeting.py",
+      "line": 9,
+      "recommendation": "Return to Design to propose tab/newline assertions and issue a newly approved plan."
+    }
+  ],
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 50
+  }
+}

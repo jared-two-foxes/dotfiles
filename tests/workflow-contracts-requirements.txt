@@ -1,0 +1,2 @@
+# Development-only JSON Schema validator; no OpenCode runtime dependencies.
+jsonschema==4.26.0

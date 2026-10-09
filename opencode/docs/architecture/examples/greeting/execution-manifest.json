@@ -1,0 +1,66 @@
+{
+  "schema_version": "execution-manifest/v1",
+  "plan_id": "greeting-plan",
+  "plan_revision": 1,
+  "design_id": "greeting-design",
+  "design_revision": 1,
+  "requirements_id": "greeting-requirements",
+  "requirements_revision": 1,
+  "repository": {
+    "id": "example:greeting",
+    "object_format": "sha1",
+    "base_commit": "de3391c1fa6318c0ab884424ec145997027dc4a9"
+  },
+  "design": {
+    "artifact": "design.md",
+    "sha256": "48de34ee6ec82d10cdac122d965250c82a7ed0c73d7be41434d8ef8985ff63d1"
+  },
+  "patch": {
+    "artifact": "change.patch",
+    "sha256": "1789f73db7ede16fe09178de6b0d4c94556cc523a9e3ca8d719cc1af97db8884",
+    "format": "git-unified-diff"
+  },
+  "preconditions": {
+    "caller_head_equals_base": true,
+    "caller_clean": true,
+    "no_git_operation_in_progress": true
+  },
+  "policy": {
+    "allowed_paths": [
+      "greeting.py",
+      "test_greeting.py"
+    ],
+    "protected_prefixes": [
+      "secrets",
+      ".github"
+    ],
+    "allowed_operations": [
+      "create",
+      "modify"
+    ],
+    "regular_file_mode": "100644",
+    "allow_offset": false,
+    "allow_three_way": false,
+    "allow_partial": false,
+    "allow_symlinks": false,
+    "allow_binary": false
+  },
+  "files": [
+    {
+      "path": "greeting.py",
+      "operation": "modify",
+      "base_blob": "d2821505fc7bcd7bca408d6422e43150d6adbfce"
+    },
+    {
+      "path": "test_greeting.py",
+      "operation": "create",
+      "base_blob": null
+    }
+  ],
+  "commit": {
+    "message": "Apply greeting-plan revision 1",
+    "name": "Workflow Example",
+    "email": "workflow@example.invalid",
+    "timestamp": "2026-01-01T00:00:00Z"
+  }
+}

@@ -1,0 +1,7 @@
+test_plain_name (test_greeting.GreetingTests.test_plain_name) ... ok
+test_space_padding (test_greeting.GreetingTests.test_space_padding) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK

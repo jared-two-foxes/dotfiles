@@ -1,0 +1,71 @@
+{
+  "schema_version": "review-result/v1",
+  "plan_id": "greeting-plan",
+  "plan_revision": 1,
+  "design_id": "greeting-design",
+  "design_revision": 1,
+  "requirements_id": "greeting-requirements",
+  "requirements_revision": 1,
+  "review_attempt_id": "greeting-review-1",
+  "execution_attempt_id": "greeting-exec-1",
+  "completed_at": "2026-01-01T00:02:00Z",
+  "base_commit": "de3391c1fa6318c0ab884424ec145997027dc4a9",
+  "resulting_commit": "aee91f4a8488a097568bc1c7e959ffae309dbfa7",
+  "source_snapshot": "3fcd8686f41b5ce200cf3b8f364127a8c4cefb68406e7f9c2d57e10dffc3b903",
+  "source_unchanged": true,
+  "mechanical_checks": [
+    {
+      "id": "greeting-unit",
+      "kind": "test",
+      "required": true,
+      "status": "passed",
+      "argv": [
+        "python",
+        "-B",
+        "-m",
+        "unittest",
+        "-v"
+      ],
+      "exit_code": 0,
+      "evidence": "Both test methods executed and passed; test_space_padding covers only spaces.",
+      "log_artifact": "unit.log",
+      "working_directory": "candidate",
+      "tool_versions": [
+        "Python 3.12.14"
+      ]
+    }
+  ],
+  "criteria": [
+    {
+      "id": "AC-1",
+      "status": "passed",
+      "evidence": "test_plain_name passed."
+    },
+    {
+      "id": "AC-2",
+      "status": "failed",
+      "evidence": "Space assertion passed but required tab/newline coverage is missing."
+    }
+  ],
+  "semantic": {
+    "source_schema": "review.result/v1",
+    "review_id": "greeting-review-1",
+    "status": "CHANGES_REQUESTED",
+    "reason": "REVIEW_COMPLETED",
+    "model": "example-independent-reviewer",
+    "raw_result": "semantic-raw.json",
+    "findings": [
+      {
+        "blocking": true,
+        "message": "AC-2 requires tab and newline padding coverage; only space padding is asserted.",
+        "severity": "medium",
+        "path": "test_greeting.py",
+        "line": 9,
+        "recommendation": "Return to Design to propose tab/newline assertions and issue a newly approved plan."
+      }
+    ]
+  },
+  "disposition": "changes_requested",
+  "summary": "Mechanical tests pass, but AC-2 lacks complete evidence; return to Design revision 2.",
+  "profile_id": "greeting-unit"
+}

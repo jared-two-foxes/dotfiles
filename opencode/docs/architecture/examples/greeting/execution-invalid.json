@@ -1,0 +1,43 @@
+{
+  "schema_version": "execution-result/v1",
+  "plan_id": "greeting-plan",
+  "plan_revision": 1,
+  "design_id": "greeting-design",
+  "design_revision": 1,
+  "requirements_id": "greeting-requirements",
+  "requirements_revision": 1,
+  "attempt_id": "greeting-exec-invalid",
+  "completed_at": "2026-01-01T00:01:00Z",
+  "status": "failed",
+  "base_commit": "de3391c1fa6318c0ab884424ec145997027dc4a9",
+  "resulting_commit": null,
+  "operations": [
+    {
+      "name": "validate_manifest",
+      "status": "completed"
+    },
+    {
+      "name": "validate_approval",
+      "status": "completed"
+    },
+    {
+      "name": "check_repository",
+      "status": "completed"
+    },
+    {
+      "name": "validate_patch",
+      "status": "failed"
+    }
+  ],
+  "publication": {
+    "published_for_review": false,
+    "ref": null
+  },
+  "error": {
+    "code": "PATCH_NOT_APPLICABLE",
+    "classification": "plan_invalid",
+    "operation": "validate_patch",
+    "message": "Counterfactual corrupted patch has mismatched context. Return to Design; no worktree created.",
+    "diagnostic_artifact": null
+  }
+}
