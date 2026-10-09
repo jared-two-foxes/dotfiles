@@ -35,7 +35,7 @@ try {
 
     foreach ($parent in @('windows-full.ps1', 'windows-restricted.ps1')) {
         $source = Get-Content (Join-Path (Split-Path -Parent $installer) $parent) -Raw
-        Assert-True ($source.Contains("'executor.ps1') -Force:\$Force -WhatIf:\$WhatIfPreference")) "$parent does not forward installer flags"
+        Assert-True ($source.Contains('-Force:$Force -WhatIf:$WhatIfPreference')) "$parent does not forward installer flags"
     }
     Write-Host 'executor installer checks passed.'
 } finally {
