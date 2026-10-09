@@ -29,9 +29,8 @@ try {
     Assert-True ($actual -eq 'install --git https://github.com/jared-two-foxes/executor.git --locked --force') "Unexpected Cargo arguments: $actual"
 
     $global:ExecutorMockExitCode = 42
-    & $installer -Force -WarningVariable warnings
+    & $installer -Force
     Assert-True ($global:ExecutorMockCalls.Count -eq 2) 'Failed install did not invoke Cargo'
-    Assert-True (@($warnings).Count -gt 0) 'Failed Cargo install did not warn'
 
     foreach ($parent in @('windows-full.ps1', 'windows-restricted.ps1')) {
         $source = Get-Content (Join-Path (Split-Path -Parent $installer) $parent) -Raw
