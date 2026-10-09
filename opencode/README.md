@@ -68,6 +68,30 @@ Both models require access through the Zen account connected in OpenCode.
 The legacy Copilot latch does not swap these models. Review-cli model selection
 remains independent via `REVIEW_MODEL` or a tool argument.
 
+## Collaborative Design phase
+
+The primary `design` agent now runs an interactive technical-design conversation.
+It inspects relevant code, raises consequential decisions (especially data structures,
+algorithms and interfaces), and seeks explicit agreement before producing changes.
+
+After design approval, it can generate a JSON `operations` document for the
+standalone [executor](https://github.com/jared-two-foxes/executor) CLI. It does
+not invoke executor, write source files, or automatically launch other agents.
+The design summary and acceptance criteria remain separate from the JSON and
+can be supplied to the independent `review-phase` agent after application.
+
+For example, save the generated JSON as `changes.json`, then from the target
+Git repository root run:
+
+```powershell
+executor apply changes.json
+```
+
+Executor applies operations in order and **does not roll back** on failure.
+Inspect the working tree and its JSON result before proceeding. The existing
+`pipeline-runner` is still present for legacy workflows but is no longer
+invoked by the Design agent.
+
 ## Review integration
 
 `review_changes` is a global OpenCode tool backed by a shell-free Node subprocess
