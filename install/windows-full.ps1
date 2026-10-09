@@ -332,6 +332,11 @@ if (Get-Command code -ErrorAction SilentlyContinue) {
     Write-Skip "VS Code (code) not found in PATH — skipping extension install"
 }
 
+# --- executor CLI ---------------------------------------------
+Write-Host "`n[executor CLI]" -ForegroundColor White
+
+& (Join-Path $PSScriptRoot 'executor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
+
 # --- OpenCode ------------------------------------------------
 Write-Host "
 [OpenCode Configuration]" -ForegroundColor White
