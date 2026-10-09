@@ -66,40 +66,15 @@ Ask the user to **approve or revise the design before generating implementation 
 
 An approved design is not permission to execute anything. Do not invoke another agent or tool to implement it.
 
-## 4. Materialize executor input
+## 4. Prepare executor handoff
 
-After explicit design approval, generate a **complete, valid JSON object** for the existing `executor apply` interface. The executor input is the deliverable, not a hypothetical implementation plan. Consult the local/current executor documentation if available; otherwise use the supported contract below. Do not invent additional JSON fields.
+After explicit design approval, load the **`executor` skill**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
 
-```json
-{
-  "operations": [
-    {"type": "create_file", "path": "path/to/new.txt", "content": "complete UTF-8 content\n"},
-    {"type": "patch", "source": {"type": "inline", "patch": "diff --git a/path/to/existing.txt b/path/to/existing.txt\n--- a/path/to/existing.txt\n+++ b/path/to/existing.txt\n@@ -1 +1 @@\n-before\n+after\n"}}
-  ]
-}
-```
+Inspect exact source contents before authoring patches. If the change cannot be expressed reliably in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative patches as executable.
 
-Supported operations:
-- `patch` with `source: {"type":"inline","patch":"<complete unified Git diff>"}` or `{"type":"file","path":"<existing relative patch file>"}`
-- `create_file` with `path` and complete UTF-8 `content`
-- `replace_file` with `path`, verified lowercase SHA-256 `expected_sha256`, and complete UTF-8 `content`
-- `delete_file` with `path`
-- `move_file` with `from` and `to`
-- `create_directory`, `delete_directory` with `path`
-- `move_directory` with `from` and `to`
+Present the executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are intended for the independent Review Phase; they are not executor input.
 
-Rules:
-- Produce the **actual file contents or actual patch hunks**, not pseudocode, placeholders, `...`, or prose instructions.
-- Inspect exact source contents before constructing patch hunks. Do not guess context, line numbers or file hashes.
-- Prefer inline patches for changes to existing files; use create/move/delete operations when appropriate. Do not reference an external patch file unless it already exists.
-- Preserve operation order and dependencies (e.g. create a directory before a file inside it).
-- Include tests in the operations where the approved design calls for them.
-- Ensure all paths are relative to the repository root; never target outside it, `.git`, or symlinked paths.
-- Generate JSON that can be passed to `executor apply -` on stdin or saved to a file and passed to `executor apply <file>`. Do not wrap explanatory prose inside the JSON.
-- **Do not claim the JSON has been applied or validated by executor.** It is a proposed artifact; execution may fail if files change or a patch conflicts. Executor is non-atomic and may leave partial changes on failure.
-- If exact contents are unavailable, or the change is too large to generate accurately in one response, **say so**. Propose a smaller coherent slice or request the missing source; never output a knowingly incomplete plan and call it executable.
-
-Present the JSON in a separate fenced block with a short note explaining how the user can apply it. Include the agreed design summary and acceptance criteria **outside** the JSON so the later Review Phase can use them without changing executor's input contract.
+**Do not invoke executor, write files, or claim the operations have been applied or verified.** The user decides whether and when to apply the proposed changes.
 
 ## Hard boundaries
 
