@@ -19,8 +19,10 @@ try {
     & $installer -Mode Copy -ConfigDir $config -WhatIf
     Assert-True (-not (Test-Path $config)) 'WhatIf created configuration'
     & $installer -Mode Copy -ConfigDir $config
-    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 7) 'Agent files missing'
+    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 8) 'Agent files missing'
     Assert-True (Test-Path (Join-Path $config 'skills/executor/SKILL.md')) 'Executor skill not deployed in copy mode'
+    Assert-True (Test-Path (Join-Path $config 'agents/execution-loop.md')) 'Execution loop agent not deployed in copy mode'
+    Assert-True (Test-Path (Join-Path $config 'tools/apply_executor.ts')) 'Executor tool not deployed in copy mode'
     Assert-True (-not (Get-Item (Join-Path $config 'agents')).LinkType) 'Copy mode made a link'
     Assert-True (-not (Test-Path (Join-Path $config 'AGENTS.md'))) 'Repository instructions deployed globally'
     Set-Content (Join-Path $config 'latch.json') '{"state":"custom"}'
@@ -60,6 +62,8 @@ try {
     Assert-True (-not (Test-Path (Join-Path $config 'agents/validator.md'))) 'Retired agent survived migration'
     Assert-True (Test-Path (Join-Path $config 'tools/review_changes.ts')) 'Review tool not deployed'
     Assert-True (Test-Path (Join-Path $config 'agents/review-phase.md')) 'Review phase agent not deployed'
+    Assert-True (Test-Path (Join-Path $config 'agents/execution-loop.md')) 'Execution loop agent not deployed in link mode'
+    Assert-True (Test-Path (Join-Path $config 'tools/apply_executor.ts')) 'Executor tool not deployed in link mode'
     Assert-True (Test-Path (Join-Path $config 'skills/executor/SKILL.md')) 'Executor skill not deployed in link mode'
     Assert-True ([bool](Get-Item (Join-Path $config 'agents')).LinkType) 'Link mode failed'
     Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter opencode.json).Count -eq 1) 'Legacy config not backed up'
