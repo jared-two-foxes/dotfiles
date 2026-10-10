@@ -68,36 +68,81 @@ Both models require access through the Zen account connected in OpenCode.
 The legacy Copilot latch does not swap these models. Review-cli model selection
 remains independent via `REVIEW_MODEL` or a tool argument.
 
-## Collaborative Design phase
+## Collaborative Design → deterministic execution → independent review
 
-The primary `design` agent now runs an interactive technical-design conversation.
-It inspects relevant code, raises consequential decisions (especially data structures,
-algorithms and interfaces), and seeks explicit agreement before producing changes.
+The `design` primary agent is the **only author of executor input**, including
+all corrections. It investigates the repository, discusses consequential decisions
+(particularly algorithms and data structures), obtains design approval, and loads
+the reusable `executor` skill to prepare complete JSON operations.
 
-After design approval, it loads the reusable `executor` skill from
-`opencode/skills/executor/SKILL.md` to generate an `operations` document for
-the standalone [executor](https://github.com/jared-two-foxes/executor) CLI.
-The skill contains executor-specific input guidance so the Design agent
-does not duplicate the operation schema. The executor repository's README and
-Rust input types remain authoritative for the supported interface.
+**Design approval is not execution approval.** Design presents the initial
+operations and requests explicit permission to execute. It captures a fixed
+Git baseline and checks for pre-existing changes. The approved requirements
+remain the review contract across corrections; consequential changes to agreed
+decisions require renewed user approval.
 
-The Design agent does not invoke executor, write source files, or automatically
-launch other agents. Its design summary and acceptance criteria remain separate
-from the JSON and can be supplied to the independent `review-phase` agent
-after application. The skill is deployed with the other OpenCode skills by
-the existing installer in both link and copy modes.
+Once execution is approved, Design calls the single `execute_and_review`
+OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocation:
 
-For example, save the generated JSON as `changes.json`, then from the target
-Git repository root run:
+1. Verifies the original 40-character baseline SHA still matches HEAD.
+2. Applies the exact Design-authored JSON through the existing executor adapter
+   (`executor apply -` using stdin; no shell or repository-local scratch file).
+3. Runs the explicit build command, then the explicit test command, using
+   executable/argument arrays (not shell command strings).
+4. Requires evidence that at least one test executed, and checks that build/tests
+   did not change tracked or non-ignored working-tree files.
+5. Only on success, invokes the existing review-cli adapter using the same
+   original baseline and approved requirements.
 
-```powershell
-executor apply changes.json
+The tool returns `PASSED`, `NEEDS_DESIGN` (executor conflict, build/test
+failure or blocking review finding), or `BLOCKED` (missing tool, inconclusive
+test/review, unexpected source change or environment failure). It **never retries
+or generates repairs**. On a partial executor failure, earlier changes may
+remain and Design must inspect the worktree before generating new operations.
+
+The same Design conversation owns retries (up to five application attempts),
+diagnoses failures and produces every correction against the current working
+tree. Corrections within the approved architecture can proceed autonomously;
+design changes require user discussion and approval. Neither an Execution Loop nor a Review Phase AI agent is needed. Standalone
+semantic reviews remain available through the `review_changes` tool.
+
+### Tool invocation
+
+```json
+{
+  "input": "{\\"operations\\":[...]}",
+  "requirements": "Approved design and acceptance criteria",
+  "baseRef": "original 40-character Git commit SHA",
+  "buildCommand": ["cargo", "build"],
+  "testCommand": ["cargo", "test"],
+  "reviewModel": "opencode/gpt-6.1-sol"
+}
 ```
 
-Executor applies operations in order and **does not roll back** on failure.
-Inspect the working tree and its JSON result before proceeding. The existing
-`pipeline-runner` is still present for legacy workflows but is no longer
-invoked by the Design agent.
+The `input` field must contain the actual complete executor JSON, not the
+illustrative ellipsis above. The command arrays are passed directly to the OS,
+without shell expansion or command chaining. If a toolchain command needs shell
+syntax, provide an explicit script executable. `toolchain-detection` may help
+identify commands but does not automatically parse arbitrary shell strings.
+For unrecognized test-runner summaries, `testEvidencePattern` accepts a regex
+whose first capture group is the **number of executed tests**.
+
+The default review model is GPT-6.1 Sol, independent from Claude Sonnet Design;
+review-cli performs the only additional model call. Install `executor` and
+`review-cli` separately and make them available on OpenCode's PATH (or use
+`EXECUTOR_BIN` and `REVIEW_CLI_BIN`). Restart OpenCode after updating
+configuration or environment variables.
+
+The legacy `pipeline-runner` remains available for other workflows but is not
+used by Design. On forced reinstall, stale `review-phase.md`,
+`execution-loop.md` and `apply_executor.ts` are backed up and removed.
+
+Run the deterministic adapter tests from the repository root:
+
+```powershell
+node --test tests/executor-runner.test.mjs tests/execute-and-review.test.mjs
+pwsh -NoProfile -File tests/install-opencode.ps1
+```
 
 ## Review integration
 
@@ -111,7 +156,7 @@ including on copy-based machines. Re-run your installer with -Force after pullin
 Install the binary separately on each machine (Rust/Cargo required for installation):
 
 ```powershell
-cargo install --git https://github.com/jared-two-foxes/review --locked --package review-cli
+cargo install --git https://github.com/jared-two-foxes/review --locked review-cli
 review-cli --help
 ```
 
@@ -131,19 +176,22 @@ ollama/<model> uses the local Ollama endpoint, and copilot/<model> uses credenti
 supported by review-cli. OpenCode's stored login is not automatically forwarded.
 Do not commit provider credentials.
 
-Normal tasks require a clean starting worktree and retain its initial commit SHA
-through all retries. The tool reviews that base against the current working tree,
+The legacy pipeline-runner requires a clean starting worktree; the new Design
+workflow instead checks pre-existing changes and asks the user to isolate
+unrelated edits or accept their inclusion in the review diff. Both retain the
+original commit SHA through all retries. The review tool compares that base
+against the current working tree,
 including new untracked files. Review-only mode requires an explicit baseline and
 can instead review a fixed committed target. The tool stores requirements/request
 files outside the repository, removes them afterwards, validates result/exit-code
 consistency, and rejects results if repository contents change during inspection.
 
-APPROVED plus passing checks and criterion evidence completes normal execution.
-CHANGES_REQUESTED sends only blocking findings to the implementer, then repeats
-checks and review (two review repair cycles maximum; global five-failure budget).
-Suggestions remain future work. INDETERMINATE allows one explicit budget/model
-retry; ERROR stops. Neither outcome can approve or fall back to retired agents.
-Review-only never applies findings or claims that tests were run.
+For the new deterministic Design workflow, APPROVED plus passing build and tests
+completes the attempt. CHANGES_REQUESTED returns blocking findings to Design;
+INDETERMINATE and ERROR block without approval. The tool never retries or
+invokes an implementer. The legacy pipeline-runner retains its own older retry
+and model escalation policy. Standalone review-only never applies findings or
+claims that tests were run.
 
 Current binary limitations: it inspects code with read-only tools, not test/build
 execution; criterion coverage in its result is not a typed evidence matrix. That

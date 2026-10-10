@@ -12,6 +12,7 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `dcp.jsonc` contains plugin configuration.
 - `scripts/` contains the review subprocess adapter and latch helper.
 - `tools/review_changes.ts` exposes review-cli to OpenCode.
+- `tools/execute_and_review.ts` runs deterministic executor, build, test and review-cli stages. Its script reuses the executor and review adapters.
 - `scratch-notes/` contains reference material.
 
 The full Windows installer deploys directory junctions and file symlinks to
@@ -58,6 +59,12 @@ The binary requires its own provider credentials in the process environment.
 Primary agents: `build`, `design`, `linear-orchestrator`.
 Subagents: `pipeline-runner`, `tester`, `implementer`.
 
+The Design agent owns the conversation and all executor input generation.
+The deterministic `execute_and_review` tool applies one change set, runs
+compilation/tests and invokes review-cli directly; no orchestration subagent is
+involved. Design owns correction attempts and architecture-change approvals.
+The legacy pipeline-runner is not part of the new loop.
+
 Code quality, reuse, structural recommendations and security inspection are
 consolidated into review_changes. The runner owns check logs and criterion evidence.
 The old five review agent files are retired; do not add parallel review agents.
@@ -87,8 +94,10 @@ The `@tarquinen/opencode-dcp` plugin is installed to manage conversation context
 
 ### Design agent integration
 
-- **Phase 1c:** After reading key source files, run `/dcp compress` if `CODEBASE_CONTEXT` exceeds 2000 lines to keep the context window clean.
-- **Phase 3:** Before invoking `pipeline-runner`, run `/dcp sweep` to remove stale tool outputs from Phase 1 discovery.
+The Design agent may use DCP to compress large discovery and review-feedback
+context, but must preserve agreed decisions, fixed requirements, original Git
+baseline and the current retry count. It does not invoke the retired
+`pipeline-runner` workflow.
 
 ### Configuration
 
