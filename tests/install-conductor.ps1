@@ -39,6 +39,7 @@ try {
     }
     Write-Host 'conductor installer checks passed.'
 } finally {
+    $global:LASTEXITCODE = 0
     Remove-Item Function:cargo -ErrorAction SilentlyContinue
     Remove-Variable ConductorMockCalls, ConductorMockExitCode -Scope Global -ErrorAction SilentlyContinue
 }
