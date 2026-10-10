@@ -68,53 +68,82 @@ Both models require access through the Zen account connected in OpenCode.
 The legacy Copilot latch does not swap these models. Review-cli model selection
 remains independent via `REVIEW_MODEL` or a tool argument.
 
-## Collaborative Design → Execution → Review loop
+## Collaborative Design → deterministic execution → independent review
 
 The `design` primary agent is the **only author of executor input**, including
-corrections. It investigates the repository, discusses consequential decisions
-(particularly algorithms and data structures), obtains design approval, and
-loads the reusable `executor` skill to prepare the actual JSON operations.
+all corrections. It investigates the repository, discusses consequential decisions
+(particularly algorithms and data structures), obtains design approval, and loads
+the reusable `executor` skill to prepare complete JSON operations.
 
-Design approval **does not authorize execution**. After presenting the proposed
-operations, Design asks for separate execution confirmation. Before the first
-application it captures a fixed Git HEAD baseline, checks for pre-existing
-changes, and resolves build/test commands (via `toolchain-detection` or explicit
-commands). If unrelated edits exist, isolate them or explicitly accept that
-they will be included in review.
+**Design approval is not execution approval.** Design presents the initial
+operations and requests explicit permission to execute. It captures a fixed
+Git baseline and checks for pre-existing changes. The approved requirements
+remain the review contract across corrections; consequential changes to agreed
+decisions require renewed user approval.
 
-Once execution is approved, Design calls the hidden `execution-loop` subagent
-for **one attempt at a time**. That agent passes the unchanged JSON to the
-`apply_executor` OpenCode tool (which uses `executor apply -` with stdin, no
-shell), then invokes the independent `review-phase` agent for compilation,
-tests and review-cli verification. This workflow explicitly selects
-`opencode/gpt-6.1-sol` for semantic review, keeping the reviewer in a
-different model family from Claude Sonnet Design; independent Review Phase
-invocations still use their existing default unless a model is supplied. The review baseline stays fixed across all
-attempts, and the working tree is never reset or committed automatically.
+Once execution is approved, Design calls the single `execute_and_review`
+OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocation:
 
-Failures return to the **same Design conversation**. Routine defects can be
-corrected autonomously by generating a new executor input against the current
-working tree; architecture-changing fixes require renewed user approval.
-Design stops on successful verification, blocked/inconclusive verification,
-two consecutive attempts without progress, or a maximum of five application
-attempts. Neither the execution coordinator nor Review Phase can generate
-repairs. Executor may leave partial changes on failure, so the actual worktree
-must be inspected before a correction; never replay failed operations blindly.
+1. Verifies the original 40-character baseline SHA still matches HEAD.
+2. Applies the exact Design-authored JSON through the existing executor adapter
+   (`executor apply -` using stdin; no shell or repository-local scratch file).
+3. Runs the explicit build command, then the explicit test command, using
+   executable/argument arrays (not shell command strings).
+4. Requires evidence that at least one test executed, and checks that build/tests
+   did not change tracked or non-ignored working-tree files.
+5. Only on success, invokes the existing review-cli adapter using the same
+   original baseline and approved requirements.
 
-The executor skill lives in `opencode/skills/executor/SKILL.md`; the executable's
-README and Rust input types remain authoritative for its interface. Install the
-executor binary separately and ensure it is on OpenCode's PATH (or set
-`EXECUTOR_BIN`). Review Phase also requires review-cli and configured provider
-credentials. Restart OpenCode after installation or environment changes.
+The tool returns `PASSED`, `NEEDS_DESIGN` (executor conflict, build/test
+failure or blocking review finding), or `BLOCKED` (missing tool, inconclusive
+test/review, unexpected source change or environment failure). It **never retries
+or generates repairs**. On a partial executor failure, earlier changes may
+remain and Design must inspect the worktree before generating new operations.
 
-To run the isolated executor tool adapter tests:
+The same Design conversation owns retries (up to five application attempts),
+diagnoses failures and produces every correction against the current working
+tree. Corrections within the approved architecture can proceed autonomously;
+design changes require user discussion and approval. Neither a separate
+Execution Loop nor Review Phase AI agent is invoked in this workflow.
+The standalone `review-phase` agent remains available for other uses.
 
-```powershell
-node --test tests/executor-runner.test.mjs
+### Tool invocation
+
+```json
+{
+  "input": "{\\"operations\\":[...]}",
+  "requirements": "Approved design and acceptance criteria",
+  "baseRef": "original 40-character Git commit SHA",
+  "buildCommand": ["cargo", "build"],
+  "testCommand": ["cargo", "test"],
+  "reviewModel": "opencode/gpt-6.1-sol"
+}
 ```
 
-The legacy `pipeline-runner` remains available for older workflows but is not
-used by Design. The new loop does not invoke the old tester or implementer.
+The `input` field must contain the actual complete executor JSON, not the
+illustrative ellipsis above. The command arrays are passed directly to the OS,
+without shell expansion or command chaining. If a toolchain command needs shell
+syntax, provide an explicit script executable. `toolchain-detection` may help
+identify commands but does not automatically parse arbitrary shell strings.
+For unrecognized test-runner summaries, `testEvidencePattern` accepts a regex
+whose first capture group is the **number of executed tests**.
+
+The default review model is GPT-6.1 Sol, independent from Claude Sonnet Design;
+review-cli performs the only additional model call. Install `executor` and
+`review-cli` separately and make them available on OpenCode's PATH (or use
+`EXECUTOR_BIN` and `REVIEW_CLI_BIN`). Restart OpenCode after updating
+configuration or environment variables.
+
+The legacy `pipeline-runner` and independent `review-phase` remain available
+for other workflows but are not used by Design. On forced reinstall, stale
+`execution-loop.md` and `apply_executor.ts` are backed up and removed.
+
+Run the deterministic adapter tests from the repository root:
+
+```powershell
+node --test tests/executor-runner.test.mjs tests/execute-and-review.test.mjs
+pwsh -NoProfile -File tests/install-opencode.ps1
+```
 
 ## Review integration
 
