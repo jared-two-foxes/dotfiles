@@ -22,10 +22,9 @@ Run `setup.ps1` for an OpenCode-only installation, or `setup.ps1 -Copy` for copi
 Existing conflicting configuration is preserved unless `-Force` is supplied;
 forced replacements are backed up. See README.md for commands and dependencies.
 
-Review-cli replaces review-only subagents. Preserve explicit mechanical checks
-and per-criterion evidence in the pipeline runner; incomplete reviews cannot approve. Agent escalation edits affect the tracked source
-in link mode, and installed copies in copy mode. Check and restore agent changes
-before committing.
+Review-cli replaces review-only subagents. The deterministic execution tool
+performs mechanical checks; incomplete or indeterminate reviews cannot approve.
+The legacy multi-agent TDD pipeline has been retired.
 
 ## GitHub Latch
 
@@ -56,21 +55,18 @@ The binary requires its own provider credentials in the process environment.
 
 ## Agent files
 
-Primary agents: `build`, `design`, `linear-orchestrator`.
-Subagents: `pipeline-runner`, `tester`, `implementer`.
+Primary agents: `build`, `design`. No custom subagents are deployed.
 
 The Design agent owns the conversation and all executor input generation.
 The deterministic `execute_and_review` tool applies one change set, runs
 compilation/tests and invokes review-cli directly; no orchestration subagent is
 involved. Design owns correction attempts and architecture-change approvals.
-The legacy pipeline-runner is not part of the new loop.
+The old Linear Orchestrator, Pipeline Runner, Tester and Implementer agents are
+removed; `review_changes` remains available for standalone semantic reviews.
 
 Code quality, reuse, structural recommendations and security inspection are
-consolidated into review_changes. The runner owns check logs and criterion evidence.
-The old five review agent files are retired; do not add parallel review agents.
-
-Pipeline-runner edits agent model frontmatter during escalation. Preserve its
-restore rules; agent bodies and model choices are imported without redesign.
+consolidated into `review_changes`. The deterministic execution tool owns
+build/test logs and review results. Do not reintroduce parallel review agents.
 
 ## opencode.jsonc notes
 
@@ -96,8 +92,7 @@ The `@tarquinen/opencode-dcp` plugin is installed to manage conversation context
 
 The Design agent may use DCP to compress large discovery and review-feedback
 context, but must preserve agreed decisions, fixed requirements, original Git
-baseline and the current retry count. It does not invoke the retired
-`pipeline-runner` workflow.
+baseline and the current retry count. It does not invoke retired implementation subagents.
 
 ### Configuration
 

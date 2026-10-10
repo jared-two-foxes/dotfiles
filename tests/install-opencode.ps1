@@ -19,7 +19,7 @@ try {
     & $installer -Mode Copy -ConfigDir $config -WhatIf
     Assert-True (-not (Test-Path $config)) 'WhatIf created configuration'
     & $installer -Mode Copy -ConfigDir $config
-    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 6) 'Agent files missing'
+    Assert-True ((Get-ChildItem (Join-Path $config 'agents') -File).Count -eq 2) 'Expected only Design and Build agents'
     Assert-True (Test-Path (Join-Path $config 'skills/executor/SKILL.md')) 'Executor skill not deployed in copy mode'
     Assert-True (Test-Path (Join-Path $config 'tools/execute_and_review.ts')) 'Execution and review tool not deployed in copy mode'
     Assert-True (-not (Get-Item (Join-Path $config 'agents')).LinkType) 'Copy mode made a link'
@@ -32,6 +32,9 @@ try {
     Set-Content (Join-Path $config 'agents/validator.md') 'retired'
     Set-Content (Join-Path $config 'agents/execution-loop.md') 'retired loop'
     Set-Content (Join-Path $config 'agents/review-phase.md') 'retired review phase'
+    foreach ($agent in @('linear-orchestrator', 'pipeline-runner', 'tester', 'implementer')) {
+        Set-Content (Join-Path $config "agents/$agent.md") "retired $agent"
+    }
     Set-Content (Join-Path $config 'tools/apply_executor.ts') 'retired tool'
     Set-Content (Join-Path $config 'agents/daily-summary.md') 'retired summary'
     Set-Content (Join-Path $config 'scripts/run-daily-summary.ps1') 'retired launcher'
@@ -47,6 +50,10 @@ try {
     Assert-True (-not (Test-Path (Join-Path $config 'agents/execution-loop.md'))) 'Copy upgrade retained retired execution agent'
     Assert-True (-not (Test-Path (Join-Path $config 'agents/review-phase.md'))) 'Copy upgrade retained retired review agent'
     Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter review-phase.md).Count -eq 1) 'Retired review phase was not backed up'
+    foreach ($agent in @('linear-orchestrator', 'pipeline-runner', 'tester', 'implementer')) {
+        Assert-True (-not (Test-Path (Join-Path $config "agents/$agent.md"))) "Retired agent survived copy upgrade: $agent"
+        Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter "$agent.md").Count -eq 1) "Retired agent was not backed up: $agent"
+    }
     Assert-True (-not (Test-Path (Join-Path $config 'tools/apply_executor.ts'))) 'Copy upgrade retained retired executor tool'
     Assert-True ((Get-ChildItem (Join-Path $config 'backups') -Recurse -Filter validator.md).Count -eq 1) 'Retired copy was not backed up'
     foreach ($legacy in @('agents/daily-summary.md', 'scripts/run-daily-summary.ps1', 'scripts/register-scheduled-task.ps1')) {
@@ -68,6 +75,11 @@ try {
     Assert-True (-not (Test-Path (Join-Path $config 'agents/validator.md'))) 'Retired agent survived migration'
     Assert-True (Test-Path (Join-Path $config 'tools/review_changes.ts')) 'Review tool not deployed'
     Assert-True (-not (Test-Path (Join-Path $config 'agents/review-phase.md'))) 'Retired review phase still deployed'
+    foreach ($agent in @('linear-orchestrator', 'pipeline-runner', 'tester', 'implementer')) {
+        Assert-True (-not (Test-Path (Join-Path $config "agents/$agent.md"))) "Retired agent survived link upgrade: $agent"
+    }
+    Assert-True (Test-Path (Join-Path $config 'agents/design.md')) 'Design agent missing in link mode'
+    Assert-True (Test-Path (Join-Path $config 'agents/build.md')) 'Build agent missing in link mode'
     Assert-True (Test-Path (Join-Path $config 'tools/execute_and_review.ts')) 'Execution and review tool not deployed in link mode'
     Assert-True (-not (Test-Path (Join-Path $config 'agents/execution-loop.md'))) 'Retired execution loop still deployed'
     Assert-True (-not (Test-Path (Join-Path $config 'tools/apply_executor.ts'))) 'Retired executor tool still deployed'

@@ -50,7 +50,7 @@ foreach ($entry in $entries) {
 }
 # Remove retired agents from copy installs as well as existing directory links.
 # Back up each legacy file before replacing its old role with deterministic tools.
-$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator', 'daily-summary', 'execution-loop', 'review-phase')
+$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator', 'daily-summary', 'execution-loop', 'review-phase', 'linear-orchestrator', 'pipeline-runner', 'tester', 'implementer')
 foreach ($agent in $retiredAgents) {
     $legacyAgent = Join-Path $ConfigDir "agents/$agent.md"
     if ($null -ne (Get-Item -LiteralPath $legacyAgent -Force -ErrorAction SilentlyContinue)) {

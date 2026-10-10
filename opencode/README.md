@@ -1,7 +1,9 @@
 # OpenCode configuration
 
-Imported from the standalone local OpenCode repository. The implementation/planning agents and five skills remain.
-Review-only subagents are replaced by review-cli.
+The global setup keeps two primary agents: `design` for collaborative architecture and
+executor-authored changes, and `build` for direct manual coding tasks. The old
+multi-agent TDD pipeline and review orchestration agents have been retired.
+Independent semantic review is provided by `review-cli`.
 
 ## Install
 
@@ -48,8 +50,8 @@ from the installed skills directory. No actual secret values are included.
 
 Run helpers from ~/.config/opencode/scripts/ so latch state and agent files refer
 to the same installation. latch.example.json seeds local latch.json once; installer
-reruns preserve its state. In link mode, model toggles and pipeline escalation edit
-tracked agent files. In copy mode they edit installed copies.
+reruns preserve its state. In link mode, model toggles edit tracked agent files. In copy mode they edit
+installed copies.
 
 ```powershell
 & "$env:USERPROFILE\.config\opencode\scripts\toggle-github-latch.ps1" -Status
@@ -58,15 +60,13 @@ tracked agent files. In copy mode they edit installed copies.
 AGENTS.md is maintenance guidance for this directory and is not deployed as global
 OpenCode instructions. scratch-notes/ is retained in Git but not installed. The former standalone .git directory is not imported.
 
-## Implementation models
+## Agent models
 
-Implementer defaults to `opencode/gpt-6-luna` through OpenCode Zen. The pipeline
-runner uses the same model for startup recovery and resets after escalation.
-Its Tier 2 and model-error fallback are `opencode/gpt-6.1-sol`; the existing
-three Tier 1 / two Tier 2 invocation limits and global retry budget still apply.
-Both models require access through the Zen account connected in OpenCode.
-The legacy Copilot latch does not swap these models. Review-cli model selection
-remains independent via `REVIEW_MODEL` or a tool argument.
+`design` and `build` use Claude Sonnet through OpenCode. Design produces the
+executor input and owns corrections; Build is an independent direct-editing
+option for tasks that do not use the Design workflow. Semantic review uses a
+separate model through `review-cli`, configured by `reviewModel` or
+`REVIEW_MODEL`.
 
 ## Collaborative Design → deterministic execution → independent review
 
@@ -133,9 +133,10 @@ review-cli performs the only additional model call. Install `executor` and
 `EXECUTOR_BIN` and `REVIEW_CLI_BIN`). Restart OpenCode after updating
 configuration or environment variables.
 
-The legacy `pipeline-runner` remains available for other workflows but is not
-used by Design. On forced reinstall, stale `review-phase.md`,
-`execution-loop.md` and `apply_executor.ts` are backed up and removed.
+The legacy `linear-orchestrator`, `pipeline-runner`, `tester` and
+`implementer` agents are retired. On forced reinstall, their installed copies
+and older `review-phase.md`, `execution-loop.md` and `apply_executor.ts`
+are backed up and removed.
 
 Run the deterministic adapter tests from the repository root:
 
@@ -148,9 +149,9 @@ pwsh -NoProfile -File tests/install-opencode.ps1
 
 `review_changes` is a global OpenCode tool backed by a shell-free Node subprocess
 adapter. It consolidates code review, security inspection, reuse checking and
-structural recommendations. The pipeline runner performs mechanical commands and
-maps every acceptance criterion to evidence before requesting binary review.
-Five retired agent files are backed up and removed during forced installation,
+structural recommendations. The deterministic `execute_and_review` tool runs the mechanical build and test
+checks before invoking review-cli.
+Retired agent files are backed up and removed during forced installation,
 including on copy-based machines. Re-run your installer with -Force after pulling.
 
 Install the binary separately on each machine (Rust/Cargo required for installation):
@@ -164,21 +165,20 @@ Git is required by the adapter. OpenCode provides the JS runtime and tool helper
 The binary must be on the OpenCode process PATH, or set REVIEW_CLI_BIN to its full
 executable path. Restart OpenCode after changing environment variables.
 
-The review model is independent of the orchestrator and implementer models. Set
+The review model is independent of the Design and Build agent models. Set
 REVIEW_MODEL (default opencode/claude-sonnet-5) or supply an explicit tool model.
 Use a review-cli build with Anthropic Messages support for Claude on Zen.
 Reinstall the binary with the cargo install command above and `--force` to update
 an existing installation. Claude Sonnet 5 provides a different model family from
-the GPT Implementer. Existing REVIEW_MODEL values override this default; unset
+the Claude Design agent when configured accordingly. Existing REVIEW_MODEL values override this default; unset
 old GPT overrides or set REVIEW_MODEL=opencode/claude-sonnet-5.
 For the default provider, export OPENCODE_API_KEY; openai/<model> uses OPENAI_API_KEY,
 ollama/<model> uses the local Ollama endpoint, and copilot/<model> uses credentials
 supported by review-cli. OpenCode's stored login is not automatically forwarded.
 Do not commit provider credentials.
 
-The legacy pipeline-runner requires a clean starting worktree; the new Design
-workflow instead checks pre-existing changes and asks the user to isolate
-unrelated edits or accept their inclusion in the review diff. Both retain the
+The Design workflow checks pre-existing changes and asks the user to isolate
+unrelated edits or accept their inclusion in the review diff. It retains the
 original commit SHA through all retries. The review tool compares that base
 against the current working tree,
 including new untracked files. Review-only mode requires an explicit baseline and
@@ -186,16 +186,14 @@ can instead review a fixed committed target. The tool stores requirements/reques
 files outside the repository, removes them afterwards, validates result/exit-code
 consistency, and rejects results if repository contents change during inspection.
 
-For the new deterministic Design workflow, APPROVED plus passing build and tests
+For the deterministic Design workflow, APPROVED plus passing build and tests
 completes the attempt. CHANGES_REQUESTED returns blocking findings to Design;
 INDETERMINATE and ERROR block without approval. The tool never retries or
-invokes an implementer. The legacy pipeline-runner retains its own older retry
-and model escalation policy. Standalone review-only never applies findings or
-claims that tests were run.
+invokes an implementation agent. Standalone review-only never applies findings
+or claims that tests were run.
 
 Current binary limitations: it inspects code with read-only tools, not test/build
-execution; criterion coverage in its result is not a typed evidence matrix. That
-matrix stays with the runner. Its general review prompt still asks for a concrete
+execution; criterion coverage in its result is not a typed evidence matrix. Any additional evidence matrix must be provided by the calling workflow. Its general review prompt still asks for a concrete
 finding, and its specialized test-quality skill currently targets Python files.
 The adapter preserves the binary's verdict and does not pretend these limitations
 are additional verified guarantees.
