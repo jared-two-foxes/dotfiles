@@ -38,5 +38,5 @@ test('Pi system prompt and Conductor skill route collaborative workflow to Desig
   assert.match(system, /direct-edit.*tdd/);
   assert.match(conductor, /\/skill:design/);
   assert.match(executor, /"operations"/);
-  assert.match(executor, /"replace_file"/);
+  assert.match(executor, /`replace_file`/);
 });
