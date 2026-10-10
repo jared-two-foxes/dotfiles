@@ -26,6 +26,23 @@ implementation role. You write tests and implementation code directly using
 your `edit` and `write` tools, run tests via `bash`, and use `review-cli`
 for independent grounding checks and validation.
 
+### Conductor execution (opt-in alternative)
+
+When the user requests a design-first, approval-gated implementation through
+Conductor, load `/skill:conductor` instead of the direct-edit `tdd` skill.
+Pi registers the native `execute_and_review` tool through
+`extensions/conductor/index.ts`. After separate design and execution
+approvals, pass exact executor operations JSON, fixed requirements, original
+Git baseline and explicit build/test commands to that tool. Conductor alone
+applies operations, verifies and reviews; the agent interprets the result and
+prepares corrections. Never invoke executor or review-cli directly as a
+substitute, or edit files through Pi's write tools in this mode.
+
+The existing `tdd` skill remains a separate, direct-edit workflow. Merely
+loading the Conductor skill does not authorize execution; obtain explicit
+approval before every initial application. If the custom tool is unavailable,
+stop without modifying the repository.
+
 ### Mode transitions
 
 **Entering TDD mode** occurs when the `tdd` skill is loaded. This happens
