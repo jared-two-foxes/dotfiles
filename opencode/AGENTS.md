@@ -10,9 +10,9 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `skills/` contains the global skills.
 - `opencode.jsonc` contains MCP, model and plugin configuration (JSON with comments).
 - `dcp.jsonc` contains plugin configuration.
-- `scripts/` contains the review subprocess adapter and latch helper.
+- `scripts/` contains the thin Conductor subprocess adapter, standalone review subprocess adapter and latch helper.
 - `tools/review_changes.ts` exposes review-cli to OpenCode.
-- `tools/execute_and_review.ts` runs deterministic executor, build, test and review-cli stages. Its script reuses the executor and review adapters.
+- `tools/execute_and_review.ts` forwards Design's executor input, build/test commands and requirements to the shared Rust Conductor CLI. It does not invoke executor or review-cli directly.
 - `scratch-notes/` contains reference material.
 
 The full Windows installer deploys directory junctions and file symlinks to
@@ -58,9 +58,8 @@ The binary requires its own provider credentials in the process environment.
 Primary agents: `build`, `design`. No custom subagents are deployed.
 
 The Design agent owns the conversation and all executor input generation.
-The deterministic `execute_and_review` tool applies one change set, runs
-compilation/tests and invokes review-cli directly; no orchestration subagent is
-involved. Design owns correction attempts and architecture-change approvals.
+The deterministic `execute_and_review` tool invokes Conductor for one change set,
+verification and independent review; no orchestration subagent is involved. Design owns correction attempts and architecture-change approvals.
 The old Linear Orchestrator, Pipeline Runner, Tester and Implementer agents are
 removed; `review_changes` remains available for standalone semantic reviews.
 

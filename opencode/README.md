@@ -3,7 +3,7 @@
 The global setup keeps two primary agents: `design` for collaborative architecture and
 executor-authored changes, and `build` for direct manual coding tasks. The old
 multi-agent TDD pipeline and review orchestration agents have been retired.
-Independent semantic review is provided by `review-cli`.
+Independent semantic review is provided by the `review-app` library through Conductor (and `review-cli` for standalone reviews).
 
 ## Install
 
@@ -40,6 +40,23 @@ source edits; restart OpenCode after updating configuration.
 The uploaded opencode.json contains comments, so it is named opencode.jsonc.
 The redundant relative skills.paths setting was removed: skills are discovered
 from the installed skills directory. No actual secret values are included.
+
+## Shared Conductor CLI
+
+The full and restricted Windows installers also install the shared Rust `conductor`
+CLI through Cargo. To install or update it independently (PowerShell 7+):
+
+```powershell
+.\install\conductor.ps1 -Force
+conductor --help
+```
+
+`conductor` must be on OpenCode's PATH, or set `CONDUCTOR_BIN` to its executable
+path before starting OpenCode. The Design agent's `execute_and_review` tool now
+invokes Conductor directly; `executor` and `review-cli` are no longer spawned
+for that workflow. They remain available as standalone tools. Conductor does not
+yet include a checked-in `Cargo.lock`, so its installer intentionally does not
+pass `--locked`.
 
 ## Dependencies and optional helpers
 
@@ -85,18 +102,19 @@ Once execution is approved, Design calls the single `execute_and_review`
 OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocation:
 
 1. Verifies the original 40-character baseline SHA still matches HEAD.
-2. Applies the exact Design-authored JSON through the existing executor adapter
-   (`executor apply -` using stdin; no shell or repository-local scratch file).
+2. Passes the exact Design-authored JSON to `conductor run --request -` over stdin.
+   Conductor applies it through the executor Rust library (no shell or repository-local scratch file).
 3. Runs the explicit build command, then the explicit test command, using
    executable/argument arrays (not shell command strings).
-4. Requires evidence that at least one test executed, and checks that build/tests
-   did not change tracked or non-ignored working-tree files.
-5. Only on success, invokes the existing review-cli adapter using the same
-   original baseline and approved requirements.
+4. Relies on Conductor's check exit codes. The current Conductor version does **not**
+   verify that tests actually executed or that build/tests left source unchanged;
+   inspect outputs and avoid treating a zero exit code as proof of test coverage.
+5. Only on successful checks, Conductor invokes the review-app Rust library
+   using the same original baseline and approved requirements.
 
 The tool returns `PASSED`, `NEEDS_DESIGN` (executor conflict, build/test
-failure or blocking review finding), or `BLOCKED` (missing tool, inconclusive
-test/review, unexpected source change or environment failure). It **never retries
+failure or blocking review finding), or `BLOCKED` (invalid input, missing
+Conductor binary or indeterminate review). It **never retries
 or generates repairs**. On a partial executor failure, earlier changes may
 remain and Design must inspect the worktree before generating new operations.
 
@@ -124,13 +142,14 @@ illustrative ellipsis above. The command arrays are passed directly to the OS,
 without shell expansion or command chaining. If a toolchain command needs shell
 syntax, provide an explicit script executable. `toolchain-detection` may help
 identify commands but does not automatically parse arbitrary shell strings.
-For unrecognized test-runner summaries, `testEvidencePattern` accepts a regex
-whose first capture group is the **number of executed tests**.
+The current Conductor request has no `testEvidencePattern` or per-command timeout.
+The OpenCode adapter retains a fixed task-start Git HEAD preflight, but does not
+reimplement Conductor's execution/check/review stages.
 
 The default review model is GPT-6.1 Sol, independent from Claude Sonnet Design;
-review-cli performs the only additional model call. Install `executor` and
-`review-cli` separately and make them available on OpenCode's PATH (or use
-`EXECUTOR_BIN` and `REVIEW_CLI_BIN`). Restart OpenCode after updating
+Conductor's review-app integration performs the only additional model call. Install
+`conductor` and make it available on OpenCode's PATH (or set `CONDUCTOR_BIN`).
+Standalone `review_changes` still requires `review-cli`. Restart OpenCode after updating
 configuration or environment variables.
 
 The legacy `linear-orchestrator`, `pipeline-runner`, `tester` and
@@ -141,7 +160,7 @@ are backed up and removed.
 Run the deterministic adapter tests from the repository root:
 
 ```powershell
-node --test tests/executor-runner.test.mjs tests/execute-and-review.test.mjs
+node --test tests/execute-and-review.test.mjs
 pwsh -NoProfile -File tests/install-opencode.ps1
 ```
 
@@ -149,8 +168,8 @@ pwsh -NoProfile -File tests/install-opencode.ps1
 
 `review_changes` is a global OpenCode tool backed by a shell-free Node subprocess
 adapter. It consolidates code review, security inspection, reuse checking and
-structural recommendations. The deterministic `execute_and_review` tool runs the mechanical build and test
-checks before invoking review-cli.
+structural recommendations. The deterministic `execute_and_review` tool delegates the build, test and review
+stages to Conductor.
 Retired agent files are backed up and removed during forced installation,
 including on copy-based machines. Re-run your installer with -Force after pulling.
 

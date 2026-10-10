@@ -338,6 +338,10 @@ Write-Host "`n[executor CLI]" -ForegroundColor White
 
 & (Join-Path $PSScriptRoot 'executor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
 
+# --- conductor CLI ---
+Write-Host "[conductor CLI]" -ForegroundColor White
+& (Join-Path $PSScriptRoot 'conductor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
+
 # --- OpenCode ------------------------------------------------
 Write-Host "
 [OpenCode Configuration]" -ForegroundColor White
