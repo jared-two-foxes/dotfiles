@@ -5,7 +5,7 @@ description: Use when preparing a deterministic change set for the standalone ex
 
 # Executor — Prepare Change Operations
 
-This skill describes how to **prepare** input for the standalone [executor CLI](https://github.com/jared-two-foxes/executor). It is reusable by any agent that needs to author executor-compatible operations, not just the Design agent.
+This skill describes how to **prepare** input for the [executor](https://github.com/jared-two-foxes/executor) operation schema. OpenCode's Design workflow passes this exact input to the shared [Conductor](https://github.com/jared-two-foxes/conductor) CLI via `execute_and_review`. It is reusable by any agent that needs to author executor-compatible operations, not just the Design agent.
 
 **The executor repository (its README and Rust input types) is the source of truth.** This skill documents the interface known at the time of writing. If a newer installed executor or repository version differs, consult its documentation rather than inventing an input format.
 
@@ -54,7 +54,7 @@ Supported operations (field names and shapes are significant):
 | `delete_directory` | `path` | Remove an empty directory |
 | `move_directory` | `from`, `to` | Move a directory; destination must not exist |
 
-For `patch`, the `source` object has a `type` of `inline` or `file`. An inline patch contains the **complete** Git diff as a JSON string, with newline characters escaped. A file source refers to a patch file that already exists; its path is resolved relative to the current working directory.
+For `patch`, the `source` object has a `type` of `inline` or `file`. An inline patch contains the **complete** Git diff as a JSON string, with newline characters escaped. A file source refers to a patch file that already exists; through Conductor's library integration, its path is resolved relative to the repository root. For standalone `executor apply`, consult the executor version's documented resolution rules.
 
 ## Authoring rules
 
@@ -69,6 +69,6 @@ For `patch`, the `source` object has a `type` of `inline` or `file`. An inline p
 
 ## Handoff
 
-Return the JSON in a separate fenced block, accompanied by a short description of what it changes and how to pass it to `executor apply -` or save it as a file. Do not execute it unless the calling agent's role and the user **explicitly** authorize execution; for read-only design roles, never invoke executor.
+Return the JSON in a separate fenced block with a short description. In OpenCode Design, after **separate explicit execution approval**, pass this exact JSON as the `input` field of `execute_and_review`. Do not run `executor apply` or `conductor run` directly from Design. Outside OpenCode, a caller may use `executor apply -` or wrap the operations in a Conductor workflow request. Never execute without authorization.
 
 Executor reports JSON with `success`, `operations_applied`, and, on operation failure, `failed_operation` (zero-based) and `error`. A nonzero exit code indicates failure. On failure, inspect the working tree before attempting another application because partial changes may remain.
