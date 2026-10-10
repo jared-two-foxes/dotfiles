@@ -35,7 +35,7 @@ try {
 
     foreach ($parent in @('windows-full.ps1', 'windows-restricted.ps1')) {
         $source = Get-Content (Join-Path $repo "install/$parent") -Raw
-        Assert-True ($source.Contains("conductor.ps1') -Force:$Force -WhatIf:$WhatIfPreference")) "$parent does not forward Conductor installer flags"
+        Assert-True ($source -match 'conductor\.ps1\x27\) -Force:\$Force -WhatIf:\$WhatIfPreference') "$parent does not forward Conductor installer flags"
     }
     Write-Host 'conductor installer checks passed.'
 } finally {
