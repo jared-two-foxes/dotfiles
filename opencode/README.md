@@ -68,36 +68,50 @@ Both models require access through the Zen account connected in OpenCode.
 The legacy Copilot latch does not swap these models. Review-cli model selection
 remains independent via `REVIEW_MODEL` or a tool argument.
 
-## Collaborative Design phase
+## Collaborative Design → Execution → Review loop
 
-The primary `design` agent now runs an interactive technical-design conversation.
-It inspects relevant code, raises consequential decisions (especially data structures,
-algorithms and interfaces), and seeks explicit agreement before producing changes.
+The `design` primary agent is the **only author of executor input**, including
+corrections. It investigates the repository, discusses consequential decisions
+(particularly algorithms and data structures), obtains design approval, and
+loads the reusable `executor` skill to prepare the actual JSON operations.
 
-After design approval, it loads the reusable `executor` skill from
-`opencode/skills/executor/SKILL.md` to generate an `operations` document for
-the standalone [executor](https://github.com/jared-two-foxes/executor) CLI.
-The skill contains executor-specific input guidance so the Design agent
-does not duplicate the operation schema. The executor repository's README and
-Rust input types remain authoritative for the supported interface.
+Design approval **does not authorize execution**. After presenting the proposed
+operations, Design asks for separate execution confirmation. Before the first
+application it captures a fixed Git HEAD baseline, checks for pre-existing
+changes, and resolves build/test commands (via `toolchain-detection` or explicit
+commands). If unrelated edits exist, isolate them or explicitly accept that
+they will be included in review.
 
-The Design agent does not invoke executor, write source files, or automatically
-launch other agents. Its design summary and acceptance criteria remain separate
-from the JSON and can be supplied to the independent `review-phase` agent
-after application. The skill is deployed with the other OpenCode skills by
-the existing installer in both link and copy modes.
+Once execution is approved, Design calls the hidden `execution-loop` subagent
+for **one attempt at a time**. That agent passes the unchanged JSON to the
+`apply_executor` OpenCode tool (which uses `executor apply -` with stdin, no
+shell), then invokes the independent `review-phase` agent for compilation,
+tests and review-cli verification. The review baseline stays fixed across all
+attempts, and the working tree is never reset or committed automatically.
 
-For example, save the generated JSON as `changes.json`, then from the target
-Git repository root run:
+Failures return to the **same Design conversation**. Routine defects can be
+corrected autonomously by generating a new executor input against the current
+working tree; architecture-changing fixes require renewed user approval.
+Design stops on successful verification, blocked/inconclusive verification,
+two consecutive attempts without progress, or a maximum of five application
+attempts. Neither the execution coordinator nor Review Phase can generate
+repairs. Executor may leave partial changes on failure, so the actual worktree
+must be inspected before a correction; never replay failed operations blindly.
+
+The executor skill lives in `opencode/skills/executor/SKILL.md`; the executable's
+README and Rust input types remain authoritative for its interface. Install the
+executor binary separately and ensure it is on OpenCode's PATH (or set
+`EXECUTOR_BIN`). Review Phase also requires review-cli and configured provider
+credentials. Restart OpenCode after installation or environment changes.
+
+To run the isolated executor tool adapter tests:
 
 ```powershell
-executor apply changes.json
+node --test tests/executor-runner.test.mjs
 ```
 
-Executor applies operations in order and **does not roll back** on failure.
-Inspect the working tree and its JSON result before proceeding. The existing
-`pipeline-runner` is still present for legacy workflows but is no longer
-invoked by the Design agent.
+The legacy `pipeline-runner` remains available for older workflows but is not
+used by Design. The new loop does not invoke the old tester or implementer.
 
 ## Review integration
 
