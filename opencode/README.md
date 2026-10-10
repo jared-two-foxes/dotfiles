@@ -151,7 +151,7 @@ pwsh -NoProfile -File tests/install-opencode.ps1
 adapter. It consolidates code review, security inspection, reuse checking and
 structural recommendations. The deterministic `execute_and_review` tool runs the mechanical build and test
 checks before invoking review-cli.
-Five retired agent files are backed up and removed during forced installation,
+Retired agent files are backed up and removed during forced installation,
 including on copy-based machines. Re-run your installer with -Force after pulling.
 
 Install the binary separately on each machine (Rust/Cargo required for installation):
