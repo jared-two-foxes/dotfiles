@@ -103,9 +103,8 @@ remain and Design must inspect the worktree before generating new operations.
 The same Design conversation owns retries (up to five application attempts),
 diagnoses failures and produces every correction against the current working
 tree. Corrections within the approved architecture can proceed autonomously;
-design changes require user discussion and approval. Neither a separate
-Execution Loop nor Review Phase AI agent is invoked in this workflow.
-The standalone `review-phase` agent remains available for other uses.
+design changes require user discussion and approval. Neither an Execution Loop nor a Review Phase AI agent is needed. Standalone
+semantic reviews remain available through the `review_changes` tool.
 
 ### Tool invocation
 
@@ -134,8 +133,8 @@ review-cli performs the only additional model call. Install `executor` and
 `EXECUTOR_BIN` and `REVIEW_CLI_BIN`). Restart OpenCode after updating
 configuration or environment variables.
 
-The legacy `pipeline-runner` and independent `review-phase` remain available
-for other workflows but are not used by Design. On forced reinstall, stale
+The legacy `pipeline-runner` remains available for other workflows but is not
+used by Design. On forced reinstall, stale `review-phase.md`,
 `execution-loop.md` and `apply_executor.ts` are backed up and removed.
 
 Run the deterministic adapter tests from the repository root:
