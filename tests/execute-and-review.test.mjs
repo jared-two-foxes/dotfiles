@@ -105,7 +105,7 @@ test('partial executor failure returns immediately without review', async t => {
   const f = await fixture(t);
   const outcome = await executeAndReview(f.args, { worktree: f.dir }, {
     skipDependencyCheck: true, apply: async () => ({ status: 'APPLY_FAILED', operationsApplied: 0, failedOperation: 0, error: 'conflict' }),
-    review: f.review, skipDependencyCheck: true,
+    review: f.review,
   });
   assert.equal(outcome.status, 'NEEDS_DESIGN');
   assert.equal(outcome.stage, 'APPLY');
@@ -134,9 +134,10 @@ test('changed HEAD and invalid inputs stop before executor', async t => {
   assert.equal(changed.status, 'BLOCKED');
   assert.equal(changed.reason, 'HEAD_CHANGED');
   assert.equal(f.calls.length, 0);
-  const invalid = await executeAndReview({ ...f.args, buildCommand: ['echo hi'] },
+  const invalid = await executeAndReview({ ...f.args, buildCommand: [] },
     { worktree: f.dir }, { apply: f.apply, review: f.review, skipDependencyCheck: true });
   assert.equal(invalid.status, 'BLOCKED');
+  assert.equal(invalid.stage, 'PRECHECK');
 });
 
 test('missing build binary blocks, never triggers review', async t => {
