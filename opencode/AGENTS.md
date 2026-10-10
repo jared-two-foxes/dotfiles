@@ -12,7 +12,7 @@ This directory in dotfiles is the source of truth for the global OpenCode setup.
 - `dcp.jsonc` contains plugin configuration.
 - `scripts/` contains the review subprocess adapter and latch helper.
 - `tools/review_changes.ts` exposes review-cli to OpenCode.
-- `tools/apply_executor.ts` pipes Design-authored operations to the standalone executor binary.
+- `tools/execute_and_review.ts` runs deterministic executor, build, test and review-cli stages. Its script reuses the executor and review adapters.
 - `scratch-notes/` contains reference material.
 
 The full Windows installer deploys directory junctions and file symlinks to
@@ -57,12 +57,13 @@ The binary requires its own provider credentials in the process environment.
 ## Agent files
 
 Primary agents: `build`, `design`, `linear-orchestrator`.
-Subagents: `execution-loop`, `review-phase`, `pipeline-runner`, `tester`, `implementer`.
+Subagents: `review-phase`, `pipeline-runner`, `tester`, `implementer`.
 
-The Design agent owns the conversation and all executor input generation. Its
-`execution-loop` subagent applies one change set and invokes `review-phase`;
-Design owns correction attempts and architecture-change approvals. The legacy
-pipeline-runner is not part of the new loop.
+The Design agent owns the conversation and all executor input generation.
+The deterministic `execute_and_review` tool applies one change set, runs
+compilation/tests and invokes review-cli directly; no orchestration subagent is
+involved. Design owns correction attempts and architecture-change approvals.
+The legacy pipeline-runner is not part of the new loop.
 
 Code quality, reuse, structural recommendations and security inspection are
 consolidated into review_changes. The runner owns check logs and criterion evidence.
