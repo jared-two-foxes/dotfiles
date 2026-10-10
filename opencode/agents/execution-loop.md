@@ -36,7 +36,7 @@ The session workspace is the target repository. Never accept an alternative repo
    - `APPLIED`: proceed to Review Phase, including if the operations array was empty.
    - `APPLY_FAILED`: return `NEEDS_DESIGN` with the operation index, error, and number of completed operations. **No review**; partial changes may remain. Design must inspect the actual current working tree before preparing any correction.
    - `ERROR`: return `BLOCKED`. An invocation error or timeout may have left partial changes; do not assume the repository is unchanged. Do not retry automatically.
-4. **Review:** Invoke `review-phase` via the task tool, passing REQUIREMENTS, fixed BASE_REF, working-tree target (omit HEAD_REF), optional TOOLCHAIN and current repository. Do not run an independent review or mechanical checks yourself. Wait for `REVIEW_PHASE_RESULT`.
+4. **Review:** Invoke `review-phase` via the task tool, passing REQUIREMENTS, fixed BASE_REF, working-tree target (omit HEAD_REF), optional TOOLCHAIN, current repository and `REVIEW_MODEL: opencode/gpt-6.1-sol`. The GPT-family semantic reviewer is deliberately independent of the Claude-family Design agent that generated the change. Do not silently substitute a Claude reviewer on provider failure. Do not run an independent review or mechanical checks yourself. Wait for `REVIEW_PHASE_RESULT`.
 5. **Classify:** Review `PASS` -> `PASSED`; `FAIL` -> `NEEDS_DESIGN`; `INDETERMINATE` or malformed/missing result -> `BLOCKED`. Never treat missing evidence or an unavailable review provider as approval.
 
 ## Return
