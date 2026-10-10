@@ -57,7 +57,7 @@ The binary requires its own provider credentials in the process environment.
 ## Agent files
 
 Primary agents: `build`, `design`, `linear-orchestrator`.
-Subagents: `review-phase`, `pipeline-runner`, `tester`, `implementer`.
+Subagents: `pipeline-runner`, `tester`, `implementer`.
 
 The Design agent owns the conversation and all executor input generation.
 The deterministic `execute_and_review` tool applies one change set, runs
