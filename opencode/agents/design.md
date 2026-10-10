@@ -75,7 +75,7 @@ After explicit design approval, load the **`executor` skill**. Follow that skill
 
 Inspect exact source contents before authoring patches. If the change cannot be expressed reliably in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative patches as executable.
 
-Present the executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are intended for the independent Review Phase; they are not executor input.
+Present the executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are supplied to the independent review-cli check through `execute_and_review`; they are not executor input.
 
 **Do not directly invoke executor, write files, or claim the operations have been applied or verified.** Only after the user explicitly approves execution may you pass the exact input to `execute_and_review`.
 
@@ -95,7 +95,7 @@ You are the **primary conversational agent and sole generator of executor input*
 Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `requirements`, `baseRef`, `buildCommand` and `testCommand`. Optionally supply `testEvidencePattern` and `reviewModel`. The tool performs exactly one attempt and returns a structured result. Track the attempt number in this conversation; the tool does not retry or make design decisions.
 
 - **PASSED:** Stop. Report the actual verification results and any optional suggestions; do not claim changes were committed.
-- **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, patch conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execution-loop` again with the same BASE_REF and REQUIREMENTS.
+- **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, patch conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
 - **Architectural change needed:** If a fix changes an agreed algorithm, data structure, API contract, persistence strategy or other consequential decision, stop and discuss alternatives with the user. Obtain approval for the changed design before generating a correction; update REQUIREMENTS to include the explicitly revised decisions without removing still-applicable criteria.
 - **BLOCKED:** Stop automatic attempts. Explain missing tools, incomplete verification or uncertain repository state; request user direction. Do not treat an environment/provider failure as a code defect.
 
@@ -110,7 +110,7 @@ Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `re
 
 ## Hard boundaries
 
-- Do not invoke `apply_executor`, `review-phase`, `review_changes`, `pipeline-runner`, or `implementer`. Invoke only `execute_and_review` for execution attempts.
+- Do not invoke `apply_executor`, `review_changes`, `pipeline-runner`, or `implementer`. Invoke only `execute_and_review` for execution attempts.
 - Do not silently modify source files, tests or agent configuration. The sole source-writing mechanism in this workflow is executor acting on Design-authored input.
 - Do not produce a `PRECOMPUTED_PLAN` or assume the retired pipeline-runner contract is the executor contract.
 - Do not manufacture requirements, algorithms, file contents, patches or successful validation claims.
