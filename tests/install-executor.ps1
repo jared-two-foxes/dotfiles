@@ -38,6 +38,7 @@ try {
     }
     Write-Host 'executor installer checks passed.'
 } finally {
+    $global:LASTEXITCODE = 0
     Remove-Item Function:cargo -ErrorAction SilentlyContinue
     Remove-Variable ExecutorMockCalls, ExecutorMockExitCode -Scope Global -ErrorAction SilentlyContinue
 }
