@@ -86,7 +86,10 @@ Once execution is approved, Design calls the hidden `execution-loop` subagent
 for **one attempt at a time**. That agent passes the unchanged JSON to the
 `apply_executor` OpenCode tool (which uses `executor apply -` with stdin, no
 shell), then invokes the independent `review-phase` agent for compilation,
-tests and review-cli verification. The review baseline stays fixed across all
+tests and review-cli verification. This workflow explicitly selects
+`opencode/gpt-6.1-sol` for semantic review, keeping the reviewer in a
+different model family from Claude Sonnet Design; independent Review Phase
+invocations still use their existing default unless a model is supplied. The review baseline stays fixed across all
 attempts, and the working tree is never reset or committed automatically.
 
 Failures return to the **same Design conversation**. Routine defects can be
