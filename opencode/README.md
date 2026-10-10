@@ -157,7 +157,7 @@ including on copy-based machines. Re-run your installer with -Force after pullin
 Install the binary separately on each machine (Rust/Cargo required for installation):
 
 ```powershell
-cargo install --git https://github.com/jared-two-foxes/review --locked --package review-cli
+cargo install --git https://github.com/jared-two-foxes/review --locked review-cli
 review-cli --help
 ```
 
@@ -177,19 +177,22 @@ ollama/<model> uses the local Ollama endpoint, and copilot/<model> uses credenti
 supported by review-cli. OpenCode's stored login is not automatically forwarded.
 Do not commit provider credentials.
 
-Normal tasks require a clean starting worktree and retain its initial commit SHA
-through all retries. The tool reviews that base against the current working tree,
+The legacy pipeline-runner requires a clean starting worktree; the new Design
+workflow instead checks pre-existing changes and asks the user to isolate
+unrelated edits or accept their inclusion in the review diff. Both retain the
+original commit SHA through all retries. The review tool compares that base
+against the current working tree,
 including new untracked files. Review-only mode requires an explicit baseline and
 can instead review a fixed committed target. The tool stores requirements/request
 files outside the repository, removes them afterwards, validates result/exit-code
 consistency, and rejects results if repository contents change during inspection.
 
-APPROVED plus passing checks and criterion evidence completes normal execution.
-CHANGES_REQUESTED sends only blocking findings to the implementer, then repeats
-checks and review (two review repair cycles maximum; global five-failure budget).
-Suggestions remain future work. INDETERMINATE allows one explicit budget/model
-retry; ERROR stops. Neither outcome can approve or fall back to retired agents.
-Review-only never applies findings or claims that tests were run.
+For the new deterministic Design workflow, APPROVED plus passing build and tests
+completes the attempt. CHANGES_REQUESTED returns blocking findings to Design;
+INDETERMINATE and ERROR block without approval. The tool never retries or
+invokes an implementer. The legacy pipeline-runner retains its own older retry
+and model escalation policy. Standalone review-only never applies findings or
+claims that tests were run.
 
 Current binary limitations: it inspects code with read-only tools, not test/build
 execution; criterion coverage in its result is not a typed evidence matrix. That
