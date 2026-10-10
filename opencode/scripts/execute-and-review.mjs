@@ -121,6 +121,10 @@ export async function executeAndReview(args, context = {}, options = {}) {
       }
       new RegExp(args.testEvidencePattern);
     }
+    const timeoutMs = args.commandTimeoutMs ?? 180000;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) {
+      throw new Error('commandTimeoutMs must be between 1000 and 600000');
+    }
     const directory = path.resolve(context.worktree ?? context.directory ?? '.');
     repository = path.resolve(await git(directory, ['rev-parse', '--show-toplevel'], context.abort));
     const head = await git(repository, ['rev-parse', 'HEAD'], context.abort);
@@ -128,6 +132,16 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (head !== base) {
       return result('BLOCKED', 'PRECHECK', { repository, reason: 'HEAD_CHANGED',
         message: 'HEAD differs from the original baseline; no changes were applied' });
+    }
+    // Fail before source modification when required binaries are absent.
+    // Isolated tests inject both adapters and skip these real binary checks.
+    if (!options.skipDependencyCheck) {
+      for (const binary of [process.env.EXECUTOR_BIN ?? 'executor',
+        process.env.REVIEW_CLI_BIN ?? 'review-cli']) {
+        const check = await run(binary, ['--help'], { cwd: repository,
+          signal: context.abort, timeoutMs: 15000 });
+        if (check.code !== 0) throw new Error('Required binary is unavailable: ' + binary);
+      }
     }
     // An empty operation list is valid for verification-only correction attempts.
     stage = 'APPLY';
@@ -140,8 +154,12 @@ export async function executeAndReview(args, context = {}, options = {}) {
     const beforeChecks = await snapshot(repository, context.abort);
     stage = 'BUILD';
     build = await run(buildCommand[0], buildCommand.slice(1), { cwd: repository, signal: context.abort,
-      timeoutMs: args.commandTimeoutMs ?? 180000 });
+      timeoutMs });
     build = { exitCode: build.code, output: bounded(build.stdout + '\n' + build.stderr) };
+    if (await git(repository, ['rev-parse', 'HEAD'], context.abort) !== base) {
+      return result('BLOCKED', stage, { repository, apply, reason: 'HEAD_CHANGED',
+        message: 'Build or test changed HEAD; review was not run' });
+    }
     if (await snapshot(repository, context.abort) !== beforeChecks) {
       return result('BLOCKED', 'BUILD', { repository, apply, build, reason: 'SOURCE_CHANGED',
         message: 'Build changed tracked or non-ignored source; review was not run' });
@@ -151,10 +169,14 @@ export async function executeAndReview(args, context = {}, options = {}) {
     }
     stage = 'TEST';
     const executed = await run(testCommand[0], testCommand.slice(1), { cwd: repository,
-      signal: context.abort, timeoutMs: args.commandTimeoutMs ?? 180000 });
+      signal: context.abort, timeoutMs });
     const output = executed.stdout + '\n' + executed.stderr;
     tests = { exitCode: executed.code, executed: testCount(output, args.testEvidencePattern),
       output: bounded(output) };
+    if (await git(repository, ['rev-parse', 'HEAD'], context.abort) !== base) {
+      return result('BLOCKED', stage, { repository, apply, reason: 'HEAD_CHANGED',
+        message: 'Build or test changed HEAD; review was not run' });
+    }
     if (await snapshot(repository, context.abort) !== beforeChecks) {
       return result('BLOCKED', 'TEST', { repository, apply, build, tests, reason: 'SOURCE_CHANGED',
         message: 'Tests changed tracked or non-ignored source; review was not run' });
