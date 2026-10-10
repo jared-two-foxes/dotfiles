@@ -41,6 +41,23 @@ The uploaded opencode.json contains comments, so it is named opencode.jsonc.
 The redundant relative skills.paths setting was removed: skills are discovered
 from the installed skills directory. No actual secret values are included.
 
+## Shared Conductor CLI
+
+The full and restricted Windows installers also install the shared Rust `conductor`
+CLI through Cargo. To install or update it independently (PowerShell 7+):
+
+```powershell
+.\install\conductor.ps1 -Force
+conductor --help
+```
+
+`conductor` must be on OpenCode's PATH, or set `CONDUCTOR_BIN` to its executable
+path before starting OpenCode. The Design agent's `execute_and_review` tool now
+invokes Conductor directly; `executor` and `review-cli` are no longer spawned
+for that workflow. They remain available as standalone tools. Conductor does not
+yet include a checked-in `Cargo.lock`, so its installer intentionally does not
+pass `--locked`.
+
 ## Dependencies and optional helpers
 
 - Install/authenticate OpenCode and the model providers you use.
