@@ -50,12 +50,20 @@ foreach ($entry in $entries) {
 }
 # Remove retired agents from copy installs as well as existing directory links.
 # Back up each legacy file before replacing its old role with review-cli.
-$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator', 'daily-summary')
+$retiredAgents = @('code-reviewer', 'security-reviewer', 'reuse-checker', 'refactorer', 'validator', 'daily-summary', 'execution-loop')
 foreach ($agent in $retiredAgents) {
     $legacyAgent = Join-Path $ConfigDir "agents/$agent.md"
     if ($null -ne (Get-Item -LiteralPath $legacyAgent -Force -ErrorAction SilentlyContinue)) {
         # If the entire agents directory is already a conflict, backing it up covers this file.
         if ($conflicts -notcontains (Join-Path $ConfigDir 'agents')) { $conflicts += $legacyAgent }
+    }
+}
+# The former AI execution pass-through and its standalone tool were superseded by
+# execute_and_review. Remove stale copies to avoid exposing duplicate workflows.
+foreach ($tool in @('apply_executor.ts')) {
+    $legacyTool = Join-Path $ConfigDir "tools/$tool"
+    if ($null -ne (Get-Item -LiteralPath $legacyTool -Force -ErrorAction SilentlyContinue)) {
+        if ($conflicts -notcontains (Join-Path $ConfigDir 'tools')) { $conflicts += $legacyTool }
     }
 }
 # Scheduling helpers for the retired daily-summary agent must not survive copy upgrades.
