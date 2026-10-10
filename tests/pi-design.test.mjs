@@ -34,7 +34,7 @@ test('Pi system prompt and Conductor skill route collaborative workflow to Desig
   const conductor = read('pi/agent/skills/conductor/SKILL.md');
   const executor = read('pi/agent/skills/executor/SKILL.md');
   assert.match(system, /\/skill:design/);
-  assert.match(system, /separate.*execution approval/);
+  assert.match(system, /separate\*\*[\s\S]*execution approval/);
   assert.match(system, /direct-edit.*tdd/);
   assert.match(conductor, /\/skill:design/);
   assert.match(executor, /"operations"/);
