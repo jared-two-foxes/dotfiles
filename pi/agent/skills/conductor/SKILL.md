@@ -4,14 +4,15 @@ description: >
   Execute an approved, exact executor operations JSON through the Pi
   execute_and_review tool and the deterministic Conductor CLI. Use for
   design-first implementation with explicit approval, build/test checks,
-  and independent review. Distinct from the existing direct-edit tdd skill.
+  and independent review. Used by the Design implementation workflow.
 ---
 
 # Conductor — design-first execution
 
-Use this skill when the user wants to apply an agreed implementation through
-Conductor. This is an **alternative** to the direct-edit `tdd` skill; do not
-silently switch between the two workflows.
+Use this skill as the lower-level Conductor execution reference. For the
+full collaborative architecture conversation, load `/skill:design` first;
+that skill owns decisions, design confirmation and executor authoring.
+Conductor is the sole implementation path; never substitute direct edits.
 
 ## Preconditions
 
@@ -22,7 +23,7 @@ silently switch between the two workflows.
 - The target directory must be a Git repository.
 - Confirm both a real build command and a real test command as arrays of
   executable and arguments. No shell syntax or invented commands.
-- The agent must inspect the exact source before writing patches and must
+- The Design agent must inspect the exact source before writing patches and must
   produce **complete executor operations JSON** with an `operations` array.
   Do not pass a plan, a patch-only legacy format, or pseudocode.
 

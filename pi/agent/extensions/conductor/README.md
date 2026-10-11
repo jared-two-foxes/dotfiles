@@ -18,15 +18,26 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions\conductor"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
+Copy-Item -Recurse -Force .\pi\agent\skills\design "$HOME\.pi\agent\skills\design"
+Copy-Item -Recurse -Force .\pi\agent\skills\executor "$HOME\.pi\agent\skills\executor"
+# If previously installed, remove the retired TDD skill:
+Remove-Item -Recurse -Force "$HOME\.pi\agent\skills\tdd" -ErrorAction SilentlyContinue
 ```
 
 If Pi already uses this dotfiles directory as its agent home, no copy is
 necessary. Restart Pi after changing extensions.
 
 Install `conductor` on PATH (the dotfiles Windows installer already handles
-it), or set `CONDUCTOR_BIN` to its executable path. Load
-`/skill:conductor` for the design-first, approval-gated workflow. The
-existing `/skill:tdd` is independent and remains available.
+it), or set `CONDUCTOR_BIN` to its executable path. Pi loads `/skill:design` when implementation is requested, or you can
+invoke it explicitly for the full collaborative design-first persona. It
+uses `/skill:executor` to author exact operations and the native
+`execute_and_review` tool to apply them after separate execution approval.
+`/skill:conductor` is the lower-level execution reference. The legacy
+`/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
+implementation strategy within Design.
+
+Pi skills do not pin a model or establish a separate OpenCode-style agent.
+The active Pi model executes the Design persona in the current conversation.
 
 ## Current limits
 
