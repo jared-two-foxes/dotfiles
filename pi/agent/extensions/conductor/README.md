@@ -26,11 +26,13 @@ If Pi already uses this dotfiles directory as its agent home, no copy is
 necessary. Restart Pi after changing extensions.
 
 Install `conductor` on PATH (the dotfiles Windows installer already handles
-it), or set `CONDUCTOR_BIN` to its executable path. Load `/skill:design` for the full collaborative design-first persona. It
+it), or set `CONDUCTOR_BIN` to its executable path. Pi loads `/skill:design` when implementation is requested, or you can
+invoke it explicitly for the full collaborative design-first persona. It
 uses `/skill:executor` to author exact operations and the native
 `execute_and_review` tool to apply them after separate execution approval.
-`/skill:conductor` is the lower-level execution reference. The existing
-`/skill:tdd` is independent and remains available.
+`/skill:conductor` is the lower-level execution reference. The legacy
+`/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
+implementation strategy within Design.
 
 Pi skills do not pin a model or establish a separate OpenCode-style agent.
 The active Pi model executes the Design persona in the current conversation.
