@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -35,7 +35,13 @@ test('Pi system prompt and Conductor skill route collaborative workflow to Desig
   const executor = read('pi/agent/skills/executor/SKILL.md');
   assert.match(system, /\/skill:design/);
   assert.match(system, /separate\*\*[\s\S]*execution approval/);
-  assert.match(system, /direct-edit.*tdd/);
+  assert.match(system, /one of two modes/);
+  assert.match(system, /Research → Design/);
+  assert.match(system, /ticket-driven TDD task/);
+  assert.match(system, /sole repository-writing/);
+  assert.doesNotMatch(system, /### TDD mode|Entering TDD mode|Exiting TDD mode|\/skill:tdd/);
+  assert.equal(existsSync(path.join(root, 'pi/agent/skills/tdd/SKILL.md')), false);
+  assert.doesNotMatch(conductor, /alternative.*direct-edit/);
   assert.match(conductor, /\/skill:design/);
   assert.match(executor, /"operations"/);
   assert.match(executor, /`replace_file`/);
