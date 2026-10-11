@@ -4,15 +4,15 @@ description: >
   Execute an approved, exact executor operations JSON through the Pi
   execute_and_review tool and the deterministic Conductor CLI. Use for
   design-first implementation with explicit approval, build/test checks,
-  and independent review. Distinct from the existing direct-edit tdd skill.
+  and independent review. Used by the Design implementation workflow.
 ---
 
 # Conductor — design-first execution
 
 Use this skill as the lower-level Conductor execution reference. For the
 full collaborative architecture conversation, load `/skill:design` first;
-that skill owns decisions, design confirmation and executor authoring. This is an **alternative** to the direct-edit `tdd` skill; do not
-silently switch between the two workflows.
+that skill owns decisions, design confirmation and executor authoring.
+Conductor is the sole implementation path; never substitute direct edits.
 
 ## Preconditions
 
