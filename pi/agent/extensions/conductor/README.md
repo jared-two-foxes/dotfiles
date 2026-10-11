@@ -20,6 +20,8 @@ Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\exten
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
 Copy-Item -Recurse -Force .\pi\agent\skills\design "$HOME\.pi\agent\skills\design"
 Copy-Item -Recurse -Force .\pi\agent\skills\executor "$HOME\.pi\agent\skills\executor"
+# If previously installed, remove the retired TDD skill:
+Remove-Item -Recurse -Force "$HOME\.pi\agent\skills\tdd" -ErrorAction SilentlyContinue
 ```
 
 If Pi already uses this dotfiles directory as its agent home, no copy is
