@@ -1,10 +1,12 @@
 {
-  "lastChangelogVersion": "1.0.4",
+  "lastChangelogVersion": "1.2.0",
   "theme": "dark",
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",
   "defaultThinkingLevel": "high",
   "packages": [
-    "npm:pi-ollama-cloud"
+    "npm:pi-ollama-cloud",
+    "git:github.com/jalbarrang/pi-lsp",
+    "npm:pi-web-access"
   ]
 }
