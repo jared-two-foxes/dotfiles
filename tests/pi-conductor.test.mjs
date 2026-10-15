@@ -18,7 +18,9 @@ async function fixture(t) {
   git('commit', '-qm', 'baseline');
   const baseRef = git('rev-parse', 'HEAD');
   const input = JSON.stringify({ operations: [
-    { type: 'create_file', path: 'new.txt', content: 'ok' },
+    { type: 'edit_file', path: 'source.txt', edits: [
+      { oldText: 'before', newText: 'after' },
+    ] },
   ] });
   const args = {
     input, baseRef, requirements: 'Preserve approved behavior',

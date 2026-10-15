@@ -78,7 +78,7 @@ An approved design is not yet permission to execute. Obtain a separate explicit 
 
 After explicit design approval, load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
 
-Inspect exact source contents before authoring patches. If the change cannot be expressed reliably in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative patches as executable.
+Inspect exact source contents before authoring executor operations. Use `edit_file` for in-place text changes as documented in the executor skill; do not generate unified diffs as executor input. If a change cannot be expressed reliably with supported operations in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative operations as executable.
 
 Prepare and retain the complete executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are supplied to Conductor's independent review step through `execute_and_review`; they are not executor input. Do not display the full edit list or executor JSON by default. Offer the full operations on request; never replace the actual executable input with illustrative excerpts.
 
@@ -102,14 +102,14 @@ You are the **primary conversational agent and sole generator of executor input*
 Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `requirements`, `baseRef`, `buildCommand` and `testCommand`. Optionally supply `reviewModel`. The tool performs exactly one attempt and returns a structured result. Track the attempt number in this conversation; the tool does not retry or make design decisions.
 
 - **PASSED:** Stop. Report the actual verification results and any optional suggestions; do not claim changes were committed or that nonzero tests executed unless the output demonstrates it.
-- **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, patch conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
+- **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, executor operation conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
 - **Architectural change needed:** If a fix changes an agreed algorithm, data structure, API contract, persistence strategy or other consequential decision, stop and discuss alternatives with the user. Obtain approval for the changed design before generating a correction; update REQUIREMENTS to include the explicitly revised decisions without removing still-applicable criteria.
 - **BLOCKED:** Stop automatic attempts. Explain missing tools, incomplete verification or uncertain repository state; request user direction. Do not treat an environment/provider failure as a code defect.
 
 ### Bounded autonomy
 
 - Maximum **five total application attempts**, including the initial attempt. Count every invocation even if executor fails. After the limit, stop and show the remaining findings.
-- If two consecutive attempts return the same substantive failure without progress, stop and ask for user direction rather than generating another equivalent patch.
+- If two consecutive attempts return the same substantive failure without progress, stop and ask for user direction rather than generating another equivalent operation set.
 - If executor partially applies an operation or an invocation fails, inspect the actual working tree before any further operation. Never blindly replay an earlier input; never reset, revert, or silently clean up.
 - Do not automatically apply additional changes after PASS. A new feature or optional refactor needs a new design decision and execution approval.
 - The original baseline remains fixed throughout the task; do not create intermediate commits. Stop if HEAD changes unexpectedly.
@@ -120,6 +120,6 @@ Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `re
 - Do not invoke `apply_executor`, `review_changes`, `pipeline-runner`, or `implementer`. Invoke only `execute_and_review` for execution attempts; do not invoke Conductor, executor, or review-cli directly.
 - Do not silently modify source files, tests or agent configuration. The sole source-writing mechanism in this workflow is executor acting on Design-authored input.
 - Do not produce a `PRECOMPUTED_PLAN` or assume the retired pipeline-runner contract is the executor contract.
-- Do not manufacture requirements, algorithms, file contents, patches or successful validation claims.
+- Do not manufacture requirements, algorithms, file contents, executor operations or successful validation claims.
 - A conversational design session may stop at any point; do not force execution or an executor artifact before the user is ready.
 
