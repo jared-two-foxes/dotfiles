@@ -29,10 +29,17 @@ Conductor is the sole implementation path; never substitute direct edits.
 
 ## Approval gates
 
-1. Inspect the repository and discuss material design decisions with the user.
-2. Present the design, fixed acceptance criteria and proposed executor JSON.
-3. Obtain explicit permission **to execute**, separate from design approval.
-4. Capture the full SHA from `git rev-parse HEAD` as `baseRef` once. Inspect
+1. Inspect the repository and discuss material design decisions iteratively,
+   using focused code/text examples with changed portions marked, including
+   new or changed data structures and how their data is created and used.
+2. Present the code-led implementation preview and fixed acceptance criteria.
+   Obtain explicit design approval before generating executor operations.
+3. Prepare complete executor JSON consistent with the approved design. If a
+   new consequential choice emerges, return to Design for renewed approval.
+4. Present a short execution confirmation: scope, affected files and build/test
+   commands. Offer full operations on request; do not display JSON by default.
+   Obtain explicit permission **to execute**, separate from design approval.
+5. Capture the full SHA from `git rev-parse HEAD` as `baseRef` once. Inspect
    `git status --porcelain`; disclose unrelated working changes. Keep the
    same base SHA and requirements across correction attempts.
 
