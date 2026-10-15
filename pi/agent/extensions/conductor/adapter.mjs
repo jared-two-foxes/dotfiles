@@ -3,7 +3,19 @@
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // Conductor alone owns apply/check/review.
 import { spawn } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import path from 'node:path';
+
+// Load OPENCODE_API_KEY from ~/.secrets/opencode-key if not already set, so
+// the review engine (review-cli via Conductor) can authenticate the opencode
+// provider. Silent no-op if the file is absent or already set.
+try {
+  if (!process.env.OPENCODE_API_KEY) {
+    const key = readFileSync(path.join(homedir(), '.secrets', 'opencode-key'), 'utf8').trim();
+    if (key) process.env.OPENCODE_API_KEY = key;
+  }
+} catch {}
 
 const SHA = /^[0-9a-f]{40}$/i;
 const MAX_LOG_BYTES = 1024 * 1024;
@@ -83,6 +95,34 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (!execution || !Array.isArray(execution.operations)) {
       throw new Error('input must contain an executor operations array');
     }
+    if (args.reviewWallClockBudgetSecs != null &&
+        (!Number.isInteger(args.reviewWallClockBudgetSecs) ||
+         args.reviewWallClockBudgetSecs <= 0)) {
+      throw new Error('reviewWallClockBudgetSecs must be a positive integer');
+    }
+    if (args.reviewMaxTurns != null &&
+        (!Number.isInteger(args.reviewMaxTurns) || args.reviewMaxTurns <= 0)) {
+      throw new Error('reviewMaxTurns must be a positive integer');
+    }
+    if (args.reviewMaxCostUsd != null &&
+        (typeof args.reviewMaxCostUsd !== 'number' ||
+         !Number.isFinite(args.reviewMaxCostUsd) || args.reviewMaxCostUsd < 0)) {
+      throw new Error('reviewMaxCostUsd must be a finite non-negative number');
+    }
+    if (args.reviewMaxToolCalls != null &&
+        (!Number.isInteger(args.reviewMaxToolCalls) || args.reviewMaxToolCalls <= 0)) {
+      throw new Error('reviewMaxToolCalls must be a positive integer');
+    }
+    if (args.reviewMaxRepeatedActions != null &&
+        (!Number.isInteger(args.reviewMaxRepeatedActions) ||
+         args.reviewMaxRepeatedActions <= 0)) {
+      throw new Error('reviewMaxRepeatedActions must be a positive integer');
+    }
+    if (args.reviewMaxCompletionAttempts != null &&
+        (!Number.isInteger(args.reviewMaxCompletionAttempts) ||
+         args.reviewMaxCompletionAttempts <= 0)) {
+      throw new Error('reviewMaxCompletionAttempts must be a positive integer');
+    }
     const directory = path.resolve(context.worktree ?? context.directory ?? '.');
     repository = path.resolve(await git(directory, ['rev-parse', '--show-toplevel'], context.abort));
     const head = await git(repository, ['rev-parse', 'HEAD'], context.abort);
@@ -100,10 +140,34 @@ export async function executeAndReview(args, context = {}, options = {}) {
         { name: 'build', program: build[0], args: build.slice(1) },
         { name: 'test', program: test[0], args: test.slice(1) },
       ],
+      // Pi-local addition: budget and limit passthrough fields forwarded to the
+      // review engine via conductor.request/v1. Diverges from the upstream
+      // OpenCode adapter, which does not expose these. All fields optional;
+      // omitted fields are absent so Conductor applies review-cli defaults.
+      // Forwarded: wall_clock_budget_secs, max_turns, max_cost_usd,
+      // max_tool_calls, max_repeated_actions, max_completion_attempts.
       review: {
         requirements: args.requirements,
         base_ref: base,
         model: args.reviewModel ?? 'opencode/gpt-6.1-sol',
+        ...(args.reviewWallClockBudgetSecs != null
+          ? { wall_clock_budget_secs: args.reviewWallClockBudgetSecs }
+          : {}),
+        ...(args.reviewMaxTurns != null
+          ? { max_turns: args.reviewMaxTurns }
+          : {}),
+        ...(args.reviewMaxCostUsd != null
+          ? { max_cost_usd: args.reviewMaxCostUsd }
+          : {}),
+        ...(args.reviewMaxToolCalls != null
+          ? { max_tool_calls: args.reviewMaxToolCalls }
+          : {}),
+        ...(args.reviewMaxRepeatedActions != null
+          ? { max_repeated_actions: args.reviewMaxRepeatedActions }
+          : {}),
+        ...(args.reviewMaxCompletionAttempts != null
+          ? { max_completion_attempts: args.reviewMaxCompletionAttempts }
+          : {}),
       },
     };
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';

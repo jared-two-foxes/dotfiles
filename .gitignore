@@ -38,3 +38,9 @@ pi/agent/sessions/
 opencode/latch.json
 opencode/logs/
 opencode/backups/
+
+# Local agent workflow state and caches
+/.dev-pipeline.toml
+/.pi/
+/.scaffold/
+/pi/agent/web-search-cache/
