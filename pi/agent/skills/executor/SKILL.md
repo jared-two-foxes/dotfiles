@@ -69,6 +69,10 @@ For `patch`, the `source` object has a `type` of `inline` or `file`. An inline p
 
 ## Handoff
 
-Return the JSON in a separate fenced block with a short description. In Pi Design, after **separate explicit execution approval**, pass this exact JSON as the `input` field of `execute_and_review`. Do not run `executor apply` or `conductor run` directly from Design. Outside Pi Design, a caller may use `executor apply -` or wrap the operations in a Conductor workflow request. Never execute without authorization.
+In Pi Design, prepare and retain the complete JSON after design approval, but do not display it by default. The user reviews the code-led implementation preview before operations are generated, then receives a short execution confirmation covering scope, affected files and verification commands. Offer the full operations on request; when requested, return the complete JSON in a separate fenced block with a short description. Illustrative excerpts are never a substitute for complete executor input.
+
+After **separate explicit execution approval**, pass this exact JSON as the `input` field of `execute_and_review`. If authoring operations reveals a consequential departure from the approved design, return to the design conversation for renewed approval before execution. Do not run `executor apply` or `conductor run` directly from Design.
+
+Outside Pi Design, return the JSON in a separate fenced block with a short description. A caller may use `executor apply -` or wrap the operations in a Conductor workflow request. Never execute without authorization.
 
 Executor reports JSON with `success`, `operations_applied`, and, on operation failure, `failed_operation` (zero-based) and `error`. A nonzero exit code indicates failure. On failure, inspect the working tree before attempting another application because partial changes may remain.

@@ -44,20 +44,31 @@ These are **review prompts, not mandatory sections**. Only raise categories rele
 For each consequential decision:
 1. State the problem and constraints from the existing code.
 2. Present a small set of viable alternatives (typically two), with practical tradeoffs.
-3. Recommend an approach and explain why.
+3. Recommend an approach and explain why, using focused code samples where appropriate to make the implementation choice concrete.
 4. Ask for the user's preference or explicit delegation.
 5. Record the agreed decision. Do not silently select a consequential option.
 
 Do not treat silence, a generic `continue`, or approval of an unrelated choice as agreement on unresolved decisions. Do not repeatedly ask the user to approve routine details.
 
+### Code-led decision discussion
+
+Use small, focused code samples during the conversation, before generating operations, rather than saving all implementation detail for the final approval. For existing code, prefer short `diff` blocks with `+` and `-` markers or labelled before/after excerpts that clearly identify changed portions. Label new-code samples as additions and identify the relevant file or component. Show alternatives with code where that helps the user compare them; explain tradeoffs and your recommendation, then wait for the user's choice or explicit delegation before advancing.
+
+For new or changed data structures, show both the representation and how the data is used: construction/population, validation and invariants, producers and consumers, reads and updates, ownership and lifecycle, and persistence or compatibility implications where relevant. A type definition alone is not enough when its use introduces consequential choices. Keep each discussion to one coherent group of decisions, not an exhaustive checklist.
+
+These are illustrative design excerpts, not executable operations or a full edit list. Mark omitted context explicitly; do not imply the excerpts are complete patches or have been applied. For documentation/configuration changes, use focused text/configuration excerpts instead of artificial code examples. For trivial changes, keep the preview proportionate rather than manufacturing alternatives or data models.
+
 ## 3. Design confirmation
 
-Once consequential questions are resolved, present a **concise design summary** containing:
+Once consequential questions are resolved, present a **concise design summary (implementation preview)** containing:
 - Goal and boundaries
-- Agreed data structures, algorithms and interfaces (only those relevant)
-- Files/components expected to change
-- Behavior and edge cases to verify
+- Major changes grouped by behavior or component, with representative code/text excerpts and changed portions clearly marked
+- Agreed data structures, algorithms and interfaces, including how new or changed data is created and used (only those relevant)
+- Files/components expected to change and compatibility implications
+- Acceptance criteria, behavior and edge cases to verify
 - Any remaining assumptions or known risks
+
+Summarise decisions already discussed; do not introduce consequential choices for the first time in the approval preview. Refer back to agreed examples rather than repeating large code blocks. The user approves the implementation design, not the full edit list or executor JSON.
 
 Ask the user to **approve or revise the design before generating implementation operations**. If the design changes, update the summary and reconfirm affected decisions.
 
@@ -69,7 +80,9 @@ After explicit design approval, load **`/skill:executor`**. Follow that skill's 
 
 Inspect exact source contents before authoring patches. If the change cannot be expressed reliably in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative patches as executable.
 
-Present the executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are supplied to Conductor's independent review step through `execute_and_review`; they are not executor input.
+Prepare and retain the complete executor input separately from the approved **design summary, decisions, and acceptance criteria**. The latter are supplied to Conductor's independent review step through `execute_and_review`; they are not executor input. Do not display the full edit list or executor JSON by default. Offer the full operations on request; never replace the actual executable input with illustrative excerpts.
+
+If preparing exact operations exposes a new consequential choice or a departure from the approved preview, return to the design conversation and obtain approval for the affected decisions before proceeding. Do not bury new decisions in operations.
 
 **Do not directly invoke executor, write files, or claim the operations have been applied or verified.** Only after the user explicitly approves execution may you pass the exact input to `execute_and_review`.
 
@@ -79,7 +92,7 @@ You are the **primary conversational agent and sole generator of executor input*
 
 ### Before the first attempt
 
-1. Present the proposed operations and explicitly ask the user whether to **execute** them. Do not infer execution permission from design approval alone.
+1. Present a short execution confirmation tied to the prepared operations: scope, affected files, any differences from the approved preview, and the build/test commands. Offer the full operations on request instead of displaying them by default. Explicitly ask the user whether to **execute** the prepared changes. Do not infer execution permission from design approval alone. Consequential differences require renewed design approval first.
 2. Using read-only Git commands, capture `BASE_REF = git rev-parse HEAD` as a full SHA **once**. Keep it unchanged across every correction. Inspect `git status --porcelain` and ask the user to isolate unrelated pre-existing edits or explicitly accept that the review diff will include them. Do not clean or reset the worktree.
 3. Load `toolchain-detection` or obtain explicit build and test commands. Provide them to the tool as **executable-and-argument arrays** (for example `["cargo", "build"]` and `["cargo", "test"]`), never shell command strings. If a command relies on shell syntax, request an explicit script/executable rather than interpreting it yourself. Ensure both commands exist before applying anything; do not guess commands. Check `conductor` availability before execution. Conductor currently checks command exit status but does not prove that tests executed; inspect the returned test output and do not claim test coverage that is not evidenced.
 4. Retain the approved design summary, acceptance criteria, and all decisions as the **fixed requirements**. Do not weaken them during repairs.

@@ -46,6 +46,13 @@ load `/skill:executor` to author exact operations, then obtain **separate**
 execution approval before invoking the Conductor tool. `/skill:conductor`
 is the lower-level execution reference and may be loaded alongside Design;
 it is not a substitute for the collaborative Design persona.
+In Pi Design, discuss options iteratively using focused code/text examples
+with changed portions marked, including new or changed data structures and
+how their data is created and used. Obtain design approval on a code-led
+implementation preview before generating operations. Then present a short
+execution confirmation covering scope, affected files and verification
+commands; offer full operations on request, not by default. Return to the
+design conversation if operation authoring exposes a new consequential choice.
 Pi registers the native `execute_and_review` tool through
 `extensions/conductor/index.ts`. After separate design and execution
 approvals, pass exact executor operations JSON, fixed requirements, original
