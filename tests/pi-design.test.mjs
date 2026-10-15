@@ -47,6 +47,22 @@ test('Pi system prompt and Conductor skill route collaborative workflow to Desig
   assert.match(executor, /`replace_file`/);
 });
 
+test('Pi and OpenCode executor guides use the merged exact-text edit operation', () => {
+  const pi = read('pi/agent/skills/executor/SKILL.md');
+  const openCode = read('opencode/skills/executor/SKILL.md');
+  for (const [name, guide] of [['Pi', pi], ['OpenCode', openCode]]) {
+    assert.ok(guide.includes('\"type\": \"edit_file\"'), name);
+    assert.ok(guide.includes('\"oldText\"'), name);
+    assert.ok(guide.includes('\"newText\"'), name);
+    assert.ok(guide.includes('The `patch` operation has been removed'), name);
+    assert.ok(!guide.includes('| `patch` |'), name);
+    assert.ok(guide.includes('occur exactly once'), name);
+  }
+  assert.ok(read('pi/agent/skills/design/SKILL.md').includes('Use `edit_file` for in-place text changes'));
+  assert.ok(read('opencode/agents/design.md').includes('Use `edit_file` for in-place text changes'));
+  assert.ok(read('pi/agent/skills/conductor/SKILL.md').includes('removed `patch` variants'));
+});
+
 
 test('Pi Design discusses code and data usage iteratively before operation generation', () => {
   const design = read('pi/agent/skills/design/SKILL.md');

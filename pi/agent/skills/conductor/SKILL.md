@@ -23,9 +23,10 @@ Conductor is the sole implementation path; never substitute direct edits.
 - The target directory must be a Git repository.
 - Confirm both a real build command and a real test command as arrays of
   executable and arguments. No shell syntax or invented commands.
-- The Design agent must inspect the exact source before writing patches and must
-  produce **complete executor operations JSON** with an `operations` array.
-  Do not pass a plan, a patch-only legacy format, or pseudocode.
+- The Design agent must inspect the exact source before authoring executor
+  operations and must produce **complete executor operations JSON** with an
+  `operations` array. Do not pass a plan, removed `patch` variants, or
+  pseudocode.
 
 ## Approval gates
 
