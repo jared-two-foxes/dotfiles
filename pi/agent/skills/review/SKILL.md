@@ -22,6 +22,35 @@ structured JSON result contract.
 
 The binary is installed via `cargo install` and invoked as `review-cli run`.
 
+## Pi standalone review
+
+Use the native `review_changes` tool in Research mode when the user asks to
+review existing changes. Loading this skill does not enter Design mode or
+authorize implementation. Do not invoke `review-cli` through Bash; the CLI
+reference and examples below describe the binary, not additional permissions.
+If the native tool is unavailable, report the limitation rather than falling
+back to shell execution or using Conductor with a fabricated operations list.
+
+Supply an explicit `baseRef`, optional committed `headRef` (omitted or
+`:working` means the working tree), and plain-text `requirements` describing
+the review scope and edge cases. No ticket is required. For PR-style review,
+use the merge-base SHA and a locally available head ref; do not fetch/checkout
+or publish findings. `:staged` and `:empty` remain CLI-only targets here.
+
+The native default model is `opencode/gpt-6.1-sol`, overridden by `REVIEW_MODEL`
+and then an explicit `model`. Defaults are 180 seconds and 20 turns, with
+`wallClockBudgetSecs` and `maxTurns` overrides. Optional `maxCostUsd`,
+`maxToolCalls`, `maxRepeatedActions` and `maxCompletionAttempts` are forwarded
+when supplied. See `../../extensions/review/README.md` for ranges, deployment,
+credentials and safety limitations. The extension is self-contained and
+requires `review-cli` on PATH or an explicit `REVIEW_CLI_BIN`.
+
+Interpret `APPROVED` as semantic approval only, not proof of successful tests.
+Report blocking findings separately from suggestions; never apply fixes as
+part of review. `ERROR` and `INDETERMINATE` never approve a change or trigger
+automatic retries. Fix requests start a separate Design approval flow; use
+Conductor for implementation verification, never standalone review instead.
+
 ## When to use this skill
 
 Load this skill when the agent needs to:
@@ -65,6 +94,9 @@ required for automation; the flag path is a convenience for interactive use.
 | `--base-url` | URL | provider default | Override the provider base URL |
 | `--format` | FORMAT | `json` | Output format (only `json` supported) |
 | `--max-turns` | COUNT | `10` | Maximum model turns before stopping |
+| `--max-tool-calls` | COUNT | `40` | Maximum review tool calls |
+| `--max-repeated-actions` | COUNT | `3` | Maximum identical repeated actions |
+| `--max-completion-attempts` | COUNT | `3` | Maximum completion attempts |
 | `--wall-clock-budget-secs` | SECONDS | `60` | Wall-clock budget in seconds |
 | `--max-input-tokens` | TOKENS | — | Abort after exceeding this many input tokens |
 | `--max-cost-usd` | USD | — | Abort after exceeding this estimated USD cost |

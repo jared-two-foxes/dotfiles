@@ -1,28 +1,22 @@
-   # Global Agent Instructions
+# Global Agent Instructions
 
-   This environment uses two CLI tools alongside the agent's own editing
-   capability:
+Follow `SYSTEM.md` for mode boundaries and approval gates.
 
-   - **scaffold** — Ticket access and criteria-stack management. Fetch Linear
-     tickets, inspect the criteria stack, and push/pop criterion frames. Load
-     the `scaffold` skill with `/skill:scaffold` for command details.
-   - **review-cli** — AI code review against a repository diff via a bounded
-     agent loop with read-only tools. Load the `review` skill with
-     `/skill:review` for invocation, request/result protocols, and tool
-     details.
+- **Research:** inspect and explain; for user-requested standalone code
+  reviews, load `/skill:review` and use the native `review_changes` tool.
+  It reviews existing changes without applying findings or running builds/tests.
+  `ERROR` and `INDETERMINATE` never mean approval.
+- **Implementation:** load `/skill:design`, agree the architecture, obtain
+  design approval, prepare exact operations with `/skill:executor`, and obtain
+  separate execution approval. Only `execute_and_review` may apply changes
+  and run build/test/review verification. Do not edit/write directly, invoke
+  executor/review-cli from Bash, commit or push. Standalone review cannot
+  substitute for implementation verification.
+- **Scaffold:** ticket access and criteria-stack inspection. Load
+  `/skill:scaffold` for its data and command reference; it does not authorize
+  the retired direct-edit TDD workflow or override the mode boundaries.
 
-   The agent writes tests and implementation code directly using its `edit`
-   and `write` tools. review-cli provides independent verification — the
-   review agent has no knowledge of what the driving LLM intended, so it
-   reviews the code objectively.
-
-   When the user asks to plan work and create Linear tickets, use the
-   `linear_create_ticket` and `linear_update_ticket` tools directly. Structure
-   tickets with an `## Acceptance Criteria` section containing `- [ ] ...`
-   checkbox bullets so they can be pushed onto the criteria stack via
-   `scaffold stack push`.
-
-   When the user wants to work through a ticket's acceptance criteria with a
-   structured red-green TDD cycle — grounding each criterion via review-cli,
-   writing tests, implementing to green, and running a final validation —
-   load the `tdd` skill with `/skill:tdd`.
+Use the Linear tools when the user explicitly asks to manage shared tickets.
+Confirm proposed creations or revisions before execution. Ticket descriptions
+must include `## Acceptance Criteria` with independently testable `- [ ] ...`
+bullets. TDD is a strategy inside Design, not a separate operating mode.

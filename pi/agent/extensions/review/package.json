@@ -1,0 +1,9 @@
+{
+  "name": "pi-review",
+  "version": "0.1.0",
+  "type": "module",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}
