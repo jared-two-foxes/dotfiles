@@ -47,6 +47,71 @@ test('Pi system prompt and Conductor skill route collaborative workflow to Desig
   assert.match(executor, /`replace_file`/);
 });
 
+const publishingPolicy = name => {
+  const text = read(name).replace(/\r\n/g, '\n');
+  const start = text.indexOf('## Git and GitHub publishing\n');
+  assert.notEqual(start, -1, `missing publishing policy: ${name}`);
+  return text.slice(start).split('\n## ')[0].trim();
+};
+
+test('Git and GitHub publishing policy stays aligned across shared and runtime prompts', () => {
+  const core = publishingPolicy('shared/research-assistant/core.md');
+  for (const name of ['pi/agent/SYSTEM.md', 'prompts/research-assistant.prompt.md']) {
+    assert.equal(publishingPolicy(name), core, name);
+  }
+});
+
+test('Publishing permits scoped commits and PR publication without granting merge authority', () => {
+  const policy = publishingPolicy('shared/research-assistant/core.md').replace(/\s+/g, ' ');
+  for (const phrase of [
+    'instruction-level policy, not a credential or tool-enforcement boundary',
+    'Read-only Git and GitHub CLI (`gh`) inspection needs no additional approval',
+    'Only when explicitly requested',
+    'create or use a feature branch',
+    'stage or unstage selected existing changes',
+    'create commits, push that feature branch with Git',
+    '`gh pr create` or `gh pr edit`',
+    'Confirm the repository, remote, head branch, base branch, selected changes and publishing scope before writes',
+    'One clear publishing request authorizes that agreed sequence',
+    'do not require approval for each command',
+    'Do not infer publishing permission from design, implementation or review approval',
+    'Inspect the working tree and index before staging or committing',
+    'Never stage, commit or discard unrelated changes, including pre-existing staged changes',
+    'Never merge PRs, enable auto-merge, enqueue PRs for merging',
+    'through APIs, scripts, workflows or delegation',
+    'Never bypass this restriction with local merges or direct pushes to protected branches',
+    "Treat `main`, `master`, the repository's default branch and any other known protected branches as protected",
+    'Never push directly to, force-push to, rewrite history of or delete a protected branch',
+    'A normal publishing request does not authorize destructive operations, history rewriting, branch deletion or force-pushes',
+    'These require separate explicit confirmation and must not affect protected branches',
+    '`--force-with-lease` rather than an unconditional force-push',
+    'Publishing permission does not authorize source edits, conflict-resolution edits, builds, tests or other Git/GitHub writes',
+    'Never commit, change branches or otherwise change HEAD during an active implementation verification/correction loop',
+    'finish or stop the loop before starting a publishing workflow',
+  ]) {
+    assert.ok(policy.includes(phrase), `missing publishing constraint: ${phrase}`);
+  }
+});
+
+test('Pi workflow guidance retains implementation gates without blanket publishing bans', () => {
+  for (const name of [
+    'pi/agent/SYSTEM.md',
+    'pi/agent/AGENTS.md',
+    'pi/agent/skills/design/SKILL.md',
+    'pi/agent/skills/conductor/SKILL.md',
+  ]) {
+    const text = read(name).replace(/\s+/g, ' ');
+    assert.match(text, /Git\/GitHub publishing|Git and GitHub publishing/, name);
+    assert.match(text, /active (?:implementation )?verification\/correction loop/, name);
+    assert.match(text, /[Nn]ever merge PRs/, name);
+    assert.match(text, /source edits/, name);
+    assert.doesNotMatch(text, /do not commit or push|run build\/test commands, or commit|Feature branches may be created, committed to, pushed, rebased, and deleted freely|bash is for read-only inspection only|Bash access is for read-only discovery only/, name);
+  }
+  for (const name of ['shared/research-assistant/core.md', 'prompts/research-assistant.prompt.md']) {
+    assert.doesNotMatch(read(name).replace(/\s+/g, ' '), /You do not implement changes, modify files, create commits/, name);
+  }
+});
+
 test('Pi and OpenCode executor guides use the merged exact-text edit operation', () => {
   const pi = read('pi/agent/skills/executor/SKILL.md');
   const openCode = read('opencode/skills/executor/SKILL.md');
