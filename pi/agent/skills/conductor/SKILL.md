@@ -14,6 +14,15 @@ full collaborative architecture conversation, load `/skill:design` first;
 that skill owns decisions, design confirmation and executor authoring.
 Conductor is the sole implementation path; never substitute direct edits.
 
+Explicitly requested Git/GitHub publishing is a separate instruction-level
+exception governed by `SYSTEM.md`; it does not run through Conductor. Outside
+an active verification/correction loop, it may prepare selected feature-branch
+commits, push with Git, and create/update PRs with `gh pr create` / `gh pr edit`.
+Never merge PRs, enable auto-merge, enqueue PRs for merging, or use equivalent
+API, script, workflow or delegated actions. Preserve protected branches and
+unrelated working/staged changes. Publishing does not authorize source edits,
+builds or tests.
+
 ## Preconditions
 
 - The native Pi extension `extensions/conductor/index.ts` must be loaded,
@@ -70,7 +79,10 @@ name is historical; Pi consumes the same result contract.
 Maximum five total attempts, stopping after two identical failures without
 progress. Never silently clean, reset, commit or push. Do not run direct
 `edit`/`write` operations or call `executor`/`review-cli` to bypass the
-Conductor gate.
+Conductor gate. Do not commit, change branches or otherwise change HEAD during
+an active verification/correction loop. Keep the original baseline fixed;
+finish or explicitly stop the loop before a separately requested publishing
+workflow.
 
 ## Limitations
 
