@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "1.3.0",
+  "lastChangelogVersion": "1.4.0",
   "theme": "dark",
   "defaultProvider": "ollama-cloud",
   "defaultModel": "glm-5.2",
@@ -8,5 +8,6 @@
     "npm:pi-ollama-cloud",
     "git:github.com/jalbarrang/pi-lsp",
     "npm:pi-web-access"
-  ]
+  ],
+  "deviceId": "f3584470-562a-4ea4-bd77-152124a52000"
 }
