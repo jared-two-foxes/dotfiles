@@ -33,8 +33,7 @@
  *                           description must include a "## Acceptance
  *                           Criteria" section with "- [ ] ..." checkbox
  *                           bullets so the ticket is immediately consumable
- *                           by the scaffold TDD pipeline (push-ticket /
- *                           next-step) without further enrichment. To create
+ *                           as structured requirements for Design. To create
  *                           a parent + children, create the parent first
  *                           (omit parent_id), then each child with the
  *                           parent's human-readable identifier as parent_id;
@@ -472,8 +471,8 @@ export default function (pi: ExtensionAPI) {
     description:
       "Create a new Linear issue. The ticket's description must include " +
       "a '## Acceptance Criteria' section with '- [ ] ...' checkbox " +
-      "bullets, so the ticket is immediately consumable by the scaffold " +
-      "TDD pipeline (push-ticket / next-step) without further enrichment. " +
+      "bullets, so the ticket has explicit acceptance criteria for the Design " +
+      "workflow. " +
       "Use to push planned work to Linear when the user explicitly asks. " +
       "To create a parent ticket with children, first create the parent " +
       "(omit parent_id), then create each child with the parent's " +

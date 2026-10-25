@@ -9,16 +9,8 @@
  *                          local mutation for handing off plans to an
  *                          implementer agent.
  *
- *   write_ticket_file   -- writes a scaffold-compatible ticket as a
- *                          markdown file in the current working directory,
- *                          for use with `scaffold push-ticket
- *                          --ticket-file-in`. Used by the to-tickets skill
- *                          to materialise tickets synthesised from
- *                          unstructured context (conversation transcripts,
- *                          design notes, ad-hoc observations) as local
- *                          files that can be pushed straight into the
- *                          criteria-stack pipeline without going through
- *                          Linear first.
+ *   write_ticket_file   -- writes a markdown requirements artifact. It is not
+ *                          feature task state and does not start execution.
  *
  * Split out of the pi-linear extension so the Linear tools and the
  * file-writer tools can evolve independently.
@@ -69,9 +61,9 @@ export default function (pi: ExtensionAPI) {
     description:
       "Write a scaffold-compatible ticket as a markdown file in the current " +
       "working directory. The file must contain a '## Acceptance Criteria' " +
-      "section with '- [ ] ...' checkbox bullets so it can be pushed into " +
-      "the scaffold TDD pipeline via: " +
-      "scaffold push-ticket <id> --ticket-file-in <filename>. " +
+      "section with '- [ ] ...' checkbox bullets. This only writes a " +
+      "requirements artifact; use scaffold_tasks for task state and Design " +
+      "for approved implementation. " +
       "Use this when the to-tickets skill has synthesised a ticket from " +
       "unstructured context and needs to materialise it as a local file.",
     parameters: Type.Object({
@@ -125,8 +117,8 @@ export default function (pi: ExtensionAPI) {
             type: "text" as const,
             text:
               "Error: content must include a '## Acceptance Criteria' section " +
-              "with at least one '- [ ] ...' checkbox bullet for scaffold " +
-              "pipeline compatibility.",
+              "with at least one '- [ ] ...' checkbox bullet for requirements " +
+              "compatibility.",
           }],
           isError: true,
         };
@@ -138,7 +130,7 @@ export default function (pi: ExtensionAPI) {
           type: "text" as const,
           text:
             `Written: ${filename} (${content.length} chars)\n` +
-            `Next: scaffold push-ticket <id> --ticket-file-in ${filename}`,
+            "Use /skill:design for implementation and /skill:scaffold for task tracking.",
         }],
       };
     },

@@ -78,6 +78,23 @@ Ask the user to **approve or revise the design before generating implementation 
 
 An approved design is not yet permission to execute. Obtain a separate explicit execution confirmation after preparing the initial operations. Do not invoke an implementation agent to reinterpret the design.
 
+### Persistent feature design and task scope
+
+Load `/skill:scaffold` when persistent task tracking is requested/agreed. Native
+`scaffold_tasks` can store approved feature design references, task definitions,
+dependencies and lifecycle history in the current repository. Feature-level
+design describes the overall behavior and constraints; task-level implementation
+addresses one independently understandable and verifiable part of that design.
+State tracking is the narrow exception documented in `SYSTEM.md`; it grants no
+application source-edit or verification authority. Preserve separate design and
+execution approvals. Pi decides lifecycle transitions and must inspect actual
+Conductor evidence before recording completion; Scaffold does not authenticate it.
+On resumption inspect the full persisted feature, including interrupted work.
+
+This integration does not automatically decompose approved designs, populate a
+queue, select/execute tasks in sequence, or validate a whole feature. Keep the
+existing single-pass Conductor attempt and correction behavior below unchanged.
+
 ## 4. Prepare executor handoff
 
 After explicit design approval, load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.

@@ -1,3 +1,9 @@
+> **Historical workflow — retired.** The Scaffold execution commands described
+> below are no longer supported and must not be invoked. Current Pi implementation
+> uses [Design](pi/agent/skills/design/SKILL.md) and approved `execute_and_review`
+> calls. [Scaffold](pi/agent/skills/scaffold/SKILL.md) now persists explicit task
+> lifecycle state through `scaffold_tasks`; it does not execute implementations.
+
 # Ticket Pipeline Workflow: Entry to Completion
 
 This document walks through the full lifecycle of a Linear ticket
