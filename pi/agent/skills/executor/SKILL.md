@@ -81,3 +81,13 @@ After **separate explicit execution approval**, pass this exact JSON as the `inp
 Outside Pi Design, return the JSON in a separate fenced block with a short description. A caller may use `executor apply -` or wrap the operations in a Conductor workflow request. Never execute without authorization.
 
 Executor reports JSON with `success`, `operations_applied`, and, on operation failure, `failed_operation` (zero-based) and `error`. A nonzero exit code indicates failure. On failure, inspect the working tree before attempting another application because partial changes may remain.
+
+## Task boundary in Pi Design
+
+For decomposed features, author operations only after the approved task plan is
+persisted and one eligible task selected. Use that task's current source, criteria,
+context and applicable design invariants. Never generate feature-wide operations
+and divide them afterwards. Corrections target the actual partially modified tree
+with the same baseline and requirements. Do not include `.scaffold` state in source
+operations. Stop oversized work for Design-led recursive decomposition and Git
+reconciliation instead of emitting another large operation set.

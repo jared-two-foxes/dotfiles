@@ -90,3 +90,35 @@ Conductor currently does not prove that any tests executed or guard against
 unexpected source modifications during verification. Inspect test output and
 report these limitations honestly. The Pi adapter has an overall 15-minute
 subprocess deadline but Conductor does not yet enforce per-check timeouts.
+
+## Persisted task attempts
+
+Design owns decomposition and lifecycle decisions. For Scaffold tasks also pass
+`task: {featureId, taskId, designRef}` and task-scoped `requirements`: current
+criteria, applicable architectural constraints and established interfaces to
+preserve. Future feature criteria are deferred; final feature validation is later.
+Pass `previousAttempt` for corrections, using the actual preceding receipt.
+Initial task attempts require a clean implementation tree (excluding `.scaffold`
+bookkeeping). A new eligible task with earlier uncommitted changes returns
+`CHECKPOINT_REQUIRED`; finish/stop the loop and use only authorised Git publishing.
+No HEAD changes during a correction loop.
+
+The adapter retains a STARTED intent before execution and a content-addressed
+receipt afterwards under Git metadata, outside the review diff. Receipts include
+task/design identity, original request, raw response, outcome, attempt number and
+before/after tree fingerprints. `evidence.reference` is a repository-local digest
+reference, not a fabricated URL. Use read-only `inspect_conductor_evidence` to read
+it across sessions and compare the current tree. Do not remove receipts while
+Scaffold refers to them. They survive Pi restarts in this checkout, but are not
+pushed/cloned with Git; preserve them separately if moving the workspace. Local
+hashes detect corruption, not malicious rewriting or independent test quality.
+
+A bound PASSED without successful execution, build/test exit codes and APPROVED
+review becomes BLOCKED. Pi must additionally inspect output for actual relevant
+checks before completing the exact Scaffold task. Retention failures return
+BLOCKED with the actual result when available; never invent completion evidence.
+For NEEDS_DESIGN preserve the task as in_progress through bounded corrections;
+record fail when stopping for defects/attempt limits, block for unresolved
+conditions, or decompose remaining oversized work after reconciliation. Receipt
+chains preserve the five-attempt ceiling; repeated identical failures without
+progress still require Pi to stop. No retries or lifecycle mutations live here.

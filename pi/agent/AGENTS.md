@@ -31,6 +31,12 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   verification authority. Pi owns sequencing; do not automatically advance or
   retry work. Complete only with actual task-bound successful Conductor evidence.
   Scaffold validates structure and association, not evidence authenticity.
+  After feature approval, decompose complex work, persist the agreed design/tasks,
+  select one eligible task and scope its review requirements. Recover from full
+  persisted state and retained receipts; use read-only `inspect_conductor_evidence`.
+  Recursively decompose oversized remaining work without completing parents.
+  Stop between tasks when a Git checkpoint is required; only explicitly authorised
+  publishing may change HEAD, outside the active loop.
 
 Use the Linear tools when the user explicitly asks to manage shared tickets.
 Confirm proposed creations or revisions before execution. Ticket descriptions

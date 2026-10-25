@@ -40,3 +40,11 @@ State access is limited to the current repository; symlinked `.scaffold`,
 own local file API, this is not a sandbox against concurrent hostile filesystem
 changes. Timeouts, aborts and protocol failures never retry: a write may already
 have persisted, so inspect full state with `list` before recovery.
+
+New Design plans can pass `design_ref: "sha256:context"` on `init` with the exact
+approved design in feature `context`. The adapter computes the digest before CLI
+invocation and checks it on returned feature state. Scaffold's CLI/schema remains
+unchanged; immutable Git revision references remain supported. Verification
+strategies belong in task context, not invented schema fields. See the current
+[workflow overview](../../../../workflow-overview.md) and
+`tests/pi-task-workflow.test.mjs` for planning, receipts and the checkpoint barrier.

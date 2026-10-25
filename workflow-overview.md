@@ -1,3 +1,61 @@
+# Current Pi workflow (Phase 3)
+
+Pi remains the sole reasoning-based orchestrator. There is no background engine
+or additional orchestration agent. [Design](pi/agent/skills/design/SKILL.md) owns
+the conversation and source inspection; native [Scaffold](pi/agent/skills/scaffold/SKILL.md)
+records state; [Conductor](pi/agent/skills/conductor/SKILL.md) applies and verifies
+one exact Executor input per attempt, with independent Review.
+
+1. Inspect the repository and collaboratively agree architecture using code-led
+   examples. Obtain explicit feature design approval.
+2. Before operations, decompose complex work into the smallest meaningful units
+   that can be independently understood, implemented and verified. Explain task
+   boundaries/dependencies and confirm consequential decisions. Small changes may
+   remain single tasks. Do not split by file count or prepare all operations first.
+3. Persist the approved design and tasks via `scaffold_tasks`. Feature `context`
+   holds the exact approved design; `design_ref: "sha256:context"` is converted by
+   the Pi adapter to its SHA-256 digest before Scaffold sees it. Tasks include IDs,
+   objectives, criteria, context with `Verification:` strategy, inherited constraints
+   and explicit dependencies. Scaffold owns graph/lifecycle validation.
+4. Inspect full state and `next`, inspect one eligible task's source/prerequisites,
+   and author only its exact operations. Review requirements cover its criteria,
+   applicable architecture and earlier interfaces to preserve. Future feature
+   criteria are deferred. Obtain separate execution approval, then start that
+   explicit task and call `execute_and_review` with its feature/task/design binding.
+5. Inspect actual build/test output and independent review. A successful attempt
+   retains `pi-evidence:sha256:<digest>`; inspect it through
+   `inspect_conductor_evidence` before recording exact task completion in Scaffold.
+   Structural success alone cannot establish meaningful tests or evidence trust.
+6. For defects, correct from the current tree with unchanged requirements/baseline
+   and the previous receipt. Stop after five attempts or two identical failures
+   without progress. Block unresolved environment/state problems without retry.
+   Split oversized remaining work with `decompose` after reconciling partial
+   changes; preserve verified descendants and the parent's original criteria.
+   Parents require their own verification after their children finish.
+7. Stop when another task would review earlier uncommitted changes. Scaffold may
+   report that dependent task as eligible; Conductor's initial bound attempt still
+   refuses a dirty implementation tree with `CHECKPOINT_REQUIRED`. Only explicitly
+   authorised Git publishing can establish a checkpoint outside an active loop.
+   This phase does not manage commits, run unattended task sequences or validate
+   final feature completion.
+
+On resume, read the full Scaffold feature, verify its design reference, inspect
+all statuses/history and reconcile Git state/receipts before selecting new work.
+Receipts live under `git rev-parse --git-path pi-conductor-evidence`, including
+STARTED intent records written before execution. They survive session restarts in
+this checkout but are not transferred by Git push/clone. A STARTED receipt proves
+neither completion nor failure; never blindly replay interrupted operations.
+`next` returning null never proves completion.
+
+Tests: `node --test tests/pi-*.test.mjs`. For real Scaffold integration set
+`SCAFFOLD_SOURCE` to an unmodified Phase 1+ checkout. The scripted scenario uses
+real Scaffold and mocked Conductor responses; it is not a model compliance test.
+The fixture demonstrates dependency eligibility, the Git barrier, recursive
+splitting and recovery. CI runs protocol and policy regression fixtures on Linux
+and Windows; real CLI integration is opt-in and was run during Phase 3 validation.
+
+---
+
 > **Historical workflow — retired.** The Scaffold execution commands described
 > below are no longer supported and must not be invoked. Current Pi implementation
 > uses [Design](pi/agent/skills/design/SKILL.md) and approved `execute_and_review`

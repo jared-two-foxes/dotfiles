@@ -1,4 +1,5 @@
 // Stateless adapter: Scaffold alone reads/writes task state. No execution or retries.
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -16,6 +17,15 @@ function requireValue(condition, message) { if (!condition) throw new Error(mess
 function fields(value, allowed) {
   requireValue(object(value) && Object.keys(value).every(k => allowed.includes(k)), 'Unexpected or invalid fields');
 }
+export function designReference(context) {
+  return 'sha256:' + createHash('sha256').update(context, 'utf8').digest('hex');
+}
+function validateDesign(feature) {
+  if (feature.design_ref?.startsWith('sha256:')) {
+    requireValue(text(feature.context) && feature.design_ref === designReference(feature.context),
+      'Approved design digest mismatch; recover original design before continuing');
+  }
+}
 function definition(value, feature = false) {
   fields(value, ['id', 'title', 'objective', 'acceptance_criteria', 'context', 'constraints',
     ...(feature ? ['design_ref'] : ['dependencies'])]);
@@ -29,7 +39,13 @@ function definition(value, feature = false) {
 /** Validate and construct exactly one tasks command; payloads never become paths. */
 export function buildCommand(params) {
   fields(params, ['operation', 'feature_id', 'task_id', 'payload', 'reason']);
-  const { operation, feature_id, task_id, payload, reason } = params;
+  const { operation, feature_id, task_id, reason } = params;
+  let payload = params.payload;
+  // Store the exact approved design in Scaffold itself; no second design store.
+  if (operation === 'init' && payload?.design_ref === 'sha256:context') {
+    requireValue(text(payload.context), 'Approved design context is required');
+    payload = { ...payload, design_ref: designReference(payload.context) };
+  }
   requireValue(OPERATIONS.includes(operation), 'Unsupported operation');
   requireValue(text(feature_id), 'feature_id is required');
   requireValue(taskActions.has(operation) ? text(task_id) : task_id === undefined, 'task_id is required only for task transitions/decompose');
@@ -37,6 +53,7 @@ export function buildCommand(params) {
   requireValue(inputActions.has(operation) ? payload !== undefined : payload === undefined, 'payload is required only for init/add/complete/decompose');
   if (operation === 'init') {
     definition(payload, true);
+    validateDesign(payload);
     requireValue(payload.id === feature_id, 'Feature payload id must match feature_id');
   } else if (operation === 'add' || operation === 'decompose') {
     requireValue(Array.isArray(payload) && payload.length > 0, 'payload must be a nonempty task array');
@@ -78,6 +95,7 @@ function validateResponse(data, params) {
   const needsFeature = ['init', 'add', 'list', 'next', 'decompose'].includes(params.operation);
   if (needsFeature) {
     requireValue(object(data.feature) && data.feature.id === params.feature_id && object(data.feature.tasks), 'Invalid feature response or feature identity mismatch');
+    validateDesign(data.feature);
     for (const [id, task] of Object.entries(data.feature.tasks)) validateTask(task, params.feature_id, id);
   }
   if (params.operation === 'next') {

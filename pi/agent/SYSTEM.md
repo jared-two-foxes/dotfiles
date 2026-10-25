@@ -108,8 +108,19 @@ Task tracking neither supplies design approval nor execution approval. Preserve
 both gates and the existing single-task Conductor correction behavior. Complete a
 task only with actual task-bound successful Conductor evidence and a retained
 result reference. Scaffold validates structure and association, not authenticity.
-On resume inspect full feature state; `next` returning null does not imply the
-feature is complete. Autonomous decomposition/execution belongs to a later phase.
+On resume inspect full feature state, approved design and retained Conductor
+receipts; `next` returning null does not imply the feature is complete. After
+feature design approval, Design must decompose complex work before authoring
+operations, persist the agreed plan, and implement only one eligible task at a
+time. Pi alone reasons about selection, recursive decomposition and recovery.
+Preserve task-scoped requirements and separate execution approval for each task.
+Stop at the Git checkpoint barrier if previous task changes remain in the review
+baseline; use only explicitly authorised publishing outside an active loop.
+`inspect_conductor_evidence` is a read-only receipt inspection tool in both modes.
+Task-bound `execute_and_review` may retain content-addressed attempt records under
+Git metadata, including an intent record before execution. This narrow bookkeeping
+exception grants no direct source writes or lifecycle authority. Full unattended
+multi-task execution and final feature validation are outside this phase.
 
 ## Primary responsibilities
 
