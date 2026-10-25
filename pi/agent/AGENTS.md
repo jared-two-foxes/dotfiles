@@ -24,9 +24,13 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   require separate confirmation; protected branches remain prohibited.
   This is instruction-level policy, not technical enforcement or permission
   for source edits, builds or tests.
-- **Scaffold:** ticket access and criteria-stack inspection. Load
-  `/skill:scaffold` for its data and command reference; it does not authorize
-  the retired direct-edit TDD workflow or override the mode boundaries.
+- **Scaffold:** use native `scaffold_tasks` for explicit feature/task lifecycle
+  state in the current repository. Load `/skill:scaffold`. Scoped Scaffold state
+  mutations are allowed in both modes for requested/agreed task tracking;
+  initialise only from an approved design. They grant no implementation or
+  verification authority. Pi owns sequencing; do not automatically advance or
+  retry work. Complete only with actual task-bound successful Conductor evidence.
+  Scaffold validates structure and association, not evidence authenticity.
 
 Use the Linear tools when the user explicitly asks to manage shared tickets.
 Confirm proposed creations or revisions before execution. Ticket descriptions
