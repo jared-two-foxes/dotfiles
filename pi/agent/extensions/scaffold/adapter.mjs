@@ -70,7 +70,7 @@ export function buildCommand(params) {
   return { args, input: inputActions.has(operation) ? JSON.stringify(payload) : '' };
 }
 
-function invoke(program, args, { cwd, signal, input = '' }) {
+export function invoke(program, args, { cwd, signal, input = '' }) {
   return new Promise((resolve, reject) => {
     const child = execFile(program, args, { cwd, signal, shell: false, windowsHide: true,
       encoding: 'utf8', timeout: 30000, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
@@ -112,7 +112,7 @@ function validateResponse(data, params) {
 }
 
 // Reject state symlinks, so Scaffold cannot follow them into unrelated directories.
-async function checkStatePaths(repository) {
+export async function checkStatePaths(repository) {
   for (const suffix of ['.scaffold', '.scaffold/tasks.json', '.scaffold/.criteria-stack.lock']) {
     try {
       const stat = await lstat(path.join(repository, suffix));

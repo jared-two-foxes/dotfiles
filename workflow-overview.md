@@ -365,3 +365,17 @@ writers restored between fingerprints remain unsupported.
 Run `node --test tests/*.test.mjs`. Checkpoint tests use temporary Git repositories
 and deterministic Conductor/Scaffold CLI fixtures, with no live model calls;
 CI runs them on Linux and Windows. The existing correction-limit tests remain.
+
+## End-to-end feature completion
+
+Pi: approved design → persisted atomic tasks → individually approved Conductor
+attempts → Scaffold task completion → authorized verified task checkpoints →
+native `validate_feature` → full-project checks → independent Review of original
+baseline through final HEAD → retained evidence → Scaffold verified revision.
+
+All tasks completed means awaiting final validation. Failed integration returns
+findings to Pi for explicit approved corrective tasks and new checkpoints; rerun
+validation from the original feature baseline. Interrupted or stale results never
+prove completion. Inspect native evidence applicability on resume, and reconcile
+authentic complete receipts idempotently before announcing success. The gate
+never modifies source, commits or publishes. See Pi Design for the full contract.
