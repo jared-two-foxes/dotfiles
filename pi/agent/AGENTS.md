@@ -72,3 +72,10 @@ commit at HEAD, and uses an atomic Git pending ref for interrupted index updates
 It never blindly replays commits, resets changes or removes existing index locks.
 See Design's checkpoint recovery guidance. Ordinary Git/GitHub publishing remains
 separately authorized under the existing policy; checkpoints never push or open PRs.
+
+Final feature completion uses `validate_feature`, a narrow verification-only
+exception allowing approved full-project checks and cumulative bounded Review
+without Executor. Its own Pi UI authorization grants no source writes, commits,
+task selection or publishing. Inspect `inspect_feature_validation` and current
+applicability on resume; only authentic complete matching evidence can be handed
+to Scaffold. Keep original criteria and use approved corrective tasks for findings.

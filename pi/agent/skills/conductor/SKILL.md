@@ -98,7 +98,7 @@ subprocess deadline but Conductor does not yet enforce per-check timeouts.
 Design owns decomposition and lifecycle decisions. For Scaffold tasks also pass
 `task: {featureId, taskId, designRef}` and task-scoped `requirements`: current
 criteria, applicable architectural constraints and established interfaces to
-preserve. Future feature criteria are deferred; final feature validation is later.
+preserve. Future feature criteria are deferred; final feature validation uses `validate_feature` after all checkpoints.
 Pass `previousAttempt` for corrections, using the actual preceding receipt.
 Initial task attempts require a clean implementation tree (excluding `.scaffold`
 bookkeeping). A new eligible task with earlier uncommitted changes returns
@@ -162,3 +162,16 @@ it captures a Git tree/fingerprint before independent review. Final fingerprints
 must match or the adapter returns `REVIEW_SNAPSHOT_CHANGED`. Original commands
 remain in the receipt and fixed throughout corrections; non-task callers keep
 the existing protocol. No Conductor, Review or Executor changes are required.
+
+## Final feature gate
+
+Use `validate_feature` after every task and recursive parent has an authentic Git
+checkpoint. It runs full-project checks and existing independent Review against
+the original baseline and approved design; it never applies Executor operations.
+`inspect_feature_validation` authenticates retained results and current applicability.
+Scaffold Phase 5 is required. Validation lifecycle writes are internal to the gate,
+not generic `scaffold_tasks` operations; arbitrary success-shaped payloads cannot
+complete a feature through the native interface. `next: null` and all tasks completed
+are insufficient. Preserve failed/blocked history and add approved corrective tasks
+through the existing per-task workflow. See Design’s “Final feature verification”
+for authorization, output markers, bounds, stale evidence and interruption recovery.

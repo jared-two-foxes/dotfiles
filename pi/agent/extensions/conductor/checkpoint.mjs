@@ -30,6 +30,36 @@ export function checkpointAuthorization(confirm) {
   return authorize;
 }
 
+// Shared authentication for task checkpoints and cumulative feature validation.
+export async function authenticateTaskEvidence(repository, reference, binding) {
+  const record = await readEvidence(repository, reference);
+  requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === binding[k]), 'Task/design identity mismatch');
+  requireValue(verifiedResult(record.result) && record.before?.head === record.args?.baseRef &&
+    record.after?.head === record.before.head && sha(record.after?.tree) && record.request?.review?.base_ref === record.before.head &&
+    record.request?.review?.requirements === record.args.requirements &&
+    record.reviewSnapshot?.head === record.after.head && record.reviewSnapshot?.tree === record.after.tree &&
+    record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
+    record.response?.code === 0 &&
+    verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
+  // Prove the correction chain began clean and never changed task or baseline.
+  let first = record;
+  const seen = new Set();
+  while (first.args.previousAttempt) {
+    requireValue(!seen.has(first.args.previousAttempt), 'Cyclic receipt chain'); seen.add(first.args.previousAttempt);
+    const prior = await readEvidence(repository, first.args.previousAttempt);
+    requireValue(prior.attempt + 1 === first.attempt && prior.attempt < 5 &&
+      ['featureId', 'taskId', 'designRef'].every(k => prior.task[k] === record.task[k]) &&
+      prior.args.baseRef === record.args.baseRef && prior.args.requirements === record.args.requirements &&
+      JSON.stringify(prior.args.buildCommand) === JSON.stringify(record.args.buildCommand) &&
+      JSON.stringify(prior.args.testCommand) === JSON.stringify(record.args.testCommand) &&
+      prior.result.status !== 'PASSED' && prior.before.head === record.args.baseRef && prior.after.head === record.args.baseRef &&
+      prior.after.digest === first.before.digest, 'Invalid correction receipt chain');
+    first = prior;
+  }
+  requireValue(first.attempt === 1 && first.before.clean && first.before.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), 'Task did not start from a clean isolated baseline');
+  return record;
+}
+
 export async function checkpointVerifiedTask(args, context = {}, options = {}) {
   let lock, lockPath, repository;
   try {
@@ -49,31 +79,7 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches };
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
-    const record = await readEvidence(repository, args.evidenceRef);
-    requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === args.task[k]), 'Task/design identity mismatch');
-    requireValue(verifiedResult(record.result) && record.before?.head === record.args?.baseRef &&
-      record.after?.head === record.before.head && sha(record.after?.tree) && record.request?.review?.base_ref === record.before.head &&
-      record.request?.review?.requirements === record.args.requirements &&
-      record.reviewSnapshot?.head === record.after.head && record.reviewSnapshot?.tree === record.after.tree &&
-      record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
-      record.response?.code === 0 &&
-      verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
-    // Prove the correction chain began clean and never changed task or baseline.
-    let first = record;
-    const seen = new Set();
-    while (first.args.previousAttempt) {
-      requireValue(!seen.has(first.args.previousAttempt), 'Cyclic receipt chain'); seen.add(first.args.previousAttempt);
-      const prior = await readEvidence(repository, first.args.previousAttempt);
-      requireValue(prior.attempt + 1 === first.attempt && prior.attempt < 5 &&
-        ['featureId', 'taskId', 'designRef'].every(k => prior.task[k] === record.task[k]) &&
-        prior.args.baseRef === record.args.baseRef && prior.args.requirements === record.args.requirements &&
-        JSON.stringify(prior.args.buildCommand) === JSON.stringify(record.args.buildCommand) &&
-        JSON.stringify(prior.args.testCommand) === JSON.stringify(record.args.testCommand) &&
-        prior.result.status !== 'PASSED' && prior.before.head === record.args.baseRef && prior.after.head === record.args.baseRef &&
-        prior.after.digest === first.before.digest, 'Invalid correction receipt chain');
-      first = prior;
-    }
-    requireValue(first.attempt === 1 && first.before.clean && first.before.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), 'Task did not start from a clean isolated baseline');
+    const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
     const state = await scaffoldTasks({ operation: 'list', feature_id: args.task.featureId }, { directory: repository }, options.scaffoldOptions);
     const feature = state.data?.feature;
     const task = feature?.tasks?.[args.task.taskId];

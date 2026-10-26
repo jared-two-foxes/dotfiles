@@ -129,7 +129,7 @@ ID. Read the selected task's complete context, criteria, constraints, history,
 ancestor dependencies and required children. Confirm all prerequisites completed
 in persisted state. `next` selects only; it never starts work. Do not substitute
 another task silently. If it returns null inspect unfinished work; this never
-proves the feature is finished. Final feature-level validation is a later phase.
+proves the feature is finished. Final feature-level validation requires the gate below.
 
 Inspect this task's actual source code. Establish fixed task review requirements:
 its acceptance criteria, applicable approved architectural constraints, and
@@ -270,7 +270,7 @@ original feature baseline separately in approved feature context (before first
 execution) and every checkpoint's Git-native provenance. Task 2 reviews B→working,
 not A→working after Task 1 checkpoints A→B. Keep prior architectural constraints
 and interfaces in later task requirements; omit earlier implementation diffs.
-The full feature remains reviewable from A; feature validation is a later phase.
+The full feature remains reviewable from A; feature validation uses `validate_feature` below.
 
 Task-bound first attempts still require a clean implementation tree. Corrections
 retain the original task baseline, requirements, commands, preceding receipt and
@@ -332,3 +332,77 @@ is visible to Git, stop and have an authorised ignore rule established; do not
 silently edit `.gitignore`, Git configuration or index. The task-bound preflight
 returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
 if needed, follows its own normal approval and checkpoint workflow.
+
+## Final feature verification
+
+A completed collection of tasks is not a verified feature. After every required
+leaf and recursive parent is completed and checkpointed, inspect the full
+Scaffold feature; `next: null` never proves eligibility. Preserve the original
+feature baseline and complete approved design. New plans store exact approved
+text in feature `context` with `design_ref: "sha256:context"`; legacy Git design
+references must use `path@<full-40-character-commit-SHA>` so the gate can read the
+original text. Missing original designs block validation; never reconstruct them
+from task summaries or silently replace acceptance criteria.
+
+Use native `validate_feature` for final verification only. Pass feature/design,
+branch, original `featureBaseRef`, final `headRef`, explicit full-project
+`buildCommand`/`testCommand` arrays and all approved integration/smoke checks.
+`testSuccessPattern` and integration `successPattern` are literal output markers
+showing meaningful exercised behavior (for example a concrete test count), not
+regular expressions. Agree checks and expected output with the user; zero exits
+and generic success messages do not establish coverage. The existing independent
+Review engine also receives actual diagnostics and the full original design and
+criteria, and must examine coverage and integration. Bounds and cancellations are
+failures, never approval. Supply bounded review settings in `review`.
+
+The tool requests narrow Pi UI authorization for that exact verification plan and
+revision. This permits project checks, temporary external Review requests, local
+Git evidence and Scaffold validation bookkeeping only. It never invokes Executor,
+formats or repairs source, commits, selects tasks, pushes or creates PRs. A
+checkpoint grant does not authorize this gate or publishing. No confirmation UI
+means stop for verification authorization. Existing implementation approvals and
+Conductor's per-task semantics remain unchanged.
+
+The gate checks every completed task's authentic Conductor correction chain and
+Scaffold completion against a linear Git-native checkpoint chain from the original
+baseline. Missing, extra, duplicate, unrelated, reordered or modified checkpoints
+fail closed. Empty parent checkpoints remain valid. Scaffold bookkeeping must
+already be ignored and untracked. Source/index/HEAD/branch and task state must stay
+unchanged across checks, review, retention and completion; changes block and
+require reconciliation. Tracked input watchers also reject observed edits that
+are restored before the final snapshot. Ignored generated outputs are permitted;
+tracked generated files remain implementation inputs. Unsupported Git states
+(sparse entries, conflicts, submodules, active Git operations) block validation.
+
+Inspect the versioned `pi.feature-validation/v1` result and diagnostic output.
+`PASSED` requires all meaningful checks, completed APPROVED independent review,
+retained evidence and Scaffold completion handoff. `NEEDS_DESIGN` returns actionable
+check/review findings to Pi; `BLOCKED` means indeterminate verification, missing
+evidence, environment failure or inconsistent state. The gate has no correction
+or retry loop. Pi interprets findings and agrees corrective tasks (or renewed
+architecture approval) with the user, adds explicit verifiable dependent tasks
+through Scaffold, then obtains normal design/execution/checkpoint authorization
+and reruns the complete feature validation from the original baseline. Preserve
+original acceptance criteria and all historical failures.
+
+On resume inspect full Scaffold state and `inspect_feature_validation` (with
+`featureId` to discover attempts or `reference` to inspect one). STARTED intents,
+partial checks, interrupted reviews and pre-retention results never prove success.
+Evidence lives in Git metadata under `pi-conductor-evidence/feature-<hash>.json`
+and is content-addressed as `pi-feature-evidence:sha256:<hash>`. This uses the same
+trusted local-receipt boundary as task evidence; it is not remote attestation or
+a defense against a user tampering with both Git metadata and Scaffold state.
+
+If complete PASSED evidence was retained before interruption, reconcile via
+`validate_feature` with the exact original plan/revision and `resumeEvidenceRef`.
+The tool reauthenticates receipts, lineage, design, checks, review and active
+Scaffold attempt, then idempotently records completion without rerunning checks.
+If no authentic complete result exists, explicitly request fresh validation; never
+infer success or replay source operations. Repeated matching handoffs create no
+duplicate completion records. Superseded attempts cannot complete newer work.
+
+Historical PASSED remains retained after changes. `inspect_feature_validation`
+reports `applicable: false` when HEAD, tree, branch, task graph or underlying
+evidence changes. Scaffold's stored `verified` status describes a historical
+revision; always check native applicability before announcing the current feature
+verified. Never use an old result to authorize new source work or publishing.

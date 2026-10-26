@@ -119,8 +119,7 @@ baseline; use `checkpoint_verified_task` with separate checkpoint authorization 
 `inspect_conductor_evidence` is a read-only receipt inspection tool in both modes.
 Task-bound `execute_and_review` may retain content-addressed attempt records under
 Git metadata, including an intent record before execution. This narrow bookkeeping
-exception grants no direct source writes or lifecycle authority. Full unattended
-multi-task execution and final feature validation are outside this phase.
+exception grants no direct source writes or lifecycle authority. Full unattended multi-task execution remains outside this phase.
 
 ## Primary responsibilities
 
@@ -331,3 +330,24 @@ commit at HEAD, and uses an atomic Git pending ref for interrupted index updates
 It never blindly replays commits, resets changes or removes existing index locks.
 See Design's checkpoint recovery guidance. Ordinary Git/GitHub publishing remains
 separately authorized under the existing policy; checkpoints never push or open PRs.
+
+## Verification-only feature completion (both modes)
+
+After every required task and parent is completed and checkpointed, use native
+`validate_feature` with the original approved design/baseline, final HEAD and
+explicit approved full-project checks. Its Pi UI confirmation grants narrowly
+scoped verification commands and evidence/Scaffold bookkeeping only. This is a
+specific exception to the build/test rule, not source implementation authority.
+It reuses independent bounded Review without Executor or formatting. It cannot
+repair code, select tasks, commit, push or open PRs. Checkpoint authorization does
+not grant feature validation or publishing authority. No UI means no new checks.
+
+Only complete checks, APPROVED cumulative review, authentic retained evidence and
+successful Scaffold handoff can return PASSED. Inspect diagnostic output for
+meaningful coverage; zero exits alone are insufficient. NEEDS_DESIGN returns
+findings to Pi for approved corrective tasks; BLOCKED requires reconciliation.
+There is no automatic retry or correction loop. Preserve original criteria.
+Use read-only `inspect_feature_validation` on resume; incomplete intents never
+prove completion, and historical success becomes inapplicable after HEAD/tree,
+branch or task graph changes. A matching retained success may be handed off
+idempotently via `resumeEvidenceRef`; never fabricate completion JSON.

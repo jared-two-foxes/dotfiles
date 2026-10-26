@@ -13,7 +13,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/execute-and-review.test.mjs tests/executor-runner.test.mjs tests/review-runner.test.mjs tests/pi-conductor.test.mjs tests/pi-design.test.mjs tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs
+      - uses: actions/checkout@v4
+        with:
+          repository: jared-two-foxes/scaffold
+          # Phase 5 lifecycle contract; pin avoids branch drift before/after merge.
+          ref: efe144579e97f4c4b1bbee980e2af1d33cf4f1db
+          path: .ci-scaffold
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: node --test tests/*.test.mjs
+        env:
+          SCAFFOLD_SOURCE: ${{ github.workspace }}/.ci-scaffold
 
   installers:
     runs-on: windows-latest
@@ -22,7 +33,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs
+      - run: node --test tests/pi-feature-validation.test.mjs tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs
       - shell: pwsh
         run: |
           ./tests/install-conductor.ps1

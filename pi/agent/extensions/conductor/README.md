@@ -87,3 +87,29 @@ is visible to Git, stop and have an authorised ignore rule established; do not
 silently edit `.gitignore`, Git configuration or index. The task-bound preflight
 returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
 if needed, follows its own normal approval and checkpoint workflow.
+
+## Feature validation
+
+`validate_feature` is a native verification-only gate requiring Phase 5 Scaffold.
+Conductor's Rust request still always applies Executor operations and formatting,
+so validation uses a bounded native command runner plus the existing Review
+adapter instead of fabricating an implementation task. No Conductor/Review CLI
+protocol changes are required. Task checkpoint authentication is shared with the
+checkpoint tool. Model-facing Scaffold operations cannot submit feature outcomes.
+
+See Design's final feature verification section for input fields, literal output
+markers, narrow UI authority, result/evidence contracts and recovery. The gate
+records intent, checks, cumulative Review and final result in content-addressed
+Git metadata. The CLI lifecycle pins the original baseline, validates all-task
+completion and preserves attempts. Applicability is computed against actual Git
+and task state, not the historical Scaffold status alone.
+
+Run the integration suite against the companion Scaffold checkout:
+
+```sh
+SCAFFOLD_SOURCE=/path/to/scaffold node --test tests/pi-feature-validation.test.mjs tests/pi-checkpoint.test.mjs
+```
+
+No live AI calls are needed; temporary Git repositories, real Scaffold processes
+and deterministic Review CLI fixtures exercise failures, corrective checkpoints,
+full cumulative reviews and idempotent interruption recovery.

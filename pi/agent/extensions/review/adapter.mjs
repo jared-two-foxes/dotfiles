@@ -87,7 +87,7 @@ async function snapshot(repository, base, signal) {
   }
   return hash.digest('hex');
 }
-function validate(result, code) {
+export function validateReviewResult(result, code) {
   const exits = { APPROVED: 0, CHANGES_REQUESTED: 1, INDETERMINATE: 3 };
   if (result?.schema !== 'review.result/v1' || !Object.hasOwn(exits, result.status) ||
       exits[result.status] !== code || !Array.isArray(result.findings) ||
@@ -126,23 +126,28 @@ async function reviewEnvironment() {
   return env;
 }
 
+export function reviewSettings(args = {}) {
+  const budget = integer(args.wallClockBudgetSecs ?? 180, 'wallClockBudgetSecs', 600);
+  const turns = integer(args.maxTurns ?? 20, 'maxTurns', 100);
+  const limits = [];
+  for (const [name, flag, maximum] of extraLimits) {
+    if (args[name] != null) limits.push(flag, String(integer(args[name], name, maximum)));
+  }
+  if (args.maxCostUsd != null) {
+    if (typeof args.maxCostUsd !== 'number' || !Number.isFinite(args.maxCostUsd) || args.maxCostUsd < 0) {
+      throw new Error('maxCostUsd must be a finite nonnegative number');
+    }
+    limits.push('--max-cost-usd', String(args.maxCostUsd));
+  }
+  const model = text(args.model ?? process.env.REVIEW_MODEL ?? DEFAULT_MODEL, 'Review model', 512);
+  return { budget, turns, limits, model };
+}
+
 export async function reviewChanges(args, context = {}, options = {}) {
   let temp, outcome;
   try {
     text(args?.requirements, 'Review scope');
-    const budget = integer(args.wallClockBudgetSecs ?? 180, 'wallClockBudgetSecs', 600);
-    const turns = integer(args.maxTurns ?? 20, 'maxTurns', 100);
-    const limits = [];
-    for (const [name, flag, maximum] of extraLimits) {
-      if (args[name] != null) limits.push(flag, String(integer(args[name], name, maximum)));
-    }
-    if (args.maxCostUsd != null) {
-      if (typeof args.maxCostUsd !== 'number' || !Number.isFinite(args.maxCostUsd) || args.maxCostUsd < 0) {
-        throw new Error('maxCostUsd must be a finite nonnegative number');
-      }
-      limits.push('--max-cost-usd', String(args.maxCostUsd));
-    }
-    const model = text(args.model ?? process.env.REVIEW_MODEL ?? DEFAULT_MODEL, 'Review model', 512);
+    const { budget, turns, limits, model } = reviewSettings(args);
     const directory = path.resolve(args.repository ?? context.worktree ?? context.directory ?? '.');
     const repository = (await git(directory, ['rev-parse', '--show-toplevel'], context.abort)).trim();
     const base = await commit(repository, args.baseRef, context.abort);
@@ -160,7 +165,7 @@ export async function reviewChanges(args, context = {}, options = {}) {
       '--model', model, '--max-turns', String(turns), '--wall-clock-budget-secs', String(budget), ...limits];
     const output = await run(executable, argv, { cwd: repository, signal: context.abort,
       timeout: options.timeoutMs ?? (budget + 10) * 1000, env: await reviewEnvironment() });
-    const result = validate(JSON.parse(output.stdout), output.code);
+    const result = validateReviewResult(JSON.parse(output.stdout), output.code);
     if (await snapshot(repository, base, context.abort) !== before) {
       throw Object.assign(new Error('Repository changed during review; result is not authoritative'),
         { reason: 'REPOSITORY_CHANGED' });
