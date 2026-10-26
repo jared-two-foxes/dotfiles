@@ -6,11 +6,37 @@
  * No direct executor/review-cli invocation or AI retry logic lives here.
  */
 import { Type } from "typebox";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { executeAndReview } from "./adapter.mjs";
+import { checkpointVerifiedTask, checkpointAuthorization } from "./checkpoint.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
+  let checkpointContext: ExtensionContext | undefined;
+  const confirmation = async (title: string, message: string) =>
+    checkpointContext?.hasUI === true && await checkpointContext.ui.confirm(title, message);
+  const authorizeCheckpoint = checkpointAuthorization(confirmation);
+  pi.on("session_start", async () => { authorizeCheckpoint.reset(); });
+  pi.registerTool({
+    name: "checkpoint_verified_task",
+    label: "Checkpoint verified task",
+    description: "After Scaffold completion and user checkpoint authorization, create or recover ONE local commit of the exact verified Git tree. No push, task selection or source implementation. Requires Pi confirmation UI; grants expire on session start/switch.",
+    parameters: Type.Object({
+      task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
+      evidenceRef: Type.String(),
+      featureBaseRef: Type.String({ description: "Original feature-start SHA, preserved across all task checkpoints" }),
+      branch: Type.String({ description: "Explicit authorized feature branch" }),
+      defaultBranch: Type.String({ description: "Known actual repository default branch" }),
+      protectedBranches: Type.Array(Type.String(), { description: "All additional known protected branches; [] if none" }),
+      authorizationMode: Type.Union([Type.Literal("manual"), Type.Literal("feature")]),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      checkpointContext = ctx;
+      const result = await checkpointVerifiedTask(params, { directory: ctx.cwd, abort: signal }, { authorize: authorizeCheckpoint });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        isError: !result.ok, details: result };
+    },
+  });
   pi.registerTool({
     name: "execute_and_review",
     label: "Execute and Review (Conductor)",

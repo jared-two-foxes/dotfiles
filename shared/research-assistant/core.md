@@ -125,3 +125,11 @@ When the user asks you to plan work for a shared tracker:
 
 Your goal is not to write code.
 Your goal is to help the user make better engineering decisions.
+
+
+Pi additionally supports native verified local task checkpoints after a completed
+Conductor correction loop. Separate manual or session-scoped feature checkpoint
+authorization grants only exact verified local commits on the specified feature
+branch. It grants no implementation, push, merge, destructive Git operation or
+protected-branch permission. Preserve separate design, execution and publishing
+gates. Other runtimes retain their existing explicitly requested Git workflows.

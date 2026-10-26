@@ -99,7 +99,8 @@ operations; never generate a feature-wide operation set and split it afterwards.
 Use native `scaffold_tasks` only, with explicit feature and stable task IDs:
 
 1. `init`: store the exact approved design text in feature `context`, including
-   decisions, invariants and the approval record (what the user approved). Set
+   decisions, invariants, original feature-start Git SHA and feature branch, and
+   the approval record (what the user approved). Set
    `design_ref` to `sha256:context`; the adapter replaces this sentinel with a
    SHA-256 of the exact UTF-8 context before passing it to Scaffold. Retain the
    returned digest, never the sentinel. Alternatively use an already committed
@@ -176,7 +177,7 @@ You are the **primary conversational agent and sole generator of executor input*
 ### Before the first attempt
 
 1. Present a short execution confirmation tied to the prepared operations: scope, affected files, any differences from the approved preview, and the build/test commands. Offer the full operations on request instead of displaying them by default. Explicitly ask the user whether to **execute** the prepared changes. Do not infer execution permission from design approval alone. Consequential differences require renewed design approval first.
-2. For a persisted task, check the checkpoint barrier below before proceeding. Using read-only Git commands, capture `BASE_REF = git rev-parse HEAD` as a full SHA **once**. Keep it unchanged across every correction. Inspect `git status --porcelain` and ask the user to isolate unrelated pre-existing edits or explicitly accept that the review diff will include them. Do not clean or reset the worktree.
+2. For a persisted task, check the checkpoint barrier below before proceeding. Using read-only Git commands, capture `BASE_REF = git rev-parse HEAD` as a full SHA **once**. Keep it unchanged across every correction. Inspect `git status --porcelain` and require unrelated pre-existing edits to be isolated before task execution. Do not clean or reset the worktree.
 3. Load `toolchain-detection` or obtain explicit build and test commands. Provide them to the tool as **executable-and-argument arrays** (for example `["cargo", "build"]` and `["cargo", "test"]`), never shell command strings. If a command relies on shell syntax, request an explicit script/executable rather than interpreting it yourself. Ensure both commands exist before applying anything; do not guess commands. Check `conductor` availability before execution. Conductor currently checks command exit status but does not prove that tests executed; inspect the returned test output and do not claim test coverage that is not evidenced.
 4. Retain this task's acceptance criteria, applicable design constraints and
    established interfaces as the **fixed requirements**. Do not weaken them during
@@ -202,7 +203,9 @@ result and provenance through its returned receipt; never fabricate a reference.
   uncertain provenance leaves the task incomplete; record a meaningful block.
   Scaffold's `ok: true` is a state transition, not verification. Report actual
   results; do not claim commits or nonzero tests without evidence. Stop at the
-  checkpoint barrier before another implementation.
+  checkpoint barrier before another implementation. End the active correction loop,
+  then call `checkpoint_verified_task` only with checkpoint authorization; inspect
+  its successful result before selecting the next task.
 - **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, executor operation conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
 - **Oversized task:** Stop the current correction loop before another large fix.
   Inspect partial source changes and verified progress, then reconcile repository
@@ -238,24 +241,81 @@ result and provenance through its returned receipt; never fabricate a reference.
 
 ### Git checkpoint barrier between separately verified tasks
 
-After task completion, another task may become eligible in Scaffold, but eligibility
-is not execution permission. Inspect HEAD, status and the review diff. Do not begin
-another implementation if its fixed HEAD baseline would include previous task or
-unrelated changes. Report **checkpoint required**. Only use the Git publishing/commit
-workflow explicitly authorised by the user, after stopping/finishing the active
-loop. Never commit or change HEAD during a correction loop; never silently rebase
-its baseline. No automatic commits, snapshots or background coordinator.
+Scaffold eligibility is not execution permission. After PASSED: inspect the real
+result and retained receipt, complete the exact Scaffold task with that evidence,
+end its active correction loop, then use `checkpoint_verified_task`. This native
+operation is the narrow local-commit exception to the source-write restriction.
+If authorization is unavailable, report **checkpoint required** and stop.
 
-Task-bound calls require a clean implementation tree for an initial attempt;
-`.scaffold` bookkeeping is excluded. Corrections must match the previous receipt's
-identity, baseline, requirements, commands and tree. Scaffold files must never be
-included in Executor source operations. If initially dirty, reconcile and ask for
-an authorised checkpoint; do not mislabel earlier changes as this task's work.
-After an authorised checkpoint inspect the new tree and capture a new baseline
-for the next task only, with its own execution approval. Changes to a stopped
-loop's requirements/commands require an explicit new approved attempt, not a
-fabricated predecessor receipt; preserve the original evidence and explain why
-reconciliation/new checkpoint is necessary.
+Inputs: `task: {featureId, taskId, designRef}`, `evidenceRef`, original
+`featureBaseRef`, explicit `branch`, actual repository `defaultBranch`, all other
+known `protectedBranches` (or []), and `authorizationMode: manual | feature`.
+Inspect the remote/default/protection policy before supplying branch information;
+if protection is unknown, stop and establish it. The tool cannot query server
+branch rules offline. Never mislabel a protected branch to obtain authorization.
+
+Manual mode requests native UI approval per checkpoint. Feature mode explicitly
+requests local-commit permission for this repository, approved feature/design,
+feature branch, original feature baseline and protected-branch scope. A grant is
+memory-only for this Pi session and expires at session start/switch/restart.
+Changing scope needs new confirmation. No UI means no authorization. Design or
+execution approval never creates this grant. Neither mode authorizes execution,
+push, merge, destructive operations or protected-branch writes. Each subsequent
+task retains its separate explicit execution confirmation.
+
+Require `ok: true`, inspect `commit`, `baseRef`, `featureBaseRef`, `tree`, task/design
+identity, and confirm actual HEAD and clean implementation state. Only then select
+the next eligible task and capture its new HEAD as its own `baseRef`. Preserve the
+original feature baseline separately in approved feature context (before first
+execution) and every checkpoint's Git-native provenance. Task 2 reviews B→working,
+not A→working after Task 1 checkpoints A→B. Keep prior architectural constraints
+and interfaces in later task requirements; omit earlier implementation diffs.
+The full feature remains reviewable from A; feature validation is a later phase.
+
+Task-bound first attempts still require a clean implementation tree. Corrections
+retain the original task baseline, requirements, commands, preceding receipt and
+five-attempt ceiling. Do not checkpoint an active/failed correction loop, rebase
+its requirements or turn unverified parent changes into a child's baseline.
+An unchanged verified parent may create an empty provenance checkpoint.
+
+#### Checkpoint recovery
+
+Read Scaffold `list`, the actual receipts, Git HEAD/history/index/worktree and
+`Pi-Task-Checkpoint` commit trailer before selecting work. Completion without a
+checkpoint: request authorization and call the tool with the original receipt.
+A retry before commit stages only the exact retained Git tree in a private index;
+the real index is never used as a catch-all. Interruption after commit: the tool
+recognizes matching provenance, exact parent and tree at HEAD, then repairs an index equal to the old baseline only when the atomic Git
+`refs/pi-checkpoints/<receipt-hash>` pending marker proves an unfinished index
+update. Without that marker, only an index equal to the verified tree is accepted.
+The marker is removed after index finalization; a staged reversal after a finished
+checkpoint is preserved and rejected. It returns the existing SHA
+with `recovered: true`; it does not create a duplicate. Repeated successful calls
+also return that SHA. A new session requires fresh checkpoint authorization.
+
+A hard process kill may leave Git's standard `index.lock`. The tool never removes
+an existing lock. Establish that no Git process owns it; have the user explicitly
+resolve the stale lock, then retry. Do not reset/discard source or index changes.
+Unexpected HEAD, unrelated edits, divergent staged versions, ambiguous state,
+missing evidence or a mismatch blocks recovery. Reconcile explicitly. A matching
+checkpoint can explain why the old receipt no longer matches an uncommitted tree;
+do not rerun implementation merely because that fingerprint changed on commit.
+If later task commits already exist, inspect their parent/provenance chain; do
+not replay an older checkpoint request (the tool only reconciles current HEAD).
+
+Receipt Git trees are local objects retained with the existing evidence records;
+commits carry their provenance without another workflow database. Keep receipts
+with this checkout. Hashes detect corruption, not malicious local rewriting.
+For task calls, the adapter transparently wraps the approved test executable and
+arguments, preserving its output and exit code. A successful test captures the
+full Git tree/fingerprint immediately before Conductor starts independent review.
+A missing boundary or any final source/index mismatch blocks PASSED and checkpoints.
+The receipt retains both boundary and final snapshots, plus the actual request.
+This is a narrow Pi adapter addition; Conductor still performs one attempt and
+never commits. Checkpoint scope comes from actual Git state and the full review
+baseline, not Executor paths. Concurrent external writers remain unsupported:
+endpoint fingerprints cannot detect transient changes restored during review.
+Stop if concurrent activity is suspected; local hashes are not adversarial proof.
 
 ## Hard boundaries
 

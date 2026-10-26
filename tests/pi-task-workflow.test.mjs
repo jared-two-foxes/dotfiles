@@ -4,9 +4,21 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, mkdir, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { executeAndReview } from '../pi/agent/extensions/conductor/adapter.mjs';
-import { inspectEvidence, digest } from '../pi/agent/extensions/conductor/evidence.mjs';
+import { executeAndReview as executeTaskAttempt } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { inspectEvidence, digest, snapshot } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { scaffoldTasks, buildCommand, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
+
+
+async function executeAndReview(args, context, options) {
+  return executeTaskAttempt(args, context, { ...options, invokeConductor: async json => {
+    const result = await options.invokeConductor(json);
+    const request = JSON.parse(json);
+    const check = request.checks.find(c => c.name === 'test');
+    const boundary = JSON.parse(check.args[1]);
+    await writeFile(boundary.output, JSON.stringify(await snapshot(boundary.repository)));
+    return result;
+  } });
+}
 
 const designText = 'Approved: independent value model, then consumer. Preserve existing interfaces.';
 const feature = { id: 'F3', title: 'Value feature', objective: 'Deliver value behavior',

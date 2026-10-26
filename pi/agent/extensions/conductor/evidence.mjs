@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { implementationTree } from './git-tree.mjs';
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
 const git = (repository, args) => execFileSync('git', args, {
@@ -30,7 +31,7 @@ export async function snapshot(repository) {
     if (!stat.isFile()) throw new Error('Cannot fingerprint nonregular untracked file: ' + name);
     files.push([name, digest(await readFile(path.join(repository, name)))]);
   }
-  return { head: git(repository, ['rev-parse', 'HEAD']).trim(), clean: !status,
+  return { tree: await implementationTree(repository), head: git(repository, ['rev-parse', 'HEAD']).trim(), clean: !status,
     bookkeepingVisible: !!git(repository, ['status', '--porcelain=v1', '--untracked-files=all', '--', '.scaffold']).trim(),
     digest: digest(JSON.stringify([status,
       git(repository, ['diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', ...scope]),
@@ -87,7 +88,7 @@ export function verifiedResult(result) {
 
 export async function inspectEvidence(reference, context) {
   try {
-    const repository = git(context.directory, ['rev-parse', '--show-toplevel']).trim();
+    const repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']).trim());
     const record = await readEvidence(repository, reference);
     const current = await snapshot(repository);
     return { ok: true, reference, record, current,
