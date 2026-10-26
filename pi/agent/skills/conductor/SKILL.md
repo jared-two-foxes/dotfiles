@@ -39,6 +39,14 @@ builds or tests.
 
 ## Approval gates
 
+For complex features Design first obtains feature architecture approval and
+persists independently designable tasks before detailed design. The gates below
+apply to the selected task; architecture approval never replaces task design or
+execution approval. Small changes keep the single-task flow. Include the approved
+task summary, decisions and actual approval record in fixed `requirements` so the
+existing receipt retains them. Missing approval on resume requires reinspection
+and reapproval, not inference from task status or feature approval.
+
 1. Inspect the repository and discuss material design decisions iteratively,
    using focused code/text examples with changed portions marked, including
    new or changed data structures and how their data is created and used.

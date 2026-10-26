@@ -85,7 +85,8 @@ Executor reports JSON with `success`, `operations_applied`, and, on operation fa
 ## Task boundary in Pi Design
 
 For decomposed features, author operations only after the approved task plan is
-persisted and one eligible task selected. Use that task's current source, criteria,
+persisted, one eligible task selected and its detailed task design explicitly
+approved. Feature architecture approval alone is insufficient. Use that task's current source, criteria,
 context and applicable design invariants. Never generate feature-wide operations
 and divide them afterwards. Corrections target the actual partially modified tree
 with the same baseline and requirements. Do not include `.scaffold` state in source

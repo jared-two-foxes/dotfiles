@@ -50,8 +50,14 @@ is the lower-level execution reference and may be loaded alongside Design;
 it is not a substitute for the collaborative Design persona.
 In Pi Design, discuss options iteratively using focused code/text examples
 with changed portions marked, including new or changed data structures and
-how their data is created and used. Obtain design approval on a code-led
-implementation preview before generating operations. Then present a short
+how their data is created and used. For complex features, approve high-level
+feature architecture, decompose and
+persist independently designable tasks, then select one ready task before its
+detailed design. Obtain task design approval on a code-led implementation preview
+before generating operations. Feature architecture approval does not approve new
+consequential task decisions. Small changes retain a single design approval round.
+Use Design’s immutable-reference conflict and receipt recovery rules; never infer
+missing task approval or silently revise the feature architecture. Then present a short
 execution confirmation covering scope, affected files and verification
 commands; offer full operations on request, not by default. Return to the
 design conversation if operation authoring exposes a new consequential choice.
@@ -110,9 +116,9 @@ task only with actual task-bound successful Conductor evidence and a retained
 result reference. Scaffold validates structure and association, not authenticity.
 On resume inspect full feature state, approved design and retained Conductor
 receipts; `next` returning null does not imply the feature is complete. After
-feature design approval, Design must decompose complex work before authoring
-operations, persist the agreed plan, and implement only one eligible task at a
-time. Pi alone reasons about selection, recursive decomposition and recovery.
+feature architecture approval, Design must decompose and persist complex work
+before detailed task design. Select one eligible task, obtain its focused design
+approval, then author operations and implement only that task at a time. Pi alone reasons about selection, recursive decomposition and recovery.
 Preserve task-scoped requirements and separate execution approval for each task.
 Stop at the Git checkpoint barrier if previous task changes remain in the review
 baseline; use `checkpoint_verified_task` with separate checkpoint authorization outside an active loop.

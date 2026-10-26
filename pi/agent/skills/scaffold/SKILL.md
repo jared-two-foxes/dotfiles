@@ -172,7 +172,7 @@ uses Design → approved execute_and_review → Conductor.
 
 ## Approved design and complete task definitions
 
-For new Design plans put the exact approved design in feature `context` and use
+For new Design plans put the exact approved feature architecture in feature `context` and use
 `design_ref: "sha256:context"` on `init`. This Pi sentinel is replaced with a real
 SHA-256 before CLI invocation. Returned `design_ref` is the stable reference; the
 adapter checks that digest on feature responses. Existing immutable Git revision
@@ -182,7 +182,25 @@ Every Design task includes objective, acceptance_criteria, relevant context,
 inherited constraints, stable id and explicit dependencies. Put `Verification:`
 strategy in `context`; there is no extra verification field in Scaffold's schema.
 An empty dependency list is explicit. Add dependent definitions as one batch;
-Scaffold owns graph validation. Do not mutate task JSON directly.
+Scaffold owns graph validation. Do not mutate task JSON directly. Persist the task graph after architecture
+approval and before detailed task design; definitions need no complete internal
+implementation plan. Design each selected task immediately before implementation,
+with separate task design and execution approvals. Oversized pending tasks may be
+split during design with `decompose` without a failed execution attempt. Children
+inherit relevant architectural constraints and context as well as dependencies;
+parent verification remains required.
+
+Task definitions are immutable. Retain later approved task decisions and the
+actual approval record in Conductor's existing fixed `requirements`, which its
+content-addressed attempt receipt preserves. This is not a standalone approval
+store: before the first retained attempt, interruption requires reinspection and
+reapproval if approval cannot be established. Never misuse `block`/`retry` or
+`complete` to append design notes. Inspect receipts and actual implementation
+before new work; never replay verified changes to recreate missing notes.
+Feature-wide conflicts return to architectural discussion and explicit approval;
+there is no in-place design-reference revision operation. Block incompatible
+changes and propose controlled reconciliation separately, preserving the original
+specification, baseline, history and evidence. See Design for this limitation.
 
 The next eligible task may still require a Git checkpoint. State eligibility never
 authorises execution across previous uncommitted task changes. On recovery inspect

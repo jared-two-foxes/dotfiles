@@ -7,7 +7,9 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   It reviews existing changes without applying findings or running builds/tests.
   `ERROR` and `INDETERMINATE` never mean approval.
 - **Implementation:** load `/skill:design`, agree the architecture, obtain
-  design approval, prepare exact operations with `/skill:executor`, and obtain
+  feature architecture approval for complex work, decompose and persist before
+  detailed task design, then obtain task design approval, prepare exact operations
+  with `/skill:executor`, and obtain
   separate execution approval. Only `execute_and_review` may apply changes
   and run build/test/review verification. Do not edit/write directly or invoke
   executor/review-cli from Bash. Do not commit or change branches during an
@@ -31,8 +33,11 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   verification authority. Pi owns sequencing; do not automatically advance or
   retry work. Complete only with actual task-bound successful Conductor evidence.
   Scaffold validates structure and association, not evidence authenticity.
-  After feature approval, decompose complex work, persist the agreed design/tasks,
-  select one eligible task and scope its review requirements. Recover from full
+  After architecture approval, decompose complex work, persist the agreed
+  architecture/tasks,
+  select one eligible task, design it in detail and obtain its design approval.
+  Scope review requirements to that task and its approved decisions. Never infer
+  missing task approval on recovery or silently revise immutable architecture. Recover from full
   persisted state and retained receipts; use read-only `inspect_conductor_evidence`.
   Recursively decompose oversized remaining work without completing parents.
   Stop between tasks when a Git checkpoint is required; use `checkpoint_verified_task` with separate manual or session-scoped feature
