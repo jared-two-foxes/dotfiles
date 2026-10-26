@@ -4,6 +4,9 @@
 // Conductor alone owns apply/check/review.
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
+import { randomUUID } from 'node:crypto';
+import { readFile, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -139,7 +142,7 @@ async function executeAttempt(args, context = {}, options = {}) {
       execution,
       checks: [
         { name: 'build', program: build[0], args: build.slice(1) },
-        { name: 'test', program: test[0], args: test.slice(1) },
+        { name: 'test', program: (options.testBoundary ?? test)[0], args: (options.testBoundary ?? test).slice(1) },
       ],
       // Pi-local addition: budget and limit passthrough fields forwarded to the
       // review engine via conductor.request/v1. Diverges from the upstream
@@ -209,7 +212,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (args?.previousAttempt) return outcome('BLOCKED', 'PRECHECK', { reason: 'TASK_REQUIRED' });
     return executeAttempt(args, context, options);
   }
-  let repository, before, request, response;
+  let repository, before, request, response, boundaryPath;
   let attempt = 1;
   try {
     validateBinding(args.task);
@@ -242,8 +245,13 @@ export async function executeAndReview(args, context = {}, options = {}) {
       repository, task: args.task, attempt, args, before, after: before,
       result: outcome('BLOCKED', 'STARTED', { reason: 'INTERRUPTED_OR_RUNNING' }),
     });
+    boundaryPath = path.resolve(repository, await git(repository,
+      ['rev-parse', '--git-path', 'pi-conductor-evidence'], context.abort), randomUUID() + '.boundary');
+    const testBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
+      JSON.stringify({ command: args.testCommand, repository, output: boundaryPath })];
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     let result = await executeAttempt(args, context, {
+      testBoundary,
       invokeConductor: async json => {
         request = JSON.parse(json);
         response = await (options.invokeConductor ?? (body => invoke(binary, ['run', '--request', '-'], {
@@ -257,13 +265,20 @@ export async function executeAndReview(args, context = {}, options = {}) {
         message: 'PASSED lacks successful execution, build/test checks or an APPROVED independent review', conductor: result.conductor });
     }
     const after = await snapshot(repository);
+    let reviewSnapshot = null;
+    try { reviewSnapshot = JSON.parse(await readFile(boundaryPath, 'utf8')); } catch {}
+    if (result.status === 'PASSED' && (!reviewSnapshot || reviewSnapshot.head !== before.head ||
+        reviewSnapshot.tree !== after.tree || reviewSnapshot.digest !== after.digest || reviewSnapshot.bookkeepingVisible)) {
+      result = outcome('BLOCKED', 'EVIDENCE', { repository, reason: 'REVIEW_SNAPSHOT_CHANGED',
+        message: 'Missing post-test review boundary or source/index changed during independent review', actualResult: result });
+    }
     if (after.head !== before.head) result = outcome('BLOCKED', 'EVIDENCE', {
       repository, reason: 'HEAD_CHANGED', actualResult: result,
     });
     try {
       const reference = await retainEvidence(repository, {
         repository, task: args.task, attempt, args, before, after, startedReference,
-        request: request ?? null, response: response ?? null, result,
+        request: request ?? null, response: response ?? null, reviewSnapshot, result,
       });
       return { ...result, evidence: { reference, task: args.task, attempt } };
     } catch (error) {
@@ -273,5 +288,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
   } catch (error) {
     return outcome('BLOCKED', 'PRECHECK_OR_EVIDENCE', { ...(repository ? { repository } : {}),
       reason: 'TASK_CONTEXT_INVALID', message: error.message + '; inspect persisted state and working tree before retrying' });
+  } finally {
+    if (boundaryPath) await rm(boundaryPath, { force: true }).catch(() => {});
   }
 }

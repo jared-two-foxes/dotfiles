@@ -35,10 +35,40 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   select one eligible task and scope its review requirements. Recover from full
   persisted state and retained receipts; use read-only `inspect_conductor_evidence`.
   Recursively decompose oversized remaining work without completing parents.
-  Stop between tasks when a Git checkpoint is required; only explicitly authorised
-  publishing may change HEAD, outside the active loop.
+  Stop between tasks when a Git checkpoint is required; use `checkpoint_verified_task` with separate manual or session-scoped feature
+  checkpoint authorization outside the active loop.
 
 Use the Linear tools when the user explicitly asks to manage shared tickets.
 Confirm proposed creations or revisions before execution. Ticket descriptions
 must include `## Acceptance Criteria` with independently testable `- [ ] ...`
 bullets. TDD is a strategy inside Design, not a separate operating mode.
+
+
+## Verified local task checkpoints
+
+`checkpoint_verified_task` is a narrow native Git-write exception in both modes,
+after authentic task-bound PASSED evidence, matching Scaffold completion, and the
+end of that task's correction loop. It commits only the exact retained Git tree
+on an explicitly authorized feature branch, with Git-native checkpoint provenance.
+Never use it to commit failed/unverified work or bypass implementation approval.
+
+Checkpoint authorization is separate from architecture, execution and publishing.
+Manual mode obtains Pi UI confirmation per task. Feature mode obtains explicit UI
+confirmation for local commits in this repository, feature/design, feature branch,
+original feature baseline and protected-branch scope for this Pi session only.
+Grants are not persisted and expire on session start/switch/restart; no UI means
+stop for authorization. Scope changes need new confirmation. Never infer this
+permission from an approved design, source execution or a completion receipt.
+Neither mode grants source execution, push, merge, destructive Git operations or
+protected-branch writes. Establish the actual default and all known protected
+branches before invoking; offline checks cannot discover remote protection rules.
+
+Retain the original feature baseline in approved feature context. Each task uses
+the HEAD created by the preceding checkpoint as its own fixed review baseline;
+never change it during corrections. Inspect `ok`, commit SHA, exact parent/tree
+and provenance before selecting the next eligible task. On interruption reconcile
+Scaffold, receipts and real Git state. The tool recognizes an existing matching
+commit at HEAD, and uses an atomic Git pending ref for interrupted index updates.
+It never blindly replays commits, resets changes or removes existing index locks.
+See Design's checkpoint recovery guidance. Ordinary Git/GitHub publishing remains
+separately authorized under the existing policy; checkpoints never push or open PRs.

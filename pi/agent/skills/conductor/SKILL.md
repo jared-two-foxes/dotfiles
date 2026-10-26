@@ -86,8 +86,10 @@ workflow.
 
 ## Limitations
 
-Conductor currently does not prove that any tests executed or guard against
-unexpected source modifications during verification. Inspect test output and
+Conductor currently does not prove that any tests executed. For Pi task-bound
+calls the adapter captures source/index after the test command and blocks PASSED
+if that review-boundary fingerprint differs afterwards. Non-task callers retain
+the original contract; concurrent external writers remain unsupported. Inspect test output and
 report these limitations honestly. The Pi adapter has an overall 15-minute
 subprocess deadline but Conductor does not yet enforce per-check timeouts.
 
@@ -100,7 +102,7 @@ preserve. Future feature criteria are deferred; final feature validation is late
 Pass `previousAttempt` for corrections, using the actual preceding receipt.
 Initial task attempts require a clean implementation tree (excluding `.scaffold`
 bookkeeping). A new eligible task with earlier uncommitted changes returns
-`CHECKPOINT_REQUIRED`; finish/stop the loop and use only authorised Git publishing.
+`CHECKPOINT_REQUIRED`; finish the loop, record completion and use separately authorized `checkpoint_verified_task`.
 No HEAD changes during a correction loop.
 
 The adapter retains a STARTED intent before execution and a content-addressed
@@ -122,3 +124,41 @@ record fail when stopping for defects/attempt limits, block for unresolved
 conditions, or decompose remaining oversized work after reconciliation. Receipt
 chains preserve the five-attempt ceiling; repeated identical failures without
 progress still require Pi to stop. No retries or lifecycle mutations live here.
+
+
+## Local checkpoints after completion
+
+After inspected PASSED evidence and matching Scaffold completion, end the active
+correction loop. Design may invoke `checkpoint_verified_task` with separate manual
+or session-scoped feature checkpoint authorization. This tool never invokes
+Conductor, chooses tasks, pushes or opens PRs. It checks the actual retained
+request/result, clean-start correction chain, full verified Git tree and Scaffold
+history; an Executor operation list alone does not establish commit scope.
+Old receipts without Git trees and a matching post-test review-boundary snapshot
+cannot authorize checkpoints. Preserve evidence;
+reconcile and obtain fresh verification under an explicitly approved task loop.
+
+The commit trailer binds feature/task/design, receipt, original feature baseline,
+task baseline, tree and branch. A pending ref under `refs/pi-checkpoints/` is
+created atomically with the branch update and removed after index finalization.
+On resume inspect these, actual HEAD/index/worktree, Scaffold state and receipts.
+A matching checkpoint explains a committed source snapshot even though the old
+uncommitted fingerprint differs. Only current-HEAD recovery is automatic. Never
+replay older checkpoints or discard unrelated staged changes. Existing locks need
+explicit resolution after checking process ownership. New sessions require fresh
+checkpoint authorization. See Design for the complete recovery policy.
+
+`.scaffold/` must already be ignored and untracked. The tool never edits ignore
+rules, configuration or local excludes. If needed, establish an explicitly
+approved ignore rule separately before implementation. Local receipts are under
+Git metadata and never enter implementation commits. Snapshots use private indexes;
+submodules, conflicts, sparse/skip-worktree and assume-unchanged entries fail closed.
+The adapter remains backward compatible for non-task callers and retains the
+five-attempt correction ceiling. Conductor itself is unchanged.
+
+Task-bound requests transparently wrap the original approved test command in a
+Pi-local Node runner, forwarding stdout/stderr and exit status. On test success
+it captures a Git tree/fingerprint before independent review. Final fingerprints
+must match or the adapter returns `REVIEW_SNAPSHOT_CHANGED`. Original commands
+remain in the receipt and fixed throughout corrections; non-task callers keep
+the existing protocol. No Conductor, Review or Executor changes are required.

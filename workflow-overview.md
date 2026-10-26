@@ -327,3 +327,41 @@ read/write - is deterministic code with no model in the loop.
 | `GREEN_UNCONFIRMED` | A fresh test for a validate-missed/review criterion passed immediately | Inspecting the test, or `scaffold next-step --accept-green` |
 | `MANUAL_CRITERION` pause | A manual criterion's named file hasn't changed | Making the change, or `scaffold next-step --accept-manual` |
 | Stack clobber | Pushing a ticket while a different one is mid-flight | `--force` or `--prepend` |
+
+
+## Pi task checkpoints (Phase 4)
+
+Pi remains the sole reasoning orchestrator. For each task: separate execution
+approval → one bounded Conductor attempt/corrections → inspect actual PASSED
+receipt → Scaffold complete → end correction loop → authorized native
+`checkpoint_verified_task` → inspect successful checkpoint → select next task.
+No background task runner, Conductor commit behavior, automatic publishing or
+feature validation is introduced.
+
+Keep feature baseline A in approved feature context. Task 1 reviews A→working
+and checkpoints B. Task 2 reviews B→working and checkpoints C. Its review excludes
+Task 1's implementation, while the complete feature remains reviewable A→C.
+The native tool binds each commit's exact Git tree, parent, feature/task/design,
+receipt and original feature baseline in `Pi-Task-Checkpoint` metadata.
+
+Checkpoint permission is manual per call or explicitly feature-scoped via Pi's
+confirmation UI for this session. It is separate from design, task execution and
+publishing permission. It never permits protected branches, push, merge or
+history rewriting. No UI or unknown protection policy means stop.
+
+Git snapshots/staging use private indexes. Only the verified tree is committed;
+Scaffold bookkeeping must already be ignored and untracked. No ignore/config
+changes are implicit. A branch update and pending ref are atomic; index
+finalization is recoverable using that ref and the exact parent/tree/provenance.
+Finalization removes the pending ref. Existing locks and unrelated changes block;
+source and staged changes are never reset or discarded. See the Design skill for
+interruption cases and receipt retention. Local Git hashes do not authenticate
+malicious local rewrites. Task-bound Pi calls wrap the approved test command,
+forwarding its output/status and capturing Git state after successful tests,
+immediately before review. Boundary/final source or index drift blocks success
+and checkpoints. Non-task callers are unchanged. Transient concurrent source
+writers restored between fingerprints remain unsupported.
+
+Run `node --test tests/*.test.mjs`. Checkpoint tests use temporary Git repositories
+and deterministic Conductor/Scaffold CLI fixtures, with no live model calls;
+CI runs them on Linux and Windows. The existing correction-limit tests remain.

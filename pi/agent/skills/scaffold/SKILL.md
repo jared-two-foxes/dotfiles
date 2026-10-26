@@ -196,3 +196,41 @@ is visible to Git, stop and have an authorised ignore rule established; do not
 silently edit `.gitignore`, Git configuration or index. The task-bound preflight
 returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
 if needed, follows its own normal approval and checkpoint workflow.
+
+
+## Local checkpoints after completion
+
+After inspected PASSED evidence and matching Scaffold completion, end the active
+correction loop. Design may invoke `checkpoint_verified_task` with separate manual
+or session-scoped feature checkpoint authorization. This tool never invokes
+Conductor, chooses tasks, pushes or opens PRs. It checks the actual retained
+request/result, clean-start correction chain, full verified Git tree and Scaffold
+history; an Executor operation list alone does not establish commit scope.
+Old receipts without Git trees and a matching post-test review-boundary snapshot
+cannot authorize checkpoints. Preserve evidence;
+reconcile and obtain fresh verification under an explicitly approved task loop.
+
+The commit trailer binds feature/task/design, receipt, original feature baseline,
+task baseline, tree and branch. A pending ref under `refs/pi-checkpoints/` is
+created atomically with the branch update and removed after index finalization.
+On resume inspect these, actual HEAD/index/worktree, Scaffold state and receipts.
+A matching checkpoint explains a committed source snapshot even though the old
+uncommitted fingerprint differs. Only current-HEAD recovery is automatic. Never
+replay older checkpoints or discard unrelated staged changes. Existing locks need
+explicit resolution after checking process ownership. New sessions require fresh
+checkpoint authorization. See Design for the complete recovery policy.
+
+`.scaffold/` must already be ignored and untracked. The tool never edits ignore
+rules, configuration or local excludes. If needed, establish an explicitly
+approved ignore rule separately before implementation. Local receipts are under
+Git metadata and never enter implementation commits. Snapshots use private indexes;
+submodules, conflicts, sparse/skip-worktree and assume-unchanged entries fail closed.
+The adapter remains backward compatible for non-task callers and retains the
+five-attempt correction ceiling. Conductor itself is unchanged.
+
+Task-bound requests transparently wrap the original approved test command in a
+Pi-local Node runner, forwarding stdout/stderr and exit status. On test success
+it captures a Git tree/fingerprint before independent review. Final fingerprints
+must match or the adapter returns `REVIEW_SNAPSHOT_CHANGED`. Original commands
+remain in the receipt and fixed throughout corrections; non-task callers keep
+the existing protocol. No Conductor, Review or Executor changes are required.
