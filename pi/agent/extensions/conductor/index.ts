@@ -8,6 +8,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { executeAndReview } from "./adapter.mjs";
+import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -18,11 +19,17 @@ export default function (pi: ExtensionAPI) {
       "apply exact executor operations, build, test and independently review. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({
+      task: Type.Optional(Type.Object({
+        featureId: Type.String(), taskId: Type.String(), designRef: Type.String(),
+      }, { description: "Scaffold task identity and approved immutable design reference" })),
+      previousAttempt: Type.Optional(Type.String({
+        description: "Retained receipt for the previous attempt of this same task; required for corrections/recovery",
+      })),
       input: Type.String({
         description: "Exact executor JSON with an operations array; authored by the agent",
       }),
       requirements: Type.String({
-        description: "Full approved design decisions and acceptance criteria",
+        description: "Current task criteria, applicable approved constraints and earlier interfaces to preserve",
       }),
       baseRef: Type.String({
         description: "Original task-start full 40-character Git SHA, unchanged across attempts",
@@ -75,4 +82,16 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
+  pi.registerTool({
+    name: "inspect_conductor_evidence",
+    label: "Inspect retained Conductor evidence",
+    description: "Read a content-addressed task receipt and compare its tree fingerprint. No writes or lifecycle transitions. Inspect check/review output before completing a task.",
+    parameters: Type.Object({ reference: Type.String() }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const result = await inspectEvidence(params.reference, { directory: ctx.cwd });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        isError: !result.ok, details: result };
+    },
+  });
+
 }

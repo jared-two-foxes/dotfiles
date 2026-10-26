@@ -78,26 +78,88 @@ Ask the user to **approve or revise the design before generating implementation 
 
 An approved design is not yet permission to execute. Obtain a separate explicit execution confirmation after preparing the initial operations. Do not invoke an implementation agent to reinterpret the design.
 
-### Persistent feature design and task scope
+### Feature planning and decomposition (before any operations)
 
-Load `/skill:scaffold` when persistent task tracking is requested/agreed. Native
-`scaffold_tasks` can store approved feature design references, task definitions,
-dependencies and lifecycle history in the current repository. Feature-level
-design describes the overall behavior and constraints; task-level implementation
-addresses one independently understandable and verifiable part of that design.
-State tracking is the narrow exception documented in `SYSTEM.md`; it grants no
-application source-edit or verification authority. Preserve separate design and
-execution approvals. Pi decides lifecycle transitions and must inspect actual
-Conductor evidence before recording completion; Scaffold does not authenticate it.
-On resumption inspect the full persisted feature, including interrupted work.
+After explicit feature design approval, assess complexity. Mandatory decomposition
+applies when the change combines independently testable behaviors or interfaces,
+has dependency stages, or cannot be reliably understood, implemented and verified
+in one bounded attempt. Small independently verifiable changes may remain a single
+task; do not manufacture fragments merely to increase task count.
 
-This integration does not automatically decompose approved designs, populate a
-queue, select/execute tasks in sequence, or validate a whole feature. Keep the
-existing single-pass Conductor attempt and correction behavior below unchanged.
+Load `/skill:scaffold`. Pi is the sole reasoning-based orchestrator: propose the
+smallest independently understandable, implementable and verifiable units of
+meaningful functionality. Prefer changes to models, algorithms, interfaces and
+behavior with explicit inputs, outputs and invariants. Never split solely by file,
+line count or function count. Explain boundaries, dependency order and verification.
+Confirm consequential decomposition decisions with the user; routine boundaries
+within the approved design need no repeated architecture approval. Persist only
+the agreed plan. Complex features must be decomposed before generating Executor
+operations; never generate a feature-wide operation set and split it afterwards.
+
+Use native `scaffold_tasks` only, with explicit feature and stable task IDs:
+
+1. `init`: store the exact approved design text in feature `context`, including
+   decisions, invariants and the approval record (what the user approved). Set
+   `design_ref` to `sha256:context`; the adapter replaces this sentinel with a
+   SHA-256 of the exact UTF-8 context before passing it to Scaffold. Retain the
+   returned digest, never the sentinel. Alternatively use an already committed
+   design path plus full commit SHA and content digest, and read that revision.
+   A mutable path or conversation pointer alone is insufficient. Scaffold persists
+   the reference and context across sessions; digest mismatch stops recovery.
+2. `add`: send the approved tasks in one atomic batch so forward dependencies can
+   be resolved. Each definition must include `id`, `title`, a single narrow
+   `objective`, explicit `acceptance_criteria`, nonempty `context`, inherited
+   `constraints` and explicit `dependencies` (use `[]` for none). Scaffold has no
+   verification-strategy field: put `Verification:` with actual checks, expected
+   behavior and edge cases in task `context`. Record source locations, relevant
+   design reference and earlier interfaces here too. Do not invent schema fields.
+3. Inspect the returned full state. Scaffold rejects missing dependencies/cycles;
+   a failed tool call is not persistence. Do not initialise a second feature to
+   bypass a failed or interrupted mutation; `list` and reconcile first.
+
+State tracking grants no application source-edit or verification authority.
+Preserve separate design and execution approvals. Scaffold validates structure
+and association; Scaffold does not authenticate Conductor evidence.
+
+### Select exactly one eligible task
+
+Before authoring operations, use `list` and then `next` with the explicit feature
+ID. Read the selected task's complete context, criteria, constraints, history,
+ancestor dependencies and required children. Confirm all prerequisites completed
+in persisted state. `next` selects only; it never starts work. Do not substitute
+another task silently. If it returns null inspect unfinished work; this never
+proves the feature is finished. Final feature-level validation is a later phase.
+
+Inspect this task's actual source code. Establish fixed task review requirements:
+its acceptance criteria, applicable approved architectural constraints, and
+behavior/interfaces established by earlier tasks that it must preserve. Identify
+future feature criteria as deferred context, explicitly excluded from this task's
+required implementation. Do not demand an entire feature during an early review.
+Generate operations only for the currently selected task using section 4.
+
+### Resume and reconcile before selecting new work
+
+Conversational memory is not authoritative. In a new session query `list` for the
+full persisted feature. Recover and verify the approved design reference; inspect
+completed, pending, in_progress, failed, blocked and decomposed tasks and history.
+Read Git HEAD, status, staged/unstaged diffs and relevant retained receipts. For an
+interrupted task, discover receipts using read-only `git rev-parse --git-path
+pi-conductor-evidence` and directory inspection if its reference was not yet
+recorded in Scaffold. Use `inspect_conductor_evidence` to load the real receipt.
+
+Reconcile partial changes, exact task identity, baseline, requirements, receipt
+chain/attempt count and current tree before any new operation. Do not replay input
+because a session ended. A matching successful receipt may support completion
+without re-execution after inspecting actual checks/review; a mismatch, missing or
+invalid receipt leaves work unfinished. When HEAD advanced through an explicitly
+authorised checkpoint, inspect the commit/diff and prove the verified contents
+were preserved; a matching digest alone is not an authenticity guarantee. If
+uncertain, block with a meaningful reason. Do not automatically retry blocked or
+failed tasks. Use explicit `retry` only after resolution and reconciliation.
 
 ## 4. Prepare executor handoff
 
-After explicit design approval, load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
+After explicit design approval and the planning/selection stage above, load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
 
 Inspect exact source contents before authoring executor operations. Use `edit_file` for in-place text changes as documented in the executor skill; do not generate unified diffs as executor input. If a change cannot be expressed reliably with supported operations in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative operations as executable.
 
@@ -114,27 +176,86 @@ You are the **primary conversational agent and sole generator of executor input*
 ### Before the first attempt
 
 1. Present a short execution confirmation tied to the prepared operations: scope, affected files, any differences from the approved preview, and the build/test commands. Offer the full operations on request instead of displaying them by default. Explicitly ask the user whether to **execute** the prepared changes. Do not infer execution permission from design approval alone. Consequential differences require renewed design approval first.
-2. Using read-only Git commands, capture `BASE_REF = git rev-parse HEAD` as a full SHA **once**. Keep it unchanged across every correction. Inspect `git status --porcelain` and ask the user to isolate unrelated pre-existing edits or explicitly accept that the review diff will include them. Do not clean or reset the worktree.
+2. For a persisted task, check the checkpoint barrier below before proceeding. Using read-only Git commands, capture `BASE_REF = git rev-parse HEAD` as a full SHA **once**. Keep it unchanged across every correction. Inspect `git status --porcelain` and ask the user to isolate unrelated pre-existing edits or explicitly accept that the review diff will include them. Do not clean or reset the worktree.
 3. Load `toolchain-detection` or obtain explicit build and test commands. Provide them to the tool as **executable-and-argument arrays** (for example `["cargo", "build"]` and `["cargo", "test"]`), never shell command strings. If a command relies on shell syntax, request an explicit script/executable rather than interpreting it yourself. Ensure both commands exist before applying anything; do not guess commands. Check `conductor` availability before execution. Conductor currently checks command exit status but does not prove that tests executed; inspect the returned test output and do not claim test coverage that is not evidenced.
-4. Retain the approved design summary, acceptance criteria, and all decisions as the **fixed requirements**. Do not weaken them during repairs.
+4. Retain this task's acceptance criteria, applicable design constraints and
+   established interfaces as the **fixed requirements**. Do not weaken them during
+   repairs or substitute whole-feature completion criteria. After execution
+   approval, `start` the explicit feature/task via `scaffold_tasks`; require a
+   successful response before Conductor. An interrupted in_progress task is
+   reconciled rather than started again.
 
 ### Attempt and feedback
 
-Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `requirements`, `baseRef`, `buildCommand` and `testCommand`. Optionally supply `reviewModel`. The tool performs exactly one attempt and returns a structured result. Track the attempt number in this conversation; the tool does not retry or make design decisions.
+Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `requirements`, `baseRef`, `buildCommand` and `testCommand`. Optionally supply `reviewModel`. The tool performs exactly one attempt and returns a structured result. For persisted tasks supply `task: {featureId, taskId, designRef}` using the
+real approved design reference. Corrections also supply `previousAttempt` with
+the last retained evidence reference. Recover attempt counts from receipts across
+sessions; the tool does not retry or make design decisions. Preserve the request,
+result and provenance through its returned receipt; never fabricate a reference.
 
-- **PASSED:** Stop. Report the actual verification results and any optional suggestions; do not claim changes were committed or that nonzero tests executed unless the output demonstrates it.
+- **PASSED:** Inspect actual successful execution, build and test checks (including
+  meaningful output), and APPROVED independent review. For persisted tasks call
+  `inspect_conductor_evidence` on the returned reference, verify exact feature/task,
+  design reference, fixed requirements and unchanged verified tree. Complete with
+  `scaffold_tasks` only using this authentic retained reference and an accurate
+  summary. Missing/invalid evidence, retention failure, inconsistent checks or
+  uncertain provenance leaves the task incomplete; record a meaningful block.
+  Scaffold's `ok: true` is a state transition, not verification. Report actual
+  results; do not claim commits or nonzero tests without evidence. Stop at the
+  checkpoint barrier before another implementation.
 - **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, executor operation conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
+- **Oversized task:** Stop the current correction loop before another large fix.
+  Inspect partial source changes and verified progress, then reconcile repository
+  and task state. Explain smaller children for only the remaining unverified work;
+  obtain decisions on consequential boundaries. Use Scaffold `decompose`, preserving
+  parent objective, acceptance criteria, history and completed descendants. Never
+  duplicate verified work, weaken parent criteria or silently reset partial work.
+  Children inherit ancestor dependencies. Before executing a child, resolve the
+  Git checkpoint barrier: partial parent changes cannot silently enter its review
+  baseline. If they cannot be safely isolated/checkpointed under explicit user
+  authority, block and report the reconciliation needed. Decomposition is state
+  tracking, not permission to commit or execute. Children need their own execution
+  approvals. A parent remains incomplete after children finish: when eligible,
+  start it and verify its original criteria against the integrated implementation
+  with its own task-bound Conductor result, then explicitly complete it. This is
+  parent verification, not final feature-level validation.
 - **Architectural change needed:** If a fix changes an agreed algorithm, data structure, API contract, persistence strategy or other consequential decision, stop and discuss alternatives with the user. Obtain approval for the changed design before generating a correction; update REQUIREMENTS to include the explicitly revised decisions without removing still-applicable criteria.
-- **BLOCKED:** Stop automatic attempts. Explain missing tools, incomplete verification or uncertain repository state; request user direction. Do not treat an environment/provider failure as a code defect.
+- **BLOCKED:** Stop automatic attempts. Inspect potentially partial source changes,
+  retain any receipt and existing task history, and `block` the explicit task with
+  a meaningful reason and actual evidence reference if available. Never map this
+  to success or automatically retry. Resume only after the blocking condition is
+  resolved, repository/state reconciled and required approval obtained. Do not
+  treat an environment/provider failure as a code defect.
 
 ### Bounded autonomy
 
-- Maximum **five total application attempts**, including the initial attempt. Count every invocation even if executor fails. After the limit, stop and show the remaining findings.
-- If two consecutive attempts return the same substantive failure without progress, stop and ask for user direction rather than generating another equivalent operation set.
+- Maximum **five total application attempts**, including the initial attempt. Count every invocation even if executor fails. After the limit, stop and show the remaining findings; `fail` an in-progress persisted task with the actual reason and last receipt reference.
+- If two consecutive attempts return the same substantive failure without progress, stop and ask for user direction rather than generating another equivalent operation set; record `fail` for the explicit in-progress task with the repeated failure and retained receipt reference.
 - If executor partially applies an operation or an invocation fails, inspect the actual working tree before any further operation. Never blindly replay an earlier input; never reset, revert, or silently clean up.
 - Do not automatically apply additional changes after PASS. A new feature or optional refactor needs a new design decision and execution approval.
 - The original baseline remains fixed throughout the implementation verification/correction loop; do not create intermediate commits or change branches. Stop if HEAD changes unexpectedly. After the loop finishes or is explicitly stopped, a separately requested publishing workflow may create commits; never rebase the old baseline to accommodate them.
-- Keep the same Design conversation across attempts so architectural reasoning and user decisions remain available. The deterministic tool is stateless across invocations.
+- Retain architectural reasoning in the approved Scaffold design and recover attempt receipts across sessions. The deterministic tool never selects or advances tasks.
+
+### Git checkpoint barrier between separately verified tasks
+
+After task completion, another task may become eligible in Scaffold, but eligibility
+is not execution permission. Inspect HEAD, status and the review diff. Do not begin
+another implementation if its fixed HEAD baseline would include previous task or
+unrelated changes. Report **checkpoint required**. Only use the Git publishing/commit
+workflow explicitly authorised by the user, after stopping/finishing the active
+loop. Never commit or change HEAD during a correction loop; never silently rebase
+its baseline. No automatic commits, snapshots or background coordinator.
+
+Task-bound calls require a clean implementation tree for an initial attempt;
+`.scaffold` bookkeeping is excluded. Corrections must match the previous receipt's
+identity, baseline, requirements, commands and tree. Scaffold files must never be
+included in Executor source operations. If initially dirty, reconcile and ask for
+an authorised checkpoint; do not mislabel earlier changes as this task's work.
+After an authorised checkpoint inspect the new tree and capture a new baseline
+for the next task only, with its own execution approval. Changes to a stopped
+loop's requirements/commands require an explicit new approved attempt, not a
+fabricated predecessor receipt; preserve the original evidence and explain why
+reconciliation/new checkpoint is necessary.
 
 ## Hard boundaries
 
@@ -144,3 +265,10 @@ Invoke `execute_and_review` directly with the **exact** executor JSON, fixed `re
 - Do not manufacture requirements, algorithms, file contents, executor operations or successful validation claims.
 - A conversational design session may stop at any point; do not force execution or an executor artifact before the user is ready.
 
+
+Before task execution, `.scaffold/` bookkeeping must be ignored and untracked so
+it cannot enter Conductor's review diff. Inspect existing ignore rules. If state
+is visible to Git, stop and have an authorised ignore rule established; do not
+silently edit `.gitignore`, Git configuration or index. The task-bound preflight
+returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
+if needed, follows its own normal approval and checkpoint workflow.

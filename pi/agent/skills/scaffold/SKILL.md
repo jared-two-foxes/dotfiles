@@ -86,13 +86,21 @@ completed does not itself prove final feature-level validation happened.
 For implementation load `/skill:design`. Retain separate design and execution
 approvals and the existing single-task Conductor correction behavior. Only an
 approved `execute_and_review` call can apply application source changes and run
-implementation verification. This skill does not implement automatic decomposition,
-sequential execution or final feature validation.
+implementation verification. Design owns feature decomposition, task selection and recovery; this tool does
+not orchestrate execution or final feature validation. Complex work must be planned
+and persisted before Executor authoring. See `/skill:design` for the full handoff.
 
 ## Recording trusted verification
 
 After an actual successful Conductor verification covering this task's approved
 criteria, inspect its result and preserve an accessible durable result reference.
+For Pi task execution supply the exact feature/task/design binding to Conductor.
+Its returned `evidence.reference` identifies the retained request, result, Git
+fingerprints and provenance. Read it with `inspect_conductor_evidence`; check exact
+identity, fixed requirements, tree, successful checks and independent APPROVED
+review, and inspect actual test output. Structural validation is necessary but
+cannot prove meaningful tests ran. Missing, invalid, mismatched or uncertain
+receipts leave work unfinished. Never use a transcript pointer as retained proof.
 Record the evidence and complete the explicit task with a single call:
 
 ```json
@@ -161,3 +169,30 @@ separate from feature tasks and not exposed by `scaffold_tasks`. Do not mirror
 feature tasks into the legacy stack, pop frames as proof of verified completion,
 or invoke a retired Scaffold execution pipeline. Source implementation always
 uses Design → approved execute_and_review → Conductor.
+
+## Approved design and complete task definitions
+
+For new Design plans put the exact approved design in feature `context` and use
+`design_ref: "sha256:context"` on `init`. This Pi sentinel is replaced with a real
+SHA-256 before CLI invocation. Returned `design_ref` is the stable reference; the
+adapter checks that digest on feature responses. Existing immutable Git revision
+references remain supported. Never overwrite approved architecture silently.
+
+Every Design task includes objective, acceptance_criteria, relevant context,
+inherited constraints, stable id and explicit dependencies. Put `Verification:`
+strategy in `context`; there is no extra verification field in Scaffold's schema.
+An empty dependency list is explicit. Add dependent definitions as one batch;
+Scaffold owns graph validation. Do not mutate task JSON directly.
+
+The next eligible task may still require a Git checkpoint. State eligibility never
+authorises execution across previous uncommitted task changes. On recovery inspect
+receipts under `git rev-parse --git-path pi-conductor-evidence`, including unfinished
+STARTED intent records, before deciding whether to continue, retry, block or split.
+A STARTED record proves only an attempt began, never that operations finished.
+
+Before task execution, `.scaffold/` bookkeeping must be ignored and untracked so
+it cannot enter Conductor's review diff. Inspect existing ignore rules. If state
+is visible to Git, stop and have an authorised ignore rule established; do not
+silently edit `.gitignore`, Git configuration or index. The task-bound preflight
+returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
+if needed, follows its own normal approval and checkpoint workflow.

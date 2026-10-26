@@ -3,6 +3,7 @@
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // Conductor alone owns apply/check/review.
 import { spawn } from 'node:child_process';
+import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -80,7 +81,7 @@ async function git(repository, args, signal) {
  * One attempt. The only process that may modify files or invoke review is Conductor.
  * The injected invocation seam is for protocol tests; no executor/review adapters.
  */
-export async function executeAndReview(args, context = {}, options = {}) {
+async function executeAttempt(args, context = {}, options = {}) {
   let repository;
   try {
     if (!args || typeof args.requirements !== 'string' || !args.requirements.trim() ||
@@ -198,5 +199,79 @@ export async function executeAndReview(args, context = {}, options = {}) {
       reason: error.code === 'ENOENT' ? 'EXECUTABLE_NOT_FOUND' : 'EXECUTION_ERROR',
       message: error.message + (repository ? '; inspect the working tree before retrying' : ''),
     });
+  }
+}
+
+// Optional task binding leaves legacy single-change callers unchanged. Receipts
+// retain one attempt only; Pi still owns approvals, interpretation and lifecycle.
+export async function executeAndReview(args, context = {}, options = {}) {
+  if (!args?.task) {
+    if (args?.previousAttempt) return outcome('BLOCKED', 'PRECHECK', { reason: 'TASK_REQUIRED' });
+    return executeAttempt(args, context, options);
+  }
+  let repository, before, request, response;
+  let attempt = 1;
+  try {
+    validateBinding(args.task);
+    repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
+      ['rev-parse', '--show-toplevel'], context.abort));
+    before = await snapshot(repository);
+    if (before.bookkeepingVisible) return outcome('BLOCKED', 'PRECHECK', {
+      repository, reason: 'SCAFFOLD_REVIEW_SCOPE',
+      message: 'Scaffold state would enter the review diff; establish an authorised ignore rule before execution',
+    });
+    if (args.previousAttempt) {
+      const previous = await readEvidence(repository, args.previousAttempt);
+      if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
+          previous.args.baseRef !== args.baseRef || previous.args.requirements !== args.requirements ||
+          JSON.stringify(previous.args.buildCommand) !== JSON.stringify(args.buildCommand) ||
+          JSON.stringify(previous.args.testCommand) !== JSON.stringify(args.testCommand) ||
+          previous.result.status === 'PASSED' || before.head !== previous.after.head ||
+          before.digest !== previous.after.digest) {
+        throw new Error('Previous attempt does not match this task, fixed requirements or current tree; reconcile before continuing');
+      }
+      attempt = previous.attempt + 1;
+      if (!Number.isInteger(attempt) || attempt > 5) throw new Error('Five-attempt limit reached; stop this loop');
+    } else if (!before.clean) {
+      return outcome('BLOCKED', 'PRECHECK', { repository, reason: 'CHECKPOINT_REQUIRED',
+        message: 'Implementation changes remain outside this task loop; reconcile and obtain an authorised Git checkpoint first' });
+    }
+    // Write intent before applying anything so a killed Pi session leaves the
+    // original baseline, requirements and attempt count discoverable.
+    const startedReference = await retainEvidence(repository, {
+      repository, task: args.task, attempt, args, before, after: before,
+      result: outcome('BLOCKED', 'STARTED', { reason: 'INTERRUPTED_OR_RUNNING' }),
+    });
+    const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
+    let result = await executeAttempt(args, context, {
+      invokeConductor: async json => {
+        request = JSON.parse(json);
+        response = await (options.invokeConductor ?? (body => invoke(binary, ['run', '--request', '-'], {
+          cwd: repository, signal: context.abort, input: body,
+        })))(json);
+        return response;
+      },
+    });
+    if (result.status === 'PASSED' && !verifiedResult(result)) {
+      result = outcome('BLOCKED', 'EVIDENCE', { repository, reason: 'INCOMPLETE_VERIFICATION',
+        message: 'PASSED lacks successful execution, build/test checks or an APPROVED independent review', conductor: result.conductor });
+    }
+    const after = await snapshot(repository);
+    if (after.head !== before.head) result = outcome('BLOCKED', 'EVIDENCE', {
+      repository, reason: 'HEAD_CHANGED', actualResult: result,
+    });
+    try {
+      const reference = await retainEvidence(repository, {
+        repository, task: args.task, attempt, args, before, after, startedReference,
+        request: request ?? null, response: response ?? null, result,
+      });
+      return { ...result, evidence: { reference, task: args.task, attempt } };
+    } catch (error) {
+      return outcome('BLOCKED', 'EVIDENCE', { repository, reason: 'EVIDENCE_RETENTION_FAILED',
+        message: error.message, actualResult: result });
+    }
+  } catch (error) {
+    return outcome('BLOCKED', 'PRECHECK_OR_EVIDENCE', { ...(repository ? { repository } : {}),
+      reason: 'TASK_CONTEXT_INVALID', message: error.message + '; inspect persisted state and working tree before retrying' });
   }
 }
