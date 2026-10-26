@@ -285,3 +285,86 @@ test('workflow guidance covers handoff, task-scoped review, failure classificati
   }
   assert.ok(design.indexOf('### Feature planning') < design.indexOf('## 4. Prepare executor'));
 });
+
+const approvedTaskDesign = [
+  'Task design: model for F3. Represent values as bounded integers; reject invalid input before construction.',
+  'Usage: constructor validates; consumer reads the validated value. Tests cover bounds and invalid input.',
+  'Task design approval record: user explicitly approved this model preview and its validation contract.',
+  requirements,
+].join('\n');
+
+test('existing attempt evidence retains approved local design independently of immutable architecture and definitions', async t => {
+  const f = await fixture(t);
+  const architecture = JSON.parse(buildCommand({ operation: 'init', feature_id: 'F3', payload: feature }).input);
+  const definitions = JSON.parse(buildCommand({ operation: 'add', feature_id: 'F3', payload: [definition('model')] }).input);
+  assert.ok(!architecture.context.includes('bounded integers'));
+  assert.ok(!definitions[0].context.includes('bounded integers'));
+  let calls = 0;
+  const result = await executeAndReview({ ...f.args, requirements: approvedTaskDesign }, { directory: f.dir }, {
+    invokeConductor: async json => {
+      calls++;
+      assert.equal(JSON.parse(json).review.requirements, approvedTaskDesign);
+      await writeFile(path.join(f.dir, 'value.txt'), 'after');
+      return response();
+    },
+  });
+  assert.equal(result.status, 'PASSED');
+  const fresh = await import('../pi/agent/extensions/conductor/evidence.mjs?local-design-recovery');
+  const recovered = await fresh.inspectEvidence(result.evidence.reference, { directory: f.dir });
+  assert.equal(recovered.record.request.review.requirements, approvedTaskDesign);
+  const intent = await fresh.inspectEvidence(recovered.record.startedReference, { directory: f.dir });
+  assert.equal(intent.record.args.requirements, approvedTaskDesign);
+  assert.equal(intent.structurallyVerified, false); // approval text is not successful execution
+  assert.equal(calls, 1); // recovery never applies operations
+  assert.equal(architecture.design_ref, task.designRef);
+  assert.equal(architecture.context, designText);
+  assert.deepEqual(definitions[0], definition('model'));
+});
+
+test('real Scaffold permits recursive design decomposition before any implementation attempt', {
+  skip: !process.env.SCAFFOLD_SOURCE || process.platform === 'win32' ? 'Set SCAFFOLD_SOURCE (POSIX launcher)' : false,
+}, async t => {
+  const f = await fixture(t);
+  const bin = await mkdtemp(path.join(tmpdir(), 'pi-design-scaffold-bin-'));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  await writeFile(path.join(bin, 'scaffold'), '#!/usr/bin/env python3\nimport sys\nsys.path.insert(0, ' +
+    JSON.stringify(path.resolve(process.env.SCAFFOLD_SOURCE, 'src')) + ')\nfrom scaffold_cli.cli import main\nmain()\n');
+  await chmod(path.join(bin, 'scaffold'), 0o755);
+  // Invoke the actual CLI explicitly through the existing adapter injection, without changing PATH.
+  const { invoke } = await import('../pi/agent/extensions/scaffold/adapter.mjs');
+  const call = args => scaffoldTasks({ feature_id: 'F3', ...args }, { directory: f.dir }, {
+    invokeScaffold: (_program, args, options) => invoke(path.join(bin, 'scaffold'), args, options),
+  });
+  assert.equal((await call({ operation: 'init', payload: feature })).ok, true);
+  assert.equal((await call({ operation: 'add', payload: [definition('model'), definition('consumer', ['model'])] })).ok, true);
+  const before = (await call({ operation: 'list' })).data.feature;
+  assert.equal((await call({ operation: 'next' })).data.task.id, 'model');
+  const children = [definition('contract'), definition('writes', ['contract']), definition('queries', ['writes'])];
+  const split = await call({ operation: 'decompose', task_id: 'model', payload: children });
+  assert.equal(split.ok, true, JSON.stringify(split));
+  const after = (await call({ operation: 'list' })).data.feature;
+  assert.equal(after.design_ref, before.design_ref);
+  assert.equal(after.context, before.context);
+  assert.equal(after.tasks.model.status, 'decomposed');
+  for (const key of ['objective', 'acceptance_criteria', 'context', 'constraints', 'dependencies']) {
+    assert.deepEqual(after.tasks.model[key], before.tasks.model[key]);
+  }
+  assert.deepEqual(after.tasks.model.history.slice(0, before.tasks.model.history.length), before.tasks.model.history);
+  assert.ok(!after.tasks.model.history.some(h => h.event === 'failed' || h.event === 'started'));
+  for (const child of children) {
+    assert.equal(after.tasks[child.id].parent_id, 'model');
+    assert.deepEqual(after.tasks[child.id].constraints, child.constraints);
+    assert.equal(after.tasks[child.id].context, child.context);
+  }
+  assert.deepEqual(after.tasks.consumer.dependencies, ['model']);
+  assert.equal((await call({ operation: 'next' })).data.task.id, 'contract');
+  assert.equal((await call({ operation: 'start', task_id: 'model' })).ok, false);
+  assert.equal(f.git('rev-parse', 'HEAD'), f.args.baseRef);
+  assert.equal(await readFile(path.join(f.dir, 'value.txt'), 'utf8'), 'before');
+  // A fresh session has graph and architecture, but no invented task design approval.
+  const fresh = await import('../pi/agent/extensions/scaffold/adapter.mjs?design-decomposition-recovery');
+  const recovered = await fresh.scaffoldTasks({ operation: 'list', feature_id: 'F3' }, { directory: f.dir }, {
+    invokeScaffold: (_program, args, options) => invoke(path.join(bin, 'scaffold'), args, options),
+  });
+  assert.deepEqual(recovered.data.feature, after);
+});

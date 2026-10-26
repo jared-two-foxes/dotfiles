@@ -1,58 +1,80 @@
-# Current Pi workflow (Phase 3)
+# Current Pi workflow
 
-Pi remains the sole reasoning-based orchestrator. There is no background engine
-or additional orchestration agent. [Design](pi/agent/skills/design/SKILL.md) owns
-the conversation and source inspection; native [Scaffold](pi/agent/skills/scaffold/SKILL.md)
-records state; [Conductor](pi/agent/skills/conductor/SKILL.md) applies and verifies
-one exact Executor input per attempt, with independent Review.
+Pi remains the sole reasoning-based orchestrator. [Design](pi/agent/skills/design/SKILL.md)
+owns discovery and decisions; [Scaffold](pi/agent/skills/scaffold/SKILL.md) persists
+state; [Conductor](pi/agent/skills/conductor/SKILL.md) performs one bounded exact
+Executor attempt and independent Review. No new coordinator or storage schema is
+needed for architectural approval followed by local detailed design.
 
-1. Inspect the repository and collaboratively agree architecture using code-led
-   examples. Obtain explicit feature design approval.
-2. Before operations, decompose complex work into the smallest meaningful units
-   that can be independently understood, implemented and verified. Explain task
-   boundaries/dependencies and confirm consequential decisions. Small changes may
-   remain single tasks. Do not split by file count or prepare all operations first.
-3. Persist the approved design and tasks via `scaffold_tasks`. Feature `context`
-   holds the exact approved design; `design_ref: "sha256:context"` is converted by
-   the Pi adapter to its SHA-256 digest before Scaffold sees it. Tasks include IDs,
-   objectives, criteria, context with `Verification:` strategy, inherited constraints
-   and explicit dependencies. Scaffold owns graph/lifecycle validation.
-4. Inspect full state and `next`, inspect one eligible task's source/prerequisites,
-   and author only its exact operations. Review requirements cover its criteria,
-   applicable architecture and earlier interfaces to preserve. Future feature
-   criteria are deferred. Obtain separate execution approval, then start that
-   explicit task and call `execute_and_review` with its feature/task/design binding.
-5. Inspect actual build/test output and independent review. A successful attempt
-   retains `pi-evidence:sha256:<digest>`; inspect it through
-   `inspect_conductor_evidence` before recording exact task completion in Scaffold.
-   Structural success alone cannot establish meaningful tests or evidence trust.
-6. For defects, correct from the current tree with unchanged requirements/baseline
-   and the previous receipt. Stop after five attempts or two identical failures
-   without progress. Block unresolved environment/state problems without retry.
-   Split oversized remaining work with `decompose` after reconciling partial
-   changes; preserve verified descendants and the parent's original criteria.
-   Parents require their own verification after their children finish.
-7. Stop when another task would review earlier uncommitted changes. Scaffold may
-   report that dependent task as eligible; Conductor's initial bound attempt still
-   refuses a dirty implementation tree with `CHECKPOINT_REQUIRED`. Only explicitly
-   authorised Git publishing can establish a checkpoint outside an active loop.
-   This phase does not manage commits, run unattended task sequences or validate
-   final feature completion.
+1. Discover the repository and collaboratively resolve feature-wide objectives,
+   acceptance criteria, ownership, shared interfaces/semantics, invariants,
+   persistence, security/compatibility constraints and integration risks. Agree
+   feature verification expectations and approve this high-level architecture.
+   Defer task-local algorithms and implementation details.
+2. Decompose the approved architecture into independently understandable,
+   designable, implementable and verifiable behaviors. Confirm consequential
+   boundaries and dependencies; do not split by files or line counts.
+3. Persist the exact architecture, approval record, original feature Git baseline
+   and branch in feature `context` via `scaffold_tasks`. `design_ref: "sha256:context"`
+   becomes the immutable digest. Add tasks with stable IDs, objectives, criteria,
+   relevant context including `Verification:`, inherited constraints and explicit
+   dependencies. A complete internal design is not required to persist a task.
+4. Inspect full state and select one ready task with `next`. Inspect its source,
+   dependencies, completed interfaces and relevant architecture. Discuss detailed
+   structures/usage, algorithms, contracts, errors and tests for this task only.
+   Obtain task design approval on a concise code-led preview. Settled architecture
+   needs no repeat approval; new consequential local decisions do.
+5. Prepare exact operations only for this approved task. Obtain separate execution
+   approval, start the task and invoke `execute_and_review`. Its fixed requirements
+   include task criteria, applicable architecture, approved task decisions and the
+   actual task design approval record. Retained receipts preserve this request.
+6. Inspect meaningful checks, independent APPROVED review and authentic evidence
+   through `inspect_conductor_evidence`, then complete the exact task in Scaffold.
+   Preserve correction limits: five attempts and stop after two repeated failures
+   without progress. Reconcile partial changes; never replay operations blindly.
+7. End the loop and obtain separate `checkpoint_verified_task` authorization.
+   Inspect the exact checkpoint before selecting and designing the next task.
+   Each task reviews from the preceding checkpoint; the original feature baseline
+   remains fixed for cumulative validation.
+8. After every child and recursive parent is verified and checkpointed, obtain
+   `validate_feature` authorization. Validate cumulative changes against the original
+   approved architecture and feature criteria. Task design evidence supplements
+   that specification; no enormous feature-wide detailed design is required.
 
-On resume, read the full Scaffold feature, verify its design reference, inspect
-all statuses/history and reconcile Git state/receipts before selecting new work.
-Receipts live under `git rev-parse --git-path pi-conductor-evidence`, including
-STARTED intent records written before execution. They survive session restarts in
-this checkout but are not transferred by Git push/clone. A STARTED receipt proves
-neither completion nor failure; never blindly replay interrupted operations.
-`next` returning null never proves completion.
+A small change that fits one bounded reasoning and verification scope keeps the
+streamlined detailed design approval → operations → execution approval flow. It
+needs no artificial decomposition or extra architecture approval round.
 
-Tests: `node --test tests/pi-*.test.mjs`. For real Scaffold integration set
-`SCAFFOLD_SOURCE` to an unmodified Phase 1+ checkout. The scripted scenario uses
-real Scaffold and mocked Conductor responses; it is not a model compliance test.
-The fixture demonstrates dependency eligibility, the Git barrier, recursive
-splitting and recovery. CI runs protocol and policy regression fixtures on Linux
-and Windows; real CLI integration is opt-in and was run during Phase 3 validation.
+If task design is too complex, use `decompose` before implementation; no failed
+attempt is needed. Children inherit relevant constraints/context and dependency
+ordering. Preserve parent criteria/history and completed work. Children finishing
+never completes the parent: it still needs its own integrated verification.
+
+If task design conflicts with shared architecture, stop for feature-level design
+and explicit approval. Never silently change immutable references, original criteria
+or peer tasks. Additive tasks may satisfy the unchanged original specification.
+A contradictory architecture revision cannot be rebound to existing receipts and
+checkpoints through current interfaces; block affected work and propose a separately
+reviewable reconciliation mechanism. This PR does not introduce design versioning.
+
+On resume recover architecture, decomposition and task history from Scaffold,
+then inspect actual Git state, checkpoints and content-addressed receipts under
+`git rev-parse --git-path pi-conductor-evidence`. Recover selected/interrupted task
+identity from state and receipts, not conversation history or `next` alone.
+Task definitions stay immutable: later detailed designs live in the first attempt's
+fixed requirements, including its STARTED intent. A STARTED intent proves no
+execution success. Receipts retain recorded approval text but do not authenticate
+user consent. Missing task design approval requires reinspection and reapproval;
+first reconcile successful implementation without replaying it. There is no
+standalone design-note write before the first attempt, so an interruption in that
+window may require repeating the task design approval. Receipts stay local to the
+checkout; Git push/clone does not transfer them. Checkpoint grants expire across
+sessions; execution, checkpoint and feature-validation authorizations stay separate.
+
+Tests: `node --test tests/pi-*.test.mjs`. Set `SCAFFOLD_SOURCE` to a current Scaffold
+checkout to run real lifecycle integration. Deterministic policy tests check the
+design sequence; scripted adapter/CLI fixtures check persistence, evidence and
+recovery. They do not prove live-model compliance and require no model calls.
 
 ---
 
