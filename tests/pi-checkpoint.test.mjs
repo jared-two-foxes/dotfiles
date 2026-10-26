@@ -89,7 +89,7 @@ test('two dependent tasks have separate verification baselines, commits, content
 
 test('missing, tampered, unsuccessful, mismatched and legacy receipts never commit', async t => {
   const f = await fixture(t); const args = await f.verify();
-  const original = await readEvidence(f.dir, args.evidenceRef);
+  const original = await readEvidence(f.dir + path.sep + '.', args.evidenceRef);
   for (const patch of [{ result: { status: 'BLOCKED' } }, { after: { ...original.after, tree: undefined } },
     { before: { ...original.before, clean: false } }, { request: { review: { base_ref: f.base, requirements: 'weakened' } } }]) {
     const evidenceRef = await retainEvidence(f.dir, { ...original, ...patch });

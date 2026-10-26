@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
@@ -24,7 +24,7 @@ function response(operation) {
   return success({ feature: { ...feature, tasks: { T1: task() } }, ...(operation === 'next' ? { task: task() } : {}) });
 }
 async function fixture(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'pi-scaffold-'));
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'pi-scaffold-')));
   t.after(() => rm(dir, { recursive: true, force: true }));
   execFileSync('git', ['init', '-q', dir]);
   await writeFile(path.join(dir, 'application.txt'), 'unchanged');

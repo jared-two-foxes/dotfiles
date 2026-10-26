@@ -1,7 +1,7 @@
 // Local, content-addressed receipts. No task selection, lifecycle writes or retries.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { lstat, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { implementationTree } from './git-tree.mjs';
 
@@ -67,7 +67,8 @@ export async function readEvidence(repository, reference) {
   const bytes = await readFile(file, 'utf8');
   if (digest(bytes) !== match[1]) throw new Error('Evidence digest mismatch');
   const record = JSON.parse(bytes);
-  if (record.schema !== 'pi.task-attempt/v1' || record.repository !== repository) {
+  if (record.schema !== 'pi.task-attempt/v1' ||
+      await realpath(record.repository) !== await realpath(repository)) {
     throw new Error('Evidence schema or repository mismatch');
   }
   validateBinding(record.task);
