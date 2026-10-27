@@ -2,6 +2,7 @@
 // Pi extensions are deployed independently of ~/.config/opencode, so this must
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // Conductor alone owns apply/check/review.
+import { verificationChecks, sameVerification } from './verification.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
 import { randomUUID } from 'node:crypto';
@@ -28,14 +29,6 @@ const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
   return { schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields };
-}
-
-function command(value, label) {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 64 ||
-      value.some(part => typeof part !== 'string' || !part || part.includes('\0') || part.length > 8192)) {
-    throw new Error(label + ' must be a nonempty executable-and-arguments array');
-  }
-  return value;
 }
 
 async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -93,8 +86,7 @@ async function executeAttempt(args, context = {}, options = {}) {
     if (typeof args.baseRef !== 'string' || !SHA.test(args.baseRef)) {
       throw new Error('baseRef must be the original full 40-character commit SHA');
     }
-    const build = command(args.buildCommand, 'buildCommand');
-    const test = command(args.testCommand, 'testCommand');
+    const checks = verificationChecks(args);
     if (args.workflowTimeoutMs != null &&
         (!Number.isSafeInteger(args.workflowTimeoutMs) || args.workflowTimeoutMs <= 0 ||
          args.workflowTimeoutMs > MAX_WORKFLOW_TIMEOUT_MS)) {
@@ -146,10 +138,11 @@ async function executeAttempt(args, context = {}, options = {}) {
       schema: 'conductor.request/v1',
       repository_path: repository,
       execution,
-      checks: [
-        { name: 'build', program: build[0], args: build.slice(1) },
-        { name: 'test', program: (options.testBoundary ?? test)[0], args: (options.testBoundary ?? test).slice(1) },
-      ],
+      checks: checks.map((check, index) => {
+        const command = index === checks.length - 1 && options.verificationBoundary
+          ? options.verificationBoundary : check.command;
+        return { name: check.name, program: command[0], args: command.slice(1) };
+      }),
       // Pi-local addition: budget and limit passthrough fields forwarded to the
       // review engine via conductor.request/v1. Diverges from the upstream
       // OpenCode adapter, which does not expose these. All fields optional;
@@ -223,6 +216,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
   let attempt = 1;
   try {
     validateBinding(args.task);
+    const checks = verificationChecks(args);
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));
     before = await snapshot(repository);
@@ -234,8 +228,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       const previous = await readEvidence(repository, args.previousAttempt);
       if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
           previous.args.baseRef !== args.baseRef || previous.args.requirements !== args.requirements ||
-          JSON.stringify(previous.args.buildCommand) !== JSON.stringify(args.buildCommand) ||
-          JSON.stringify(previous.args.testCommand) !== JSON.stringify(args.testCommand) ||
+          !sameVerification(previous.args, args) ||
           previous.result.status === 'PASSED' || before.head !== previous.after.head ||
           before.digest !== previous.after.digest) {
         throw new Error('Previous attempt does not match this task, fixed requirements or current tree; reconcile before continuing');
@@ -254,11 +247,11 @@ export async function executeAndReview(args, context = {}, options = {}) {
     });
     boundaryPath = path.resolve(repository, await git(repository,
       ['rev-parse', '--git-path', 'pi-conductor-evidence'], context.abort), randomUUID() + '.boundary');
-    const testBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
-      JSON.stringify({ command: args.testCommand, repository, output: boundaryPath })];
+    const verificationBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
+      JSON.stringify({ command: checks.at(-1).command, repository, output: boundaryPath })];
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     let result = await executeAttempt(args, context, {
-      testBoundary,
+      verificationBoundary,
       invokeConductor: async json => {
         request = JSON.parse(json);
         response = await (options.invokeConductor ?? ((body, timeoutMs) => invoke(binary, ['run', '--request', '-'], {
@@ -267,9 +260,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
         return response;
       },
     });
-    if (result.status === 'PASSED' && !verifiedResult(result)) {
+    if (result.status === 'PASSED' && !verifiedResult(result, args)) {
       result = outcome('BLOCKED', 'EVIDENCE', { repository, reason: 'INCOMPLETE_VERIFICATION',
-        message: 'PASSED lacks successful execution, build/test checks or an APPROVED independent review', conductor: result.conductor });
+        message: 'PASSED lacks successful execution, requested verification checks or an APPROVED independent review', conductor: result.conductor });
     }
     const after = await snapshot(repository);
     let reviewSnapshot = null;
@@ -277,7 +270,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (result.status === 'PASSED' && (!reviewSnapshot || reviewSnapshot.head !== before.head ||
         reviewSnapshot.tree !== after.tree || reviewSnapshot.digest !== after.digest || reviewSnapshot.bookkeepingVisible)) {
       result = outcome('BLOCKED', 'EVIDENCE', { repository, reason: 'REVIEW_SNAPSHOT_CHANGED',
-        message: 'Missing post-test review boundary or source/index changed during independent review', actualResult: result });
+        message: 'Missing post-verification review boundary or source/index changed during independent review', actualResult: result });
     }
     if (after.head !== before.head) result = outcome('BLOCKED', 'EVIDENCE', {
       repository, reason: 'HEAD_CHANGED', actualResult: result,

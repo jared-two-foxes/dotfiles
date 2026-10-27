@@ -84,7 +84,7 @@ export default function (pi: ExtensionAPI) {
     label: "Execute and Review (Conductor)",
     description:
       "After explicit user approval, run ONE deterministic Conductor attempt: " +
-      "apply exact executor operations, build, test and independently review. " +
+      "apply exact executor operations, run caller-selected verification and independently review. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({
       task: Type.Optional(Type.Object({
@@ -102,8 +102,15 @@ export default function (pi: ExtensionAPI) {
       baseRef: Type.String({
         description: "Original task-start full 40-character Git SHA, unchanged across attempts",
       }),
-      buildCommand: Type.Array(Type.String(), { minItems: 1, description: "Build executable and arguments, not a shell command" }),
-      testCommand: Type.Array(Type.String(), { minItems: 1, description: "Test executable and arguments, not a shell command" }),
+      checks: Type.Optional(Type.Array(Type.Object({
+        name: Type.String({ minLength: 1, maxLength: 256 }),
+        command: Type.Array(Type.String(), { minItems: 1, maxItems: 64 }),
+      }, { additionalProperties: false }), {
+        minItems: 1, maxItems: 64,
+        description: "Ordered named verification commands for this task, using executable/argv arrays. Select meaningful targeted tests and other checks; inspect output for actual coverage. Supply checks OR both legacy buildCommand/testCommand fields. The plan stays fixed across corrections.",
+      })),
+      buildCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy build executable and arguments; use with testCommand and omit checks" })),
+      testCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy test executable and arguments; targeted test filters are supported; omit when supplying checks" })),
       reviewModel: Type.Optional(Type.String({
         description: "Independent review model; default opencode/gpt-6.1-sol",
       })),

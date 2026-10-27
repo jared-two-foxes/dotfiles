@@ -39,6 +39,53 @@ implementation strategy within Design.
 Pi skills do not pin a model or establish a separate OpenCode-style agent.
 The active Pi model executes the Design persona in the current conversation.
 
+## Caller-selected task verification
+
+`execute_and_review` accepts an ordered `checks` list instead of requiring a
+single build and a single test command. For example (Cargo filters are illustrative;
+choose actual crate and test names for the project):
+
+```json
+{
+  "checks": [
+    { "name": "compile", "command": ["cargo", "check", "--all-targets"] },
+    { "name": "invoice unit tests", "command": ["cargo", "test", "--lib", "invoices::"] },
+    { "name": "client unit tests", "command": ["cargo", "test", "--lib", "clients::"] }
+  ]
+}
+```
+
+Supply this alongside the existing `input`, `requirements`, `baseRef` and optional
+task/review settings. Supply **either** `checks` **or** both legacy
+`buildCommand`/`testCommand` arrays; mixing them is rejected before invocation.
+Legacy calls still become checks named `build` and `test`. No default build or
+full test suite is added when `checks` is supplied. The list requires 1–64 checks
+with unique nonblank names (no surrounding whitespace, at most 256 characters).
+Each command is an executable/argv array, never shell text, and runs sequentially
+from the repository root through Conductor. Check objects accept only `name` and
+`command`; per-check timeout options are not supported by the Conductor protocol.
+
+Choose verification during task design and include the commands and their scope
+in execution approval. Use focused tests for task changes and broader regression
+checks for the final `validate_feature` gate. Inspect output to confirm relevant
+tests actually ran; an exit code of zero can also mean the filter selected no tests.
+The existing overall workflow deadline and independent review budgets still apply.
+This interface is a Pi-local addition; the OpenCode adapter retains its legacy inputs.
+
+Task receipts retain the exact caller inputs and translated request. Corrections
+must preserve the normalized ordered names and commands, including test filters;
+changing verification scope requires reconciliation and fresh approval rather than
+weakening the existing attempt. The pre-review source/index snapshot is captured
+after the **last** requested command succeeds, even if that check is not a test.
+All requested check results must appear in order, exactly once, with zero exits
+and an APPROVED independent review before task evidence can justify a checkpoint.
+`validate_feature` keeps its existing full-project verification interface.
+
+After updating, copy the entire extension directory (including `verification.mjs`)
+and restart Pi. No Conductor binary change is required for named checks.
+
+Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs`.
+
 ## Current limits
 
 - Pi's Docker launcher currently mounts only selected extensions and the
