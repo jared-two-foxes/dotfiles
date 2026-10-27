@@ -10,8 +10,8 @@ import { scaffoldTasks, buildCommand, designReference } from '../pi/agent/extens
 
 
 async function executeAndReview(args, context, options) {
-  return executeTaskAttempt(args, context, { ...options, invokeConductor: async json => {
-    const result = await options.invokeConductor(json);
+  return executeTaskAttempt(args, context, { ...options, invokeConductor: async (json, timeoutMs) => {
+    const result = await options.invokeConductor(json, timeoutMs);
     const request = JSON.parse(json);
     const check = request.checks.find(c => c.name === 'test');
     const boundary = JSON.parse(check.args[1]);
@@ -90,6 +90,31 @@ test('one task retains real request/raw response and exposes read-only recovery 
   await writeFile(path.join(f.dir, 'value.txt'), 'unexpected later changes');
   assert.equal((await inspectEvidence(result.evidence.reference, { directory: f.dir })).matchesWorkingTree, false);
   assert.equal(f.git('rev-parse', 'HEAD'), f.args.baseRef);
+});
+
+test('task receipts retain workflow timeout and corrections may increase it without changing fixed inputs', async t => {
+  const f = await fixture(t);
+  const originalTimeout = 300000;
+  const increasedTimeout = 5400000;
+  const first = await executeAndReview({ ...f.args, workflowTimeoutMs: originalTimeout }, { directory: f.dir }, {
+    invokeConductor: async (_json, timeoutMs) => { assert.equal(timeoutMs, originalTimeout); return response('NEEDS_DESIGN'); },
+  });
+  assert.equal(first.status, 'NEEDS_DESIGN');
+  assert.equal(first.evidence.attempt, 1);
+  const firstRecord = await inspectEvidence(first.evidence.reference, { directory: f.dir });
+  assert.equal(firstRecord.record.args.workflowTimeoutMs, originalTimeout);
+  const corrected = await executeAndReview({ ...f.args, workflowTimeoutMs: increasedTimeout, previousAttempt: first.evidence.reference }, { directory: f.dir }, {
+    invokeConductor: async (_json, timeoutMs) => { assert.equal(timeoutMs, increasedTimeout); return response('NEEDS_DESIGN'); },
+  });
+  assert.equal(corrected.status, 'NEEDS_DESIGN');
+  assert.equal(corrected.evidence.attempt, 2);
+  const correctedRecord = await inspectEvidence(corrected.evidence.reference, { directory: f.dir });
+  assert.equal(correctedRecord.record.args.workflowTimeoutMs, increasedTimeout);
+  assert.equal(correctedRecord.record.args.baseRef, f.args.baseRef);
+  assert.equal(correctedRecord.record.args.requirements, f.args.requirements);
+  assert.deepEqual(correctedRecord.record.args.buildCommand, f.args.buildCommand);
+  assert.deepEqual(correctedRecord.record.args.testCommand, f.args.testCommand);
+  assert.equal(correctedRecord.record.attempt, 2);
 });
 
 test('corrections preserve baseline/requirements and count attempts without automatic retry', async t => {

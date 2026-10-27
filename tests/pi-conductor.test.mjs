@@ -41,12 +41,14 @@ function fake(status, phase = 'review') {
 test('translates exact executor operations and fixed baseline to one Conductor request', async t => {
   const f = await fixture(t);
   const calls = [];
+  const timeouts = [];
   const outcome = await executeAndReview(f.args, { worktree: f.dir }, {
-    invokeConductor: async json => { calls.push(JSON.parse(json)); return fake('PASSED'); },
+    invokeConductor: async (json, timeoutMs) => { calls.push(JSON.parse(json)); timeouts.push(timeoutMs); return fake('PASSED'); },
   });
   assert.equal(outcome.status, 'PASSED');
   assert.equal(outcome.stage, 'REVIEW');
   assert.equal(calls.length, 1);
+  assert.deepEqual(timeouts, [30 * 60 * 1000]);
   assert.deepEqual(calls[0].execution, JSON.parse(f.input));
   assert.equal(calls[0].repository_path, f.dir);
   assert.equal(calls[0].review.base_ref, f.baseRef);
@@ -56,6 +58,46 @@ test('translates exact executor operations and fixed baseline to one Conductor r
     { name: 'build', program: 'cargo', args: ['build'] },
     { name: 'test', program: 'cargo', args: ['test'] },
   ]);
+});
+
+test('forwards per-call workflow timeout without changing review budgets', async t => {
+  const f = await fixture(t);
+  f.args.workflowTimeoutMs = 5400000;
+  let timeoutMs;
+  let request;
+  const result = await executeAndReview(f.args, { worktree: f.dir }, {
+    invokeConductor: async (json, timeout) => { request = JSON.parse(json); timeoutMs = timeout; return fake('PASSED'); },
+  });
+  assert.equal(result.status, 'PASSED');
+  assert.equal(timeoutMs, 5400000);
+  assert.deepEqual(request.review, { requirements: f.args.requirements, base_ref: f.baseRef, model: 'opencode/gpt-6.1-sol' });
+});
+
+test('invalid workflow deadlines are rejected before Conductor invocation', async t => {
+  const f = await fixture(t);
+  for (const workflowTimeoutMs of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, 2147483648]) {
+    const result = await executeAndReview({ ...f.args, workflowTimeoutMs }, { worktree: f.dir }, {
+      invokeConductor: () => assert.fail('invalid timeout must not invoke Conductor'),
+    });
+    assert.equal(result.status, 'BLOCKED');
+    assert.match(result.message, /workflowTimeoutMs/);
+  }
+});
+
+test('workflow timeout failures remain blocked without approval or retry', async t => {
+  const f = await fixture(t);
+  let calls = 0;
+  const result = await executeAndReview({ ...f.args, workflowTimeoutMs: 5 }, { worktree: f.dir }, {
+    invokeConductor: async (_json, timeoutMs) => {
+      calls++;
+      assert.equal(timeoutMs, 5);
+      throw new Error('Conductor exceeded the workflow deadline; the working tree may be partially modified');
+    },
+  });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.reason, 'EXECUTION_ERROR');
+  assert.match(result.message, /workflow deadline/);
+  assert.equal(calls, 1);
 });
 
 test('propagates Conductor NEEDS_DESIGN and BLOCKED without retries', async t => {
