@@ -107,6 +107,13 @@ export default function (pi: ExtensionAPI) {
       reviewModel: Type.Optional(Type.String({
         description: "Independent review model; default opencode/gpt-6.1-sol",
       })),
+      workflowTimeoutMs: Type.Optional(Type.Integer({
+        minimum: 1,
+        maximum: 2147483647,
+        description:
+          "Optional overall Conductor workflow deadline in milliseconds, covering execution, formatting, checks and review. " +
+          "Defaults to 30 minutes. Maximum 2147483647 ms (~24.8 days). Independent of all review budgets.",
+      })),
       reviewWallClockBudgetSecs: Type.Optional(Type.Integer({
         description:
           "Optional review wall-clock budget in seconds " +

@@ -23,7 +23,8 @@ try {
 
 const SHA = /^[0-9a-f]{40}$/i;
 const MAX_LOG_BYTES = 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
   return { schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields };
@@ -94,6 +95,11 @@ async function executeAttempt(args, context = {}, options = {}) {
     }
     const build = command(args.buildCommand, 'buildCommand');
     const test = command(args.testCommand, 'testCommand');
+    if (args.workflowTimeoutMs != null &&
+        (!Number.isSafeInteger(args.workflowTimeoutMs) || args.workflowTimeoutMs <= 0 ||
+         args.workflowTimeoutMs > MAX_WORKFLOW_TIMEOUT_MS)) {
+      throw new Error('workflowTimeoutMs must be a positive safe integer no greater than 2147483647');
+    }
     if (typeof args.input !== 'string') throw new Error('input must be executor JSON');
     const execution = JSON.parse(args.input);
     if (!execution || !Array.isArray(execution.operations)) {
@@ -176,10 +182,11 @@ async function executeAttempt(args, context = {}, options = {}) {
     };
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     const invokeConductor = options.invokeConductor ??
-      ((requestJson) => invoke(binary, ['run', '--request', '-'], {
-        cwd: repository, signal: context.abort, input: requestJson,
+      ((requestJson, timeoutMs) => invoke(binary, ['run', '--request', '-'], {
+        cwd: repository, signal: context.abort, input: requestJson, timeoutMs,
       }));
-    const response = await invokeConductor(JSON.stringify(request));
+    const response = await invokeConductor(
+      JSON.stringify(request), args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     let conductor;
     try {
       conductor = JSON.parse(response.stdout);
@@ -254,9 +261,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
       testBoundary,
       invokeConductor: async json => {
         request = JSON.parse(json);
-        response = await (options.invokeConductor ?? (body => invoke(binary, ['run', '--request', '-'], {
-          cwd: repository, signal: context.abort, input: body,
-        })))(json);
+        response = await (options.invokeConductor ?? ((body, timeoutMs) => invoke(binary, ['run', '--request', '-'], {
+          cwd: repository, signal: context.abort, input: body, timeoutMs,
+        })))(json, args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);
         return response;
       },
     });

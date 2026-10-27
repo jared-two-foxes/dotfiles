@@ -48,8 +48,15 @@ The active Pi model executes the Design persona in the current conversation.
   because the two agent homes can be installed independently. Keep their
   protocol behavior aligned.
 - Conductor does not yet prove tests executed or detect unexpected source
-  modifications during verification. The adapter imposes a 15-minute
-  overall subprocess timeout, not per-check deadlines.
+  modifications during verification. The adapter imposes a 30-minute overall
+  workflow deadline by default, covering execution, formatting, checks and
+  independent review; it is not a per-check deadline. Callers may override it
+  per invocation with `workflowTimeoutMs` (positive safe integer, maximum
+  2147483647 ms, about 24.8 days). This overall deadline is independent of
+  `reviewWallClockBudgetSecs` and the other review-specific budgets. Expiration
+  blocks the attempt and does not authenticate tests or review. The adapter
+  kills the direct Conductor child but does not explicitly terminate or await
+  descendant processes.
 
 ## Task receipts and checkpoint preflight
 

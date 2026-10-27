@@ -98,8 +98,14 @@ Conductor currently does not prove that any tests executed. For Pi task-bound
 calls the adapter captures source/index after the test command and blocks PASSED
 if that review-boundary fingerprint differs afterwards. Non-task callers retain
 the original contract; concurrent external writers remain unsupported. Inspect test output and
-report these limitations honestly. The Pi adapter has an overall 15-minute
-subprocess deadline but Conductor does not yet enforce per-check timeouts.
+report these limitations honestly. The Pi adapter has a 30-minute overall workflow deadline by default, covering
+execution, formatting, checks and independent review. `workflowTimeoutMs` can
+override that deadline per invocation (positive safe integer, maximum
+2147483647 ms, about 24.8 days); it is separate from `reviewWallClockBudgetSecs`
+and all other AI review budgets. Conductor does not yet enforce per-check
+timeouts. Expiration blocks the attempt and cannot establish successful tests
+or review. The adapter kills its direct Conductor child but does not explicitly
+terminate or await descendant processes.
 
 ## Persisted task attempts
 
