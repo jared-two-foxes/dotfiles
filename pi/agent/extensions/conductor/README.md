@@ -167,3 +167,65 @@ SCAFFOLD_SOURCE=/path/to/scaffold node --test tests/pi-feature-validation.test.m
 No live AI calls are needed; temporary Git repositories, real Scaffold processes
 and deterministic Review CLI fixtures exercise failures, corrective checkpoints,
 full cumulative reviews and idempotent interruption recovery.
+
+## Continue development after rebasing
+
+A completed rebase changes checkpoint parents and usually trees. Historical task
+receipts remain valid for the old history; they cannot verify conflict resolutions
+or rewritten trees. Do not edit their SHAs, checkpoint trailers, approved design,
+Scaffold completion records or original `featureBaseRef` to force a match.
+
+Use `reconcile_feature_rebase` **between tasks**, after all started tasks have
+finished and been checkpointed. The user performs the separately authorized Git
+rebase; this tool never rebases or edits source. Capture the old feature HEAD
+before rebasing (or recover and inspect it from the reflog), and preserve empty
+checkpoints/task ordering, for example with Git's `--empty=keep` option. Squashed,
+dropped, reordered, extra or merged commits are rejected; a task already present
+upstream still needs its checkpoint preserved, using `--reapply-cherry-picks`
+when appropriate. Finish conflict resolution before requesting reconciliation.
+
+Inputs extend `validate_feature`'s explicit full-project build/test commands,
+literal success markers, integration checks and bounded Review settings with:
+
+- `featureBaseRef`: the immutable **original** feature-start full SHA.
+- `oldHeadRef`: the last checkpointed HEAD before this rebase.
+- `upstreamBaseRef`: the new upstream full SHA onto which the feature was rebased.
+- `headRef`, `branch`, `featureId`, `designRef`: the actual rebased feature identity.
+- `defaultBranch`, `protectedBranches`: known branch protection scope, as for checkpoints.
+- `previousReconciliationRef`: the preceding successful receipt for a second or later rebase.
+
+The tool requires clean HEAD/index/worktree, ignored/untracked Scaffold, no active
+Git operation, and no in-progress, failed or blocked task loop. It authenticates
+all completed old checkpoints and receipt chains, matches their task identities
+and ordering to the rebased commits, and requires the new upstream to descend
+from the preceding baseline. Fresh meaningful checks and independent Review of
+the completed prefix against `upstreamBaseRef` must pass before it returns PASSED.
+Pending feature criteria remain deferred, while original design/constraints and
+completed tasks' retained requirements are supplied to Review.
+
+Retain the returned `evidenceRef` and pass it as `reconciliationRef` to **every
+subsequent** `checkpoint_verified_task` and `validate_feature` call. Capture the
+rebased HEAD as the next task's new `baseRef`; its correction-loop baseline still
+cannot change. The checkpoint authorization scope includes this reconciliation,
+so earlier session grants cannot silently authorize the new scope. Final feature
+validation still reviews from the immutable original feature baseline, satisfying
+Scaffold's existing lifecycle contract, and additionally authenticates the rebase
+receipt and all subsequent checkpoints. No Scaffold or Rust Conductor update is
+required. No task is automatically selected, retried or marked complete.
+
+`inspect_rebase_reconciliation` discovers receipts with `featureId` or reads a
+specific `reference`, reporting applicability against actual Git and Scaffold.
+Evidence uses the existing content-addressed `pi-feature-evidence:sha256:...`
+namespace with `kind: reconciliation` and a `pi.feature-reconciliation/v1` outcome;
+feature-validation inspection excludes it. Intents and failures never authorize
+continuation. If success was retained before interruption, call reconciliation
+with the exact original inputs/plan plus `resumeEvidenceRef`; this authenticates
+and returns the success without rerunning checks or requesting execution authority.
+Changed plans/revisions require fresh verification.
+
+Evidence and both sides of Git history are retained locally, using audit refs
+under `refs/pi-reconciliations/<receipt-hash>/{before,after}` to survive Git garbage
+collection. Ordinary pushes/clones do not transfer this local evidence. Preserve
+it with the checkout. Hashes detect corruption, not hostile local rewriting.
+Rebases during an active task remain blocked: explicitly stop/recover that loop
+first, without resetting work or treating unverified edits as a fresh baseline.

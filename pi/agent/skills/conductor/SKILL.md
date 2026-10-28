@@ -189,3 +189,15 @@ complete a feature through the native interface. `next: null` and all tasks comp
 are insufficient. Preserve failed/blocked history and add approved corrective tasks
 through the existing per-task workflow. See Design’s “Final feature verification”
 for authorization, output markers, bounds, stale evidence and interruption recovery.
+
+### Rebase recovery
+
+Use native `reconcile_feature_rebase` only between completed/checkpointed tasks,
+with clean Git state and fresh narrow UI authorization. It verifies the rebased
+completed prefix, preserving original feature/design/baseline and receipts. Pass
+its successful `evidenceRef` as `reconciliationRef` on subsequent checkpoints and
+final validation. Repeated rebases supply `previousReconciliationRef`; read-only
+`inspect_rebase_reconciliation` authenticates retained recovery state. It never
+rebases, edits source or changes task lifecycle. Active task loops still require
+explicit recovery. See `extensions/conductor/README.md` and Design's rebase
+recovery section for full input, evidence and interruption semantics.

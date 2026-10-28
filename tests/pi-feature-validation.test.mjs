@@ -10,6 +10,7 @@ import { executeAndReview } from '../pi/agent/extensions/conductor/adapter.mjs';
 import { checkpointVerifiedTask } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { validateFeature, inspectFeatureValidation } from '../pi/agent/extensions/conductor/feature.mjs';
+import { reconcileFeature, inspectReconciliation, readReconciliation } from '../pi/agent/extensions/conductor/reconciliation.mjs';
 import { runCheck } from '../pi/agent/extensions/conductor/feature-process.mjs';
 
 const integration = { skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE to Phase 5 Scaffold checkout' : false };
@@ -46,7 +47,7 @@ async function fixture(t, legacy = false) {
   const add = (id, dependencies = [], parent) => call(parent ? 'decompose' : 'add', {
     ...(parent ? { task_id: parent } : {}), payload: [{ id, title: id, objective: id,
       acceptance_criteria: ['Verified ' + id], dependencies }] });
-  async function finish(id, empty = false) {
+  async function finish(id, empty = false, reconciliationRef) {
     await call('start', { task_id: id });
     const args = { task: { featureId: 'F5', taskId: id, designRef }, baseRef: g('rev-parse', 'HEAD'),
       input: '{"operations":[]}', requirements: 'Only task ' + id, buildCommand: ['build'], testCommand: ['test'] };
@@ -61,7 +62,7 @@ async function fixture(t, legacy = false) {
     await call('complete', { task_id: id, payload: { feature_id: 'F5', task_id: id, result: 'PASSED',
       source: 'conductor', reference: attempt.evidence.reference, summary: 'Verified task' } });
     const checkpoint = await checkpointVerifiedTask({ task: args.task, evidenceRef: attempt.evidence.reference,
-      featureBaseRef: base, branch: 'feature/test', defaultBranch: 'main', protectedBranches: [], authorizationMode: 'manual' },
+      reconciliationRef, featureBaseRef: base, branch: 'feature/test', defaultBranch: 'main', protectedBranches: [], authorizationMode: 'manual' },
     { directory: dir }, { scaffoldOptions, authorize: async () => true });
     assert.equal(checkpoint.ok, true, JSON.stringify(checkpoint));
     return checkpoint;
@@ -250,4 +251,187 @@ test('legacy immutable Git design references review original text', integration,
   const r = await f.validate(); assert.equal(r.status, 'PASSED', JSON.stringify(r));
   const capture = JSON.parse(await readFile(f.capture, 'utf8'));
   assert.match(capture.requirements, /Original Git-approved feature design/);
+});
+
+// Real Git rebases + real Scaffold, with deterministic external verification fixtures.
+async function rebaseFixture(t, task = true) {
+  const f = await fixture(t);
+  if (task) { await f.add('one'); await f.finish('one'); }
+  const rebase = async (previousReconciliationRef) => {
+    const oldHeadRef = f.g('rev-parse', 'HEAD');
+    f.g('switch', 'main');
+    await writeFile(path.join(f.dir, 'upstream-' + f.g('rev-list', '--count', 'HEAD') + '.txt'), 'upstream change\n');
+    f.g('add', '.'); f.g('commit', '-qm', 'Upstream change');
+    const upstreamBaseRef = f.g('rev-parse', 'HEAD');
+    f.g('switch', 'feature/test'); f.g('rebase', 'main');
+    return { ...f.args(), oldHeadRef, upstreamBaseRef, defaultBranch: 'main', protectedBranches: [], previousReconciliationRef };
+  };
+  const reconcile = (args, patch = {}, optionPatch = {}) => reconcileFeature({ ...args, ...patch }, { directory: f.dir }, { ...f.options, ...optionPatch });
+  return { ...f, rebase, reconcile };
+}
+
+test('rebase recovery preserves receipts, continues a dependent task and passes final feature validation', integration, async t => {
+  const f = await rebaseFixture(t);
+  const args = await f.rebase();
+  const originalMessage = f.g('show', '-s', '--format=%B', args.oldHeadRef);
+  const originalReceipt = JSON.parse(originalMessage.split('Pi-Task-Checkpoint: ')[1]).evidenceRef;
+  const receiptPath = path.join(f.dir, '.git/pi-conductor-evidence', originalReceipt.split(':').at(-1) + '.json');
+  const bytes = await readFile(receiptPath);
+  assert.equal((await f.validate()).status, 'BLOCKED');
+  const r = await f.reconcile(args); assert.equal(r.status, 'PASSED', JSON.stringify(r));
+  assert.equal(f.g('rev-parse', 'HEAD'), args.headRef);
+  assert.deepEqual(await readFile(receiptPath), bytes);
+  const capture = JSON.parse(await readFile(f.capture, 'utf8'));
+  assert.equal(capture.req.base_ref, args.upstreamBaseRef);
+  assert.match(capture.requirements, /Only task one/);
+  assert.match(capture.requirements, /conflict resolutions/);
+  const inspected = await inspectReconciliation({ reference: r.evidenceRef }, { directory: f.dir }, f.options);
+  assert.equal(inspected.results[0].applicable, true, JSON.stringify(inspected));
+  await f.add('two', ['one']); await f.finish('two', false, r.evidenceRef);
+  const passed = await f.validate({ reconciliationRef: r.evidenceRef });
+  assert.equal(passed.status, 'PASSED', JSON.stringify(passed));
+  assert.equal(passed.binding.baseline, f.base); // Scaffold's immutable original baseline is preserved.
+  assert.equal((await f.validate({ reconciliationRef: r.evidenceRef, resumeEvidenceRef: passed.evidenceRef })).status, 'PASSED');
+  const validation = await inspectFeatureValidation({ reference: passed.evidenceRef }, { directory: f.dir }, f.options);
+  assert.equal(validation.results[0].applicable, true, JSON.stringify(validation));
+  assert.equal((await f.validate({ resumeEvidenceRef: passed.evidenceRef })).status, 'BLOCKED');
+});
+
+test('repeated rebases authenticate prior anchors and retain final applicability', integration, async t => {
+  const f = await rebaseFixture(t);
+  const firstArgs = await f.rebase();
+  const first = await f.reconcile(firstArgs); assert.equal(first.status, 'PASSED', JSON.stringify(first));
+  await f.add('two', ['one']); await f.finish('two', false, first.evidenceRef);
+  const secondArgs = await f.rebase(first.evidenceRef);
+  const second = await f.reconcile(secondArgs); assert.equal(second.status, 'PASSED', JSON.stringify(second));
+  assert.equal((await f.validate({ reconciliationRef: second.evidenceRef })).status, 'PASSED');
+  assert.equal((await f.validate({ reconciliationRef: first.evidenceRef })).status, 'BLOCKED');
+  const inspection = await inspectReconciliation({ featureId: 'F5' }, { directory: f.dir }, f.options);
+  assert.equal(inspection.results.find(r => r.reference === first.evidenceRef).applicable, false);
+  assert.equal(inspection.results.find(r => r.reference === second.evidenceRef).applicable, true);
+});
+
+test('rebase before first task supports new initial anchor without changing original design', integration, async t => {
+  const f = await rebaseFixture(t, false); await f.add('one');
+  const args = await f.rebase(); const r = await f.reconcile(args);
+  assert.equal(r.status, 'PASSED', JSON.stringify(r));
+  await f.finish('one', false, r.evidenceRef);
+  assert.equal((await f.validate({ reconciliationRef: r.evidenceRef })).status, 'PASSED');
+});
+
+test('rebase verification failures and missing authorization cannot supply an anchor', integration, async t => {
+  const f = await rebaseFixture(t); const args = await f.rebase();
+  for (const [patch, options, expected] of [
+    [{}, { authorize: undefined }, 'BLOCKED'],
+    [{}, { authorize: async () => false }, 'BLOCKED'],
+    [{ testCommand: [process.execPath, '-e', 'console.log("0 tests ran")'] }, {}, 'BLOCKED'],
+    [{ testCommand: [process.execPath, '-e', 'process.exit(7)'] }, {}, 'NEEDS_DESIGN'],
+    [{ buildCommand: ['missing-rebase-build-command'] }, {}, 'BLOCKED'],
+  ]) {
+    const r = await f.reconcile(args, patch, options);
+    assert.equal(r.status, expected, JSON.stringify(r));
+    if (r.evidenceRef) assert.equal((await f.validate({ reconciliationRef: r.evidenceRef })).status, 'BLOCKED');
+  }
+  await f.reviewer('CHANGES_REQUESTED'); assert.equal((await f.reconcile(args)).status, 'NEEDS_DESIGN');
+  await f.reviewer('INDETERMINATE'); assert.equal((await f.reconcile(args)).status, 'BLOCKED');
+});
+
+test('active tasks, dirty trees, unrelated commits, protected branches and unfinished rebase block before checks', integration, async t => {
+  for (const variant of ['active', 'dirty', 'unrelated', 'protected', 'rebase']) {
+    const f = await rebaseFixture(t); await f.add('two', ['one']);
+    const args = await f.rebase();
+    if (variant === 'active') await f.call('start', { task_id: 'two' });
+    if (variant === 'dirty') await writeFile(path.join(f.dir, 'source.txt'), 'unverified');
+    if (variant === 'unrelated') { f.g('commit', '--allow-empty', '-qm', 'unrelated'); args.headRef = f.g('rev-parse', 'HEAD'); }
+    if (variant === 'protected') args.protectedBranches = ['feature/test'];
+    if (variant === 'rebase') await (await import('node:fs/promises')).mkdir(path.join(f.dir, '.git/rebase-merge'));
+    const r = await f.reconcile(args, {}, { authorize: () => { throw Error('must not request authorization'); } });
+    assert.equal(r.status, 'BLOCKED', variant + JSON.stringify(r));
+    assert.doesNotMatch(r.message, /must not request authorization/);
+    assert.equal(r.startedReference, undefined);
+  }
+});
+
+test('interrupted rebase verification recovers retained success, never partial intents', integration, async t => {
+  for (const point of ['beforeChecks', 'beforeReview', 'beforeRetention', 'afterRetention']) {
+    const f = await rebaseFixture(t); const args = await f.rebase();
+    const r = await f.reconcile(args, {}, { interrupt: async stage => { if (stage === point) throw Error('interrupted'); } });
+    assert.equal(r.status, 'BLOCKED');
+    const resume = await f.reconcile(args, { resumeEvidenceRef: r.evidenceRef ?? r.startedReference });
+    assert.equal(resume.status, point === 'afterRetention' ? 'PASSED' : 'BLOCKED', JSON.stringify(resume));
+    if (point === 'afterRetention') {
+      assert.equal(resume.recovered, true);
+      assert.equal((await f.reconcile(args, { resumeEvidenceRef: r.evidenceRef, testSuccessPattern: 'different output' })).status, 'BLOCKED');
+    }
+  }
+});
+
+test('changed source/task state during rebase verification and tampered receipts fail closed', integration, async t => {
+  for (const variant of ['check', 'review', 'restored', 'state', 'tampered', 'lostSource', 'stale']) {
+    const f = await rebaseFixture(t); const args = await f.rebase();
+    if (variant === 'check' || variant === 'restored') {
+      const command = variant === 'check' ? 'fs.writeFileSync("source.txt","changed");' :
+        'const b=fs.readFileSync("source.txt");fs.writeFileSync("source.txt","transient");fs.writeFileSync("source.txt",b);';
+      const r = await f.reconcile(args, { testCommand: [process.execPath, '-e', 'const fs=require("fs");' + command + 'console.log("12 integration tests passed")'] });
+      assert.equal(r.status, 'BLOCKED', JSON.stringify(r));
+    } else if (variant === 'review') {
+      await f.reviewer('APPROVED', 'fs.writeFileSync(require("node:path").join(req.repository_path,"source.txt"),"changed");');
+      assert.equal((await f.reconcile(args)).status, 'BLOCKED');
+    } else if (variant === 'state') {
+      assert.equal((await f.reconcile(args, {}, { interrupt: async stage => { if (stage === 'beforeReview') await f.add('new'); } })).status, 'BLOCKED');
+    } else {
+      const r = await f.reconcile(args); assert.equal(r.status, 'PASSED', JSON.stringify(r));
+      if (variant === 'tampered') await writeFile(path.join(f.dir, '.git/pi-conductor-evidence/feature-' + r.evidenceRef.split(':').at(-1) + '.json'), '{}');
+      if (variant === 'lostSource') {
+        const anchor = await readFeatureEvidence(f.dir, r.evidenceRef);
+        await rm(path.join(f.dir, '.git/pi-conductor-evidence', anchor.sourceCheckpoints[0].evidenceRef.split(':').at(-1) + '.json'));
+      }
+      if (variant === 'stale') f.g('commit', '--allow-empty', '-qm', 'unrelated');
+      assert.equal((await f.validate({ reconciliationRef: r.evidenceRef })).status, 'BLOCKED');
+      const inspected = await inspectReconciliation({ reference: r.evidenceRef }, { directory: f.dir }, f.options);
+      if (variant !== 'tampered') assert.equal(inspected.results[0].applicable, false);
+      else assert.equal(inspected.ok, false);
+    }
+  }
+});
+
+test('conflict resolutions are freshly reviewed and original history survives Git garbage collection', integration, async t => {
+  const f = await rebaseFixture(t);
+  const oldHeadRef = f.g('rev-parse', 'HEAD');
+  f.g('switch', 'main');
+  await writeFile(path.join(f.dir, 'one.txt'), 'upstream implementation\n');
+  f.g('add', '.'); f.g('commit', '-qm', 'Upstream conflicts with task');
+  const upstreamBaseRef = f.g('rev-parse', 'HEAD');
+  f.g('switch', 'feature/test');
+  assert.throws(() => f.g('rebase', 'main'));
+  const unresolved = { ...f.args(), oldHeadRef, upstreamBaseRef, defaultBranch: 'main', protectedBranches: [] };
+  assert.equal((await f.reconcile(unresolved)).status, 'BLOCKED');
+  await writeFile(path.join(f.dir, 'one.txt'), 'task one integrated with upstream\n'); f.g('add', 'one.txt');
+  f.g('-c', 'core.editor=true', 'rebase', '--continue');
+  const args = { ...unresolved, headRef: f.g('rev-parse', 'HEAD') };
+  const r = await f.reconcile(args); assert.equal(r.status, 'PASSED', JSON.stringify(r));
+  const capture = JSON.parse(await readFile(f.capture, 'utf8'));
+  assert.equal(capture.req.base_ref, upstreamBaseRef); assert.equal(capture.req.head_ref, args.headRef);
+  assert.equal(f.g('show', args.headRef + ':one.txt'), 'task one integrated with upstream');
+  f.g('reflog', 'expire', '--expire=now', '--all'); f.g('gc', '--prune=now');
+  assert.equal(f.g('rev-parse', 'refs/pi-reconciliations/' + r.evidenceRef.split(':').at(-1) + '/before'), oldHeadRef);
+  assert.equal((await f.validate({ reconciliationRef: r.evidenceRef })).status, 'PASSED');
+});
+
+test('dropped and reordered rebased task commits cannot be accepted', integration, async t => {
+  for (const variant of ['dropped', 'reordered']) {
+    const f = await rebaseFixture(t);
+    const one = f.g('rev-parse', 'HEAD');
+    await f.add('two', ['one']); await f.finish('two');
+    const two = f.g('rev-parse', 'HEAD');
+    const args = await f.rebase();
+    // Mutations are confined to this disposable Git test fixture.
+    f.g('reset', '--hard', args.upstreamBaseRef);
+    if (variant === 'reordered') { f.g('cherry-pick', two); f.g('cherry-pick', one); }
+    const r = await f.reconcile({ ...args, headRef: f.g('rev-parse', 'HEAD') }, {}, {
+      authorize: () => { throw Error('must not request authorization'); },
+    });
+    assert.equal(r.status, 'BLOCKED'); assert.doesNotMatch(r.message, /must not request authorization/);
+    assert.match(r.message, /dropped|ordering/);
+  }
 });
