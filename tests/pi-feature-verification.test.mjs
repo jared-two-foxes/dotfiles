@@ -46,3 +46,24 @@ for (const summary of ['13 passing', '# pass 13', 'Passed: 13', '13 tests passed
     assert.equal(meaningful({ name: 'test', successPattern: summary }, output(summary + '\n' + empty)), true);
   });
 }
+
+for (const separator of ['\n', '\r\n', '\r']) {
+  test('a passed token cannot borrow a scheduled count across ' + JSON.stringify(separator), () => {
+    const text = ['0 passed', '13 tests scheduled', 'workspace finished'].join(separator);
+    assert.equal(meaningful({ name: 'test', successPattern: 'workspace finished' }, output(text)), false);
+  });
+  test('a custom passed marker cannot borrow a zero on the next line across ' + JSON.stringify(separator), () => {
+    const text = ['Messages checks passed', '0 failures'].join(separator);
+    assert.equal(meaningful({ name: 'messages', successPattern: 'Messages checks passed' }, output(text)), true);
+  });
+}
+test('positive count summaries cannot span stdout and stderr', () => {
+  assert.equal(meaningful({ name: 'test', successPattern: 'workspace finished' }, output('0 passed', '13 tests scheduled\nworkspace finished')), false);
+});
+test('zero count summaries cannot span stdout and stderr', () => {
+  assert.equal(meaningful({ name: 'messages', successPattern: 'Messages checks passed' }, output('Messages checks passed', '0 failures')), true);
+});
+test('count summaries still permit horizontal spaces and tabs within a line', () => {
+  const summary = '#\tpass: \t13';
+  assert.equal(meaningful({ name: 'test', successPattern: summary }, output(summary + '\nrunning\t0\ttests\n0\tpassed')), true);
+});
