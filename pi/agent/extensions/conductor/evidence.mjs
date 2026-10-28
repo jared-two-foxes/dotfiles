@@ -130,3 +130,12 @@ export async function featureEvidenceReferences(repository) {
   return (await readdir(dir)).filter(f => /^feature-[a-f0-9]{64}\.json$/.test(f))
     .map(f => 'pi-feature-evidence:sha256:' + f.slice(8, -5));
 }
+
+// Read-only discovery for recovery and stale-attempt protection across rebase epochs.
+export async function taskEvidenceReferences(repository) {
+  const { readdir } = await import('node:fs/promises');
+  let dir;
+  try { dir = await directory(repository); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  return (await readdir(dir)).filter(f => /^[a-f0-9]{64}\.json$/.test(f))
+    .map(f => 'pi-evidence:sha256:' + f.slice(0, -5));
+}

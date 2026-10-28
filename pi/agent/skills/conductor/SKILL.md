@@ -201,3 +201,14 @@ final validation. Repeated rebases supply `previousReconciliationRef`; read-only
 rebases, edits source or changes task lifecycle. Active task loops still require
 explicit recovery. See `extensions/conductor/README.md` and Design's rebase
 recovery section for full input, evidence and interruption semantics.
+
+For a rebase that already interrupted an active/blocked/failed task with dirty
+source, use native `recover_interrupted_task_rebase` and inspect
+`inspect_task_rebase_recovery`. It verifies the completed prefix in a temporary
+worktree and returns READY plus a baseline handoff, preserving original task
+identity, criteria/findings and consumed attempts. Source/index stay intact; no
+lifecycle mutation or source correction occurs. Continue through explicit task
+lifecycle recovery and normal execution approval, with returned `resume` plus new
+exact operations, handoff `previousAttempt`, and prefix `reconciliationRef` for
+checkpoint/final validation. READY is never task PASSED. See Design's interrupted
+handoff guidance for conflicts, budget limits and interruption recovery.

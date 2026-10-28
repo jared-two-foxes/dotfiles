@@ -11,6 +11,8 @@ import { checkpointVerifiedTask } from '../pi/agent/extensions/conductor/checkpo
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { validateFeature, inspectFeatureValidation } from '../pi/agent/extensions/conductor/feature.mjs';
 import { reconcileFeature, inspectReconciliation, readReconciliation } from '../pi/agent/extensions/conductor/reconciliation.mjs';
+import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from '../pi/agent/extensions/conductor/interrupted-rebase.mjs';
+import { readEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { runCheck } from '../pi/agent/extensions/conductor/feature-process.mjs';
 
 const integration = { skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE to Phase 5 Scaffold checkout' : false };
@@ -456,4 +458,209 @@ test('reconciled children retain recursive ancestry when checkpointing their par
   const passed = await f.validate({ reconciliationRef: reconciled.evidenceRef });
   assert.equal(passed.status, 'PASSED', JSON.stringify(passed));
   assert.equal(passed.binding.head, root.commit);
+});
+
+async function interruptedFixture(t, attempts = 3) {
+  const f = await rebaseFixture(t);
+  await f.add('two', ['one']); await f.call('start', { task_id: 'two' });
+  const task = { featureId: 'F5', taskId: 'two', designRef: f.args().designRef };
+  const taskArgs = { task, baseRef: f.g('rev-parse', 'HEAD'), requirements: 'Task two preserves CRLF matching; display/context must have no terminators',
+    input: '{"operations":[]}', buildCommand: ['build'], testCommand: ['test'] };
+  const receipts = [];
+  async function attempt(args, status = 'NEEDS_DESIGN', change = async () => {}) {
+    return executeAndReview(args, { directory: f.dir }, { invokeConductor: async json => {
+      await change();
+      const request = JSON.parse(json);
+      const boundary = JSON.parse(request.checks.at(-1).args[1]);
+      await writeFile(boundary.output, JSON.stringify(await snapshot(f.dir)));
+      return { code: status === 'PASSED' ? 0 : 2, stdout: JSON.stringify({ schema: 'conductor.result/v1', status, phase: 'review',
+        execution: { success: true }, checks: ['build', 'test'].map(name => ({ name, exit_code: 0 })),
+        review: { status: status === 'PASSED' ? 'APPROVED' : 'CHANGES_REQUESTED', findings: status === 'PASSED' ? [] : [{ message: 'Preserve carriage returns; add CRLF search regressions' }] } }) };
+    } });
+  }
+  for (let index = 0; index < attempts; index++) {
+    const r = await attempt({ ...taskArgs, previousAttempt: receipts.at(-1) }, 'NEEDS_DESIGN', async () => {
+      for (let file = 0; file < 5; file++) await writeFile(path.join(f.dir, file === 0 ? 'source.txt' : 'task-two-' + file + '.txt'), 'attempt ' + (index + 1) + '\r\n');
+    });
+    assert.equal(r.evidence.attempt, index + 1); receipts.push(r.evidence.reference);
+  }
+  await f.call('block', { task_id: 'two', reason: 'Rebase interrupted this correction loop' });
+  // Only this disposable fixture stashes to simulate the user's completed rebase.
+  f.g('stash', 'push', '-u', '-m', 'fixture interrupted work');
+  const prefixArgs = await f.rebase(); f.g('stash', 'pop');
+  const args = { ...prefixArgs, task, previousAttempt: receipts.at(-1),
+    testCommand: [process.execPath, '-e', 'if(require("fs").existsSync("task-two-1.txt")||require("fs").readFileSync("source.txt","utf8")!=="base\\n")throw Error("prefix checks saw unfinished task files");console.log("12 integration tests passed")'] };
+  const recover = (patch = {}, options = {}) => recoverInterruptedTaskRebase({ ...args, ...patch }, { directory: f.dir }, { ...f.options, ...options });
+  return { ...f, task, taskArgs, receipts, args, attempt, recover };
+}
+
+test('interrupted rebase preserves five dirty files and three receipts, resumes attempt four and completes feature', integration, async t => {
+  const f = await interruptedFixture(t);
+  const before = await snapshot(f.dir), index = await readFile(path.join(f.dir, '.git/index'));
+  const originals = await Promise.all(f.receipts.map(ref => readFile(path.join(f.dir, '.git/pi-conductor-evidence', ref.split(':').at(-1) + '.json'))));
+  const r = await f.recover(); assert.equal(r.status, 'READY', JSON.stringify(r));
+  assert.equal(r.consumedAttempts, 3); assert.equal(r.remainingAttempts, 2);
+  assert.deepEqual(await snapshot(f.dir), before); assert.deepEqual(await readFile(path.join(f.dir, '.git/index')), index);
+  assert.equal(r.resume.input, undefined); assert.equal(r.resume.previousAttempt, r.handoffRef); assert.equal(r.resume.baseRef, f.args.headRef);
+  assert.match(r.resume.requirements, /preserves CRLF/); assert.match(r.resume.requirements, /Preserve carriage returns/);
+  for (let i = 0; i < f.receipts.length; i++) assert.deepEqual(await readFile(path.join(f.dir, '.git/pi-conductor-evidence', f.receipts[i].split(':').at(-1) + '.json')), originals[i]);
+  assert.equal((await f.call('list')).feature.tasks.two.status, 'blocked');
+  const inspected = await inspectTaskRebaseRecovery({ reference: r.handoffRef }, { directory: f.dir }, f.options);
+  assert.equal(inspected.applicable, true, JSON.stringify(inspected));
+  assert.equal((await f.recover({ resumeHandoffRef: r.handoffRef })).recovered, true);
+  await f.call('retry', { task_id: 'two', reason: 'Authenticated rebase handoff; preserve three consumed attempts' });
+  await f.call('start', { task_id: 'two' });
+  const passed = await f.attempt({ ...r.resume, input: '{"operations":[]}' }, 'PASSED', async () => {
+    await writeFile(path.join(f.dir, 'source.txt'), 'CRLF regression corrected\r\n');
+  });
+  assert.equal(passed.status, 'PASSED', JSON.stringify(passed)); assert.equal(passed.evidence.attempt, 4);
+  await f.call('complete', { task_id: 'two', payload: { feature_id: 'F5', task_id: 'two', result: 'PASSED', source: 'conductor',
+    reference: passed.evidence.reference, summary: 'CRLF regression verified at attempt four' } });
+  const checkpoint = await checkpointVerifiedTask({ task: f.task, evidenceRef: passed.evidence.reference, reconciliationRef: r.reconciliationRef,
+    featureBaseRef: f.base, branch: 'feature/test', defaultBranch: 'main', protectedBranches: [], authorizationMode: 'manual' },
+  { directory: f.dir }, f.options);
+  assert.equal(checkpoint.ok, true, JSON.stringify(checkpoint));
+  assert.equal((await f.validate({ reconciliationRef: r.reconciliationRef })).status, 'PASSED');
+});
+
+test('interrupted recovery cannot reset attempts or weaken carried requirements/checks', integration, async t => {
+  const f = await interruptedFixture(t); const r = await f.recover(); assert.equal(r.status, 'READY', JSON.stringify(r));
+  for (const patch of [{ requirements: f.taskArgs.requirements }, { testCommand: ['weaker'] }, { baseRef: f.taskArgs.baseRef }]) {
+    const invalid = await executeAndReview({ ...r.resume, ...patch, input: '{"operations":[]}' }, { directory: f.dir }, {
+      invokeConductor: () => assert.fail('must not invoke altered recovery'),
+    });
+    assert.equal(invalid.status, 'BLOCKED');
+  }
+  const fourth = await f.attempt({ ...r.resume, input: '{"operations":[]}' }); assert.equal(fourth.evidence.attempt, 4);
+  const stale = await executeAndReview({ ...r.resume, input: '{"operations":[]}' }, { directory: f.dir }, {
+    invokeConductor: () => assert.fail('same-tree attempt four already consumed; do not replay the handoff'),
+  });
+  assert.equal(stale.status, 'BLOCKED'); assert.match(stale.message, /newer task attempt/);
+  assert.equal((await f.recover({ resumeHandoffRef: r.handoffRef })).status, 'BLOCKED');
+  const fifth = await f.attempt({ ...r.resume, input: '{"operations":[]}', previousAttempt: fourth.evidence.reference }); assert.equal(fifth.evidence.attempt, 5);
+  const exhausted = await executeAndReview({ ...r.resume, input: '{"operations":[]}', previousAttempt: fifth.evidence.reference }, { directory: f.dir }, {
+    invokeConductor: () => assert.fail('attempt six must not run'),
+  });
+  assert.equal(exhausted.status, 'BLOCKED'); assert.match(exhausted.message, /Five-attempt limit/);
+});
+
+test('interrupted recovery rejects unrelated source, divergent index, missing receipts and exhausted attempts', integration, async t => {
+  for (const variant of ['source', 'index', 'missing', 'exhausted', 'protected', 'unapproved', 'conflict']) {
+    const f = await interruptedFixture(t, variant === 'exhausted' ? 5 : 3);
+    if (variant === 'source') await writeFile(path.join(f.dir, 'source.txt'), 'unrelated local edit');
+    if (variant === 'index') {
+      await writeFile(path.join(f.dir, 'source.txt'), 'divergent staged variant'); f.g('add', 'source.txt');
+      await writeFile(path.join(f.dir, 'source.txt'), 'attempt 3\r\n');
+    }
+    if (variant === 'missing') await rm(path.join(f.dir, '.git/pi-conductor-evidence', f.receipts[0].split(':').at(-1) + '.json'));
+    if (variant === 'conflict') {
+      // A rebased commit independently changes the same task path. Never guess a resolution.
+      const message = f.g('show', '-s', '--format=%B', 'HEAD');
+      f.g('stash', 'push', '-u'); await writeFile(path.join(f.dir, 'source.txt'), 'conflicting upstream content');
+      f.g('add', '.'); f.g('commit', '--amend', '-m', message);
+      assert.throws(() => f.g('stash', 'pop'));
+      await writeFile(path.join(f.dir, 'source.txt'), 'attempt 3\r\n'); f.g('add', 'source.txt');
+      f.args.headRef = f.g('rev-parse', 'HEAD');
+    }
+    const before = await snapshot(f.dir), index = await readFile(path.join(f.dir, '.git/index'));
+    const r = await f.recover(variant === 'protected' ? { protectedBranches: ['feature/test'] } : {},
+      variant === 'unapproved' ? { authorize: async () => false } : {});
+    assert.equal(r.status, 'BLOCKED', variant + JSON.stringify(r)); assert.equal(r.handoffRef, undefined);
+    assert.deepEqual(await snapshot(f.dir), before); assert.deepEqual(await readFile(path.join(f.dir, '.git/index')), index);
+  }
+});
+
+test('interrupted recovery reuses only complete matching prefix evidence and recovers retained handoff audit refs', integration, async t => {
+  for (const point of ['afterPrefix', 'beforeAuditRefs', 'afterHandoffRetention']) {
+    const f = await interruptedFixture(t);
+    const r = await f.recover({}, { interrupt: async stage => { if (stage === point) throw Error('Interrupted at ' + point); } });
+    assert.equal(r.status, 'BLOCKED');
+    const recovered = point === 'afterPrefix'
+      ? await f.recover({ prefixEvidenceRef: r.reconciliationRef }, { authorize: () => assert.fail('retained prefix needs no new checks') })
+      : await f.recover({ resumeHandoffRef: r.handoffRef }, { authorize: () => assert.fail('retained handoff needs no new checks') });
+    assert.equal(recovered.status, 'READY', JSON.stringify(recovered)); assert.equal(recovered.consumedAttempts, 3);
+    const h = await readEvidence(f.dir, recovered.handoffRef);
+    assert.equal(h.kind, 'rebase-handoff');
+    assert.equal(f.g('for-each-ref', '--format=%(refname)', 'refs/pi-task-recoveries/' + recovered.handoffRef.split(':').at(-1)).split('\n').length, 8);
+    assert.equal((await f.recover({ resumeHandoffRef: recovered.handoffRef, testSuccessPattern: 'weaker output' })).status, 'BLOCKED');
+    f.g('reflog', 'expire', '--expire=now', '--all'); f.g('gc', '--prune=now');
+    const inspected = await inspectTaskRebaseRecovery({ reference: recovered.handoffRef }, { directory: f.dir }, f.options);
+    assert.equal(inspected.applicable, true, JSON.stringify(inspected));
+  }
+});
+
+test('failed prefix checks, source/state mutation and tampered handoffs never authorize interrupted continuation', integration, async t => {
+  for (const variant of ['checks', 'review', 'prefixMutation', 'sourceMutation', 'stateMutation', 'tampered', 'stale']) {
+    const f = await interruptedFixture(t);
+    if (variant === 'review') await f.reviewer('CHANGES_REQUESTED');
+    if (variant === 'prefixMutation') await f.reviewer('APPROVED', 'fs.writeFileSync(require("node:path").join(req.repository_path,"source.txt"),"unverified prefix change");');
+    const before = await snapshot(f.dir);
+    const r = await f.recover(variant === 'checks' ? { testCommand: [process.execPath, '-e', 'process.exit(7)'] } : {}, {
+      interrupt: async stage => {
+        if (stage === 'beforeReview' && variant === 'sourceMutation') await writeFile(path.join(f.dir, 'source.txt'), 'concurrent writer');
+        if (stage === 'beforeReview' && variant === 'stateMutation') await f.add('other');
+      },
+    });
+    if (['tampered', 'stale'].includes(variant)) {
+      assert.equal(r.status, 'READY', JSON.stringify(r));
+      if (variant === 'tampered') await writeFile(path.join(f.dir, '.git/pi-conductor-evidence', r.handoffRef.split(':').at(-1) + '.json'), '{}');
+      else await writeFile(path.join(f.dir, 'source.txt'), 'unexpected edit');
+      const resumed = await executeAndReview({ ...r.resume, input: '{"operations":[]}' }, { directory: f.dir }, {
+        invokeConductor: () => assert.fail('invalid handoff must not execute'),
+      });
+      assert.equal(resumed.status, 'BLOCKED');
+    } else {
+      assert.equal(r.status, 'BLOCKED', variant + JSON.stringify(r)); assert.equal(r.handoffRef, undefined);
+      if (variant !== 'sourceMutation') assert.deepEqual(await snapshot(f.dir), before);
+    }
+    assert.equal(f.g('worktree', 'list', '--porcelain').split('\n').filter(line => line.startsWith('worktree ')).length, 1);
+  }
+});
+
+test('a second interrupted rebase carries the same task from attempt four to five without a budget reset', integration, async t => {
+  const f = await interruptedFixture(t);
+  const first = await f.recover(); assert.equal(first.status, 'READY', JSON.stringify(first));
+  await f.call('retry', { task_id: 'two', reason: 'Use first authenticated handoff' }); await f.call('start', { task_id: 'two' });
+  const fourth = await f.attempt({ ...first.resume, input: '{"operations":[]}' });
+  assert.equal(fourth.evidence.attempt, 4);
+  await f.call('block', { task_id: 'two', reason: 'Second authorized rebase' });
+  f.g('stash', 'push', '-u'); const next = await f.rebase(first.reconciliationRef); f.g('stash', 'pop');
+  const second = await f.recover({ ...next, previousAttempt: fourth.evidence.reference });
+  assert.equal(second.status, 'READY', JSON.stringify(second));
+  assert.equal(second.consumedAttempts, 4); assert.equal(second.remainingAttempts, 1);
+  await f.call('retry', { task_id: 'two', reason: 'Use second authenticated handoff; four attempts consumed' }); await f.call('start', { task_id: 'two' });
+  const fifth = await f.attempt({ ...second.resume, input: '{"operations":[]}' }, 'PASSED');
+  assert.equal(fifth.status, 'PASSED', JSON.stringify(fifth)); assert.equal(fifth.evidence.attempt, 5);
+  await f.call('complete', { task_id: 'two', payload: { feature_id: 'F5', task_id: 'two', result: 'PASSED', source: 'conductor',
+    reference: fifth.evidence.reference, summary: 'Verified at final allowed attempt after two rebases' } });
+  const checkpoint = await checkpointVerifiedTask({ task: f.task, evidenceRef: fifth.evidence.reference, reconciliationRef: second.reconciliationRef,
+    featureBaseRef: f.base, branch: 'feature/test', defaultBranch: 'main', protectedBranches: [], authorizationMode: 'manual' },
+  { directory: f.dir }, f.options);
+  assert.equal(checkpoint.ok, true, JSON.stringify(checkpoint));
+  assert.equal((await f.validate({ reconciliationRef: second.reconciliationRef })).status, 'PASSED');
+});
+
+test('a terminal HEAD_CHANGED receipt preserves its consumed attempt and exact already-rebased task tree', integration, async t => {
+  const f = await interruptedFixture(t, 2);
+  // Return to the old feature HEAD in this disposable fixture, retaining pending source.
+  f.g('stash', 'push', '-u'); f.g('reset', '--hard', f.taskArgs.baseRef); f.g('stash', 'pop');
+  const changed = await executeAndReview({ ...f.taskArgs, previousAttempt: f.receipts.at(-1) }, { directory: f.dir }, {
+    invokeConductor: async () => {
+      await writeFile(path.join(f.dir, 'source.txt'), 'third attempt before rebase\r\n');
+      f.g('stash', 'push', '-u'); f.g('rebase', 'main'); f.g('stash', 'pop');
+      return { code: 2, stdout: JSON.stringify({ schema: 'conductor.result/v1', status: 'NEEDS_DESIGN', phase: 'review',
+        execution: { success: true }, checks: ['build', 'test'].map(name => ({ name, exit_code: 0 })),
+        review: { status: 'CHANGES_REQUESTED', findings: [{ message: 'Do not lose CRLF review findings when HEAD changes' }] } }) };
+    },
+  });
+  assert.equal(changed.reason, 'HEAD_CHANGED'); assert.equal(changed.evidence.attempt, 3);
+  const original = await readEvidence(f.dir, changed.evidence.reference);
+  f.args.headRef = f.g('rev-parse', 'HEAD');
+  assert.equal(original.before.head, f.taskArgs.baseRef); assert.equal(original.after.head, f.args.headRef);
+  const before = await snapshot(f.dir);
+  const recovered = await f.recover({ previousAttempt: changed.evidence.reference });
+  assert.equal(recovered.status, 'READY', JSON.stringify(recovered)); assert.equal(recovered.consumedAttempts, 3);
+  assert.deepEqual(await snapshot(f.dir), before); assert.match(recovered.resume.requirements, /Do not lose CRLF review findings/);
+  const passed = await f.attempt({ ...recovered.resume, input: '{"operations":[]}' }, 'PASSED');
+  assert.equal(passed.status, 'PASSED'); assert.equal(passed.evidence.attempt, 4);
 });

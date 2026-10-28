@@ -377,3 +377,24 @@ carry over to a changed reconciliation scope. Matching retained success may be
 resumed without executing checks; incomplete/stale evidence cannot be reused.
 Local audit refs retain both histories against Git garbage collection. These
 metadata writes grant no source, branch, publishing or protected-branch authority.
+
+## Interrupted-task recovery after an already-performed rebase
+
+Native `recover_interrupted_task_rebase` is the explicit active-loop recovery
+exception, available in both modes with narrow Pi UI confirmation. It authenticates
+old task attempts, proves the dirty implementation matches a conflict-free Git
+three-way transplant onto rebased HEAD, verifies completed checkpoints in a
+disposable detached worktree, and retains a new-baseline handoff. It preserves
+real source/index/branch and Scaffold state. It never stashes/resets, corrects
+source, changes task identity/status, clears findings or resets the five-attempt
+budget. Temporary worktree and Git object/audit-ref writes are narrowly permitted.
+
+READY authorizes neither task completion nor source execution. Inspect via
+`inspect_task_rebase_recovery`; explicitly reconcile task lifecycle and obtain
+normal source-execution approval for fresh operations using the returned fixed
+resume fields and handoff `previousAttempt`. All consumed attempts carry forward.
+Only a real subsequent successful Conductor attempt can verify/complete the task;
+checkpoint/final validation authenticate the bridge and completed-prefix receipt.
+Old receipts/design/criteria remain unchanged. Conflicts, extra edits, missing
+receipts, staged ambiguity or exhausted attempts require explicit reconciliation,
+never a replacement task or a disguised restart. See Design/Conductor guidance.

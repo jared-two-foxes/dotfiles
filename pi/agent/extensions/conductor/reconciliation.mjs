@@ -1,5 +1,7 @@
 // Explicit verification-only recovery between tasks. Never rewrites Git or receipts.
 import path from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from './git-tree.mjs';
 import { snapshot, digest, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from './evidence.mjs';
@@ -86,7 +88,7 @@ export async function readReconciliation(repository, reference, feature, args, s
 }
 
 export async function reconcileFeature(args, context = {}, options = {}) {
-  let repository, monitor, record, startedReference, evidenceRef;
+  let repository, monitor, prefixMonitor, prefixDirectory, prefixRoot, prefixBefore, record, startedReference, evidenceRef;
   try {
     context.abort?.throwIfAborted();
     const plan = planFor(args);
@@ -102,10 +104,11 @@ export async function reconcileFeature(args, context = {}, options = {}) {
       try { remoteDefault = git(repository, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, ''); } catch {}
       requireValue(args.branch !== remoteDefault, 'Default branch reconciliation prohibited');
       const before = await snapshot(repository);
-      requireValue(before.clean && !before.bookkeepingVisible && before.head === args.headRef, 'Reconciliation requires clean matching HEAD/index/worktree and ignored Scaffold');
+      requireValue((before.clean || (options.interruptedTask && equal(before, options.interruptedTask.snapshot))) && !before.bookkeepingVisible && before.head === args.headRef, 'Reconciliation requires clean matching HEAD/index/worktree and ignored Scaffold');
       const feature = await state(repository, args.featureId, options);
       requireValue(feature.design_ref === args.designRef && (!feature.original_baseline || feature.original_baseline === args.featureBaseRef), 'Original feature identity/baseline mismatch');
-      requireValue(Object.values(feature.tasks).every(t => ['pending', 'completed', 'decomposed'].includes(t.status)),
+      requireValue(Object.values(feature.tasks).every(t => ['pending', 'completed', 'decomposed'].includes(t.status) ||
+        (t.id === options.interruptedTask?.taskId && ['in_progress', 'blocked', 'failed'].includes(t.status))),
         'Finish or explicitly recover active, blocked or failed task loops before rebasing');
       const prior = args.previousReconciliationRef
         ? await readReconciliation(repository, args.previousReconciliationRef, feature, args) : undefined;
@@ -122,7 +125,8 @@ export async function reconcileFeature(args, context = {}, options = {}) {
       const anchor = await readReconciliation(repository, args.resumeEvidenceRef, pre.feature, args);
       const r = anchor.record;
       requireValue(r.oldHead === args.oldHeadRef && r.binding.head === args.headRef && r.binding.baseline === args.upstreamBaseRef &&
-        (r.previousReconciliationRef ?? null) === (args.previousReconciliationRef ?? null) && equal(r.feature, pre.feature) && equal(r.plan, plan),
+        (r.previousReconciliationRef ?? null) === (args.previousReconciliationRef ?? null) && equal(r.feature, pre.feature) && equal(r.plan, plan) &&
+        (options.interruptedTask ? equal(r.interruptedSource, pre.before) && r.interruptedTask === options.interruptedTask.taskId : !r.interruptedTask),
       'Retained reconciliation is stale or has a different verification plan');
       return { ...r.result, evidenceRef: args.resumeEvidenceRef, binding: r.binding, recovered: true, nextBaseRef: args.headRef };
     }
@@ -130,22 +134,34 @@ export async function reconcileFeature(args, context = {}, options = {}) {
       upstreamBase: args.upstreamBaseRef, head: args.headRef, branch: args.branch, tasks: Object.keys(completedTasks(pre.feature)), plan }),
     'Explicit rebase verification authorization required');
     const unchanged = async () => {
-      context.abort?.throwIfAborted(); monitor?.assert();
+      context.abort?.throwIfAborted(); monitor?.assert(); prefixMonitor?.assert();
+      if (prefixBefore) requireValue(equal(await snapshot(prefixDirectory), prefixBefore), 'Temporary completed-prefix source changed during verification');
       const current = await preconditions();
       requireValue(equal(pre, current), 'Source, branch, checkpoint evidence or task state changed during reconciliation');
     };
     await unchanged(); monitor = monitorTrackedInputs(repository);
+    if (options.interruptedTask) {
+      prefixRoot = await mkdtemp(path.join(tmpdir(), 'pi-interrupted-prefix-'));
+      prefixDirectory = path.join(prefixRoot, 'worktree');
+      git(repository, ['-c', 'core.hooksPath=' + prefixRoot, 'worktree', 'add', '--detach', prefixDirectory, args.headRef]);
+      prefixBefore = await snapshot(prefixDirectory);
+      requireValue(prefixBefore.clean && !prefixBefore.bookkeepingVisible && prefixBefore.head === args.headRef,
+        'Temporary completed-prefix worktree is not clean');
+      prefixMonitor = monitorTrackedInputs(prefixDirectory);
+    }
+    const verifiedBefore = prefixBefore ?? pre.before;
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.upstreamBaseRef,
-      head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision ?? 0,
+      head: args.headRef, tree: verifiedBefore.tree, branch: args.branch, task_revision: pre.feature.task_revision ?? 0,
       plan_digest: digest(JSON.stringify(plan)) };
     record = { kind: 'reconciliation', originalBaseline: args.featureBaseRef, oldHead: args.oldHeadRef,
       previousReconciliationRef: args.previousReconciliationRef, binding, plan, feature: pre.feature, tasks: pre.feature.tasks,
-      sourceCheckpoints: pre.source, checkpoints: pre.checkpoints, requirements, before: pre.before, after: pre.before,
+      sourceCheckpoints: pre.source, checkpoints: pre.checkpoints, requirements, before: verifiedBefore, after: verifiedBefore,
+      ...(options.interruptedTask ? { interruptedTask: options.interruptedTask.taskId, interruptedSource: pre.before } : {}),
       checks: [], review: null, result: result('BLOCKED', 'INTERRUPTED_OR_RUNNING') };
     startedReference = await retainReconciliation(repository, record);
     await options.interrupt?.('beforeChecks');
     for (const check of plan.checks) {
-      const output = await runCheck(check.command, { cwd: repository, signal: context.abort, timeoutMs: plan.timeoutMs });
+      const output = await runCheck(check.command, { cwd: prefixDirectory ?? repository, signal: context.abort, timeoutMs: plan.timeoutMs });
       record.checks.push({ name: check.name, definition: check, ...output, meaningful: meaningful(check, output) });
       await unchanged();
       if (output.problem || output.exit_code === null) { record.result = result('BLOCKED', 'Check indeterminate: ' + (output.problem ?? check.name)); break; }
@@ -154,7 +170,7 @@ export async function reconcileFeature(args, context = {}, options = {}) {
     }
     if (record.checks.length === plan.checks.length && record.checks.every(c => c.meaningful)) {
       await options.interrupt?.('beforeReview');
-      record.review = await reviewChanges({ ...plan.review, repository, baseRef: binding.baseline, headRef: binding.head,
+      record.review = await reviewChanges({ ...plan.review, repository: prefixDirectory ?? repository, baseRef: binding.baseline, headRef: binding.head,
         requirements: reviewScope(requirements, record.checks) }, context, options.reviewOptions);
       record.review.requirementsDigest = digest(reviewScope(requirements, record.checks));
       await unchanged();
@@ -174,7 +190,14 @@ export async function reconcileFeature(args, context = {}, options = {}) {
     }
     return { ...result('BLOCKED', error.message), evidenceRef, startedReference, diagnosticEvidenceRef,
       recovery: 'Inspect retained evidence, original checkpoints, actual Git and Scaffold state; never rewrite old receipts or reset work' };
-  } finally { monitor?.close(); }
+  } finally {
+    monitor?.close(); prefixMonitor?.close();
+    if (prefixDirectory) {
+      // Only this operation's disposable worktree is removed; never the source checkout.
+      try { git(repository, ['worktree', 'remove', '--force', prefixDirectory]); } catch { /* Leave registered scratch state discoverable if Git cleanup fails. */ }
+    }
+    if (prefixRoot) await rm(prefixRoot, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 export async function inspectReconciliation(args, context = {}, options = {}) {

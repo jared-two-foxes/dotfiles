@@ -94,3 +94,14 @@ each new task captures the rebased HEAD as its own fixed baseline. Active task
 loops must be explicitly stopped/recovered first. This exception grants only
 verification and local evidence/audit refs, not source writes, rebasing, commits,
 task transitions or publishing. See Design's rebase recovery section.
+
+For a task ALREADY active/blocked/failed when a user rebase occurred, native
+`recover_interrupted_task_rebase` is the explicit recovery exception. It preserves
+source/index, original receipts, criteria/findings and consumed attempts; verifies
+only completed checkpoints in a disposable worktree; and returns a non-PASSED
+baseline handoff. Inspect `inspect_task_rebase_recovery`, reconcile lifecycle
+explicitly, and resume with the returned fixed fields plus freshly approved source
+operations. Three old attempts mean attempt four next. Never replace task identity,
+reset attempts, stash/reset source or treat READY as task verification. This narrow
+UI-authorized operation grants temporary-worktree/evidence authority only; normal
+source execution, completion/checkpoint and publishing gates remain unchanged.
