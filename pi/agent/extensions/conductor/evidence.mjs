@@ -1,4 +1,5 @@
 // Local, content-addressed receipts. No task selection, lifecycle writes or retries.
+import { verificationChecks } from './verification.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
@@ -77,13 +78,15 @@ export async function readEvidence(repository, reference) {
 
 // Structural success is necessary, never proof that meaningful tests ran. Pi
 // must also inspect check output and the independently produced review content.
-export function verifiedResult(result) {
+export function verifiedResult(result, args) {
+  let checks;
+  try { checks = args ? verificationChecks(args) : [{ name: 'build' }, { name: 'test' }]; }
+  catch { return false; }
   const c = result?.conductor;
   return result?.status === 'PASSED' && c?.schema === 'conductor.result/v1' &&
     c.status === 'PASSED' && c.phase === 'review' && !c.error &&
-    c.execution?.success === true && ['build', 'test'].every(name =>
-      c.checks?.filter(check => check.name === name).length === 1 &&
-      c.checks.find(check => check.name === name).exit_code === 0) &&
+    c.execution?.success === true && Array.isArray(c.checks) && c.checks.length === checks.length &&
+    checks.every((check, index) => c.checks[index]?.name === check.name && c.checks[index].exit_code === 0) &&
     c.review?.status === 'APPROVED';
 }
 
@@ -94,7 +97,7 @@ export async function inspectEvidence(reference, context) {
     const current = await snapshot(repository);
     return { ok: true, reference, record, current,
       matchesWorkingTree: current.head === record.after?.head && current.digest === record.after?.digest,
-      structurallyVerified: verifiedResult(record.result) };
+      structurallyVerified: verifiedResult(record.result, record.args) };
   } catch (error) { return { ok: false, message: error.message }; }
 }
 

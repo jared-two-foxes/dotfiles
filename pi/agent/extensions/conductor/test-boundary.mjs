@@ -1,5 +1,5 @@
-// Transparent task-only test command wrapper. Capture the implementation after
-// the approved test command finishes, before Conductor can start its review.
+// Transparent task-only final verification command wrapper. Capture the implementation after
+// the last approved verification command finishes, before Conductor can start its review.
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import { snapshot } from './evidence.mjs';
