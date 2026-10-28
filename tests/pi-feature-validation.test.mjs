@@ -435,3 +435,25 @@ test('dropped and reordered rebased task commits cannot be accepted', integratio
     assert.match(r.message, /dropped|ordering/);
   }
 });
+
+test('reconciled children retain recursive ancestry when checkpointing their parents', integration, async t => {
+  const f = await rebaseFixture(t, false);
+  await f.add('root'); await f.add('group', [], 'root');
+  await f.add('one', [], 'group'); await f.add('two', ['one'], 'group');
+  await f.finish('one');
+  const args = await f.rebase();
+  const reconciled = await f.reconcile(args);
+  assert.equal(reconciled.status, 'PASSED', JSON.stringify(reconciled));
+  // Exercise both the reconciled prefix and a child checkpoint added after it.
+  await f.finish('two', false, reconciled.evidenceRef);
+  await f.finish('group', true, reconciled.evidenceRef);
+  const root = await f.finish('root', true, reconciled.evidenceRef);
+  const feature = (await f.call('list')).feature;
+  assert.equal(feature.tasks.one.parent_id, 'group');
+  assert.equal(feature.tasks.two.parent_id, 'group');
+  assert.equal(feature.tasks.group.parent_id, 'root');
+  assert.ok(Object.values(feature.tasks).every(task => task.status === 'completed'));
+  const passed = await f.validate({ reconciliationRef: reconciled.evidenceRef });
+  assert.equal(passed.status, 'PASSED', JSON.stringify(passed));
+  assert.equal(passed.binding.head, root.commit);
+});

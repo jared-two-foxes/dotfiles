@@ -63,8 +63,12 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     'Scaffold must record completion with matching Conductor evidence');
     if (args.reconciliationRef) {
       const anchor = await readReconciliation(repository, args.reconciliationRef, feature, args);
-      await checkpointHistory(repository, { ...feature, tasks: Object.fromEntries(
-        Object.entries(feature.tasks).filter(([id]) => id !== args.task.taskId)) },
+      // Preserve ancestry and inherited dependencies while excluding only the
+      // current task's not-yet-created checkpoint from the preceding history.
+      // This is a temporary view; persisted Scaffold completion stays unchanged.
+      await checkpointHistory(repository, { ...feature, tasks: {
+        ...feature.tasks, [args.task.taskId]: { ...task, status: 'pending' },
+      } },
         { head: record.args.baseRef, baseline: args.featureBaseRef, branch, anchor });
     } else {
       git(repository, ['merge-base', '--is-ancestor', args.featureBaseRef, record.args.baseRef]);
