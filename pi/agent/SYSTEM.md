@@ -357,3 +357,23 @@ Use read-only `inspect_feature_validation` on resume; incomplete intents never
 prove completion, and historical success becomes inapplicable after HEAD/tree,
 branch or task graph changes. A matching retained success may be handed off
 idempotently via `resumeEvidenceRef`; never fabricate completion JSON.
+
+## Verification-only recovery after rebase (both modes)
+
+Native `reconcile_feature_rebase` is a narrow verification/evidence exception for
+a user-performed rebase BETWEEN completed and checkpointed tasks. It requires
+explicit Pi UI authority for the full-project checks and bounded independent
+Review, clean matching HEAD/index/worktree, authentic original checkpoint/receipt
+history, ignored Scaffold and no active Git operation or task correction loop.
+It never rebases, edits, commits, selects/retries tasks or changes task lifecycle.
+Original feature baseline/design, receipts and completion history stay immutable.
+
+Use read-only `inspect_rebase_reconciliation` to discover/authenticate recovery
+state. Only fresh complete PASSED evidence authorizes use of the rebased prefix;
+pass its reference as `reconciliationRef` to subsequent checkpoints and final
+validation. Preserve the fixed baseline within each new task loop. Repeated
+rebases link previous reconciliation evidence. Existing checkpoint grants do not
+carry over to a changed reconciliation scope. Matching retained success may be
+resumed without executing checks; incomplete/stale evidence cannot be reused.
+Local audit refs retain both histories against Git garbage collection. These
+metadata writes grant no source, branch, publishing or protected-branch authority.

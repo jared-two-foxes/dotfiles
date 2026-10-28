@@ -10,6 +10,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { executeAndReview } from "./adapter.mjs";
 import { checkpointVerifiedTask, checkpointAuthorization } from "./checkpoint.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
+import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -19,12 +20,52 @@ export default function (pi: ExtensionAPI) {
   const authorizeCheckpoint = checkpointAuthorization(confirmation);
   pi.on("session_start", async () => { authorizeCheckpoint.reset(); });
   pi.registerTool({
+    name: "reconcile_feature_rebase",
+    label: "Verify feature after rebase",
+    description: "Verification-only recovery after a user-performed rebase BETWEEN tasks. Requires clean feature branch, original checkpoint history and fresh approved full-project checks plus independent review. Preserves original design/receipts; never rebases, edits, commits or changes Scaffold task status. Retain returned evidenceRef for checkpoint_verified_task and validate_feature.",
+    parameters: Type.Object({
+      featureId: Type.String(), designRef: Type.String(), branch: Type.String(),
+      featureBaseRef: Type.String(), oldHeadRef: Type.String(), upstreamBaseRef: Type.String(), headRef: Type.String(),
+      defaultBranch: Type.String(), protectedBranches: Type.Array(Type.String()),
+      previousReconciliationRef: Type.Optional(Type.String()), resumeEvidenceRef: Type.Optional(Type.String()),
+      buildCommand: Type.Array(Type.String(), { minItems: 1 }),
+      testCommand: Type.Array(Type.String(), { minItems: 1 }), testSuccessPattern: Type.String(),
+      integrationChecks: Type.Optional(Type.Array(Type.Object({
+        name: Type.String(), command: Type.Array(Type.String(), { minItems: 1 }), successPattern: Type.String(),
+      }))),
+      checkTimeoutMs: Type.Optional(Type.Integer()),
+      review: Type.Optional(Type.Object({
+        model: Type.Optional(Type.String()), wallClockBudgetSecs: Type.Optional(Type.Integer()),
+        maxTurns: Type.Optional(Type.Integer()), maxCostUsd: Type.Optional(Type.Number()), maxToolCalls: Type.Optional(Type.Integer()),
+        maxRepeatedActions: Type.Optional(Type.Integer()), maxCompletionAttempts: Type.Optional(Type.Integer()),
+      })),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const result = await reconcileFeature(params, { directory: ctx.cwd, abort: signal }, {
+        authorize: async scope => ctx.hasUI === true && await ctx.ui.confirm("Authorize verification after rebase",
+          JSON.stringify(scope, null, 2) + "\nRun these full-project checks and independent review of the rebased completed tasks? Verification/evidence only. No source editing, Git history changes, commits, publishing or task lifecycle changes."),
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: result.status === "BLOCKED", details: result };
+    },
+  });
+  pi.registerTool({
+    name: "inspect_rebase_reconciliation",
+    label: "Inspect retained rebase reconciliation",
+    description: "Discover and authenticate local rebase receipts against current Git and Scaffold state. Read only; no checks, review, source or lifecycle writes.",
+    parameters: Type.Object({ featureId: Type.Optional(Type.String()), reference: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const result = await inspectReconciliation(params, { directory: ctx.cwd });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: !result.ok, details: result };
+    },
+  });
+  pi.registerTool({
     name: "validate_feature",
     label: "Validate complete feature",
     description: "Verification-only final gate: authenticate all task checkpoints, run approved full-project checks, independently review the original baseline through final HEAD, retain evidence and record Scaffold validation. Requires narrow Pi UI authorization. No implementation, commits, publishing, retries or task selection.",
     parameters: Type.Object({
       featureId: Type.String(), designRef: Type.String(), branch: Type.String(),
       featureBaseRef: Type.String(), headRef: Type.String(),
+      reconciliationRef: Type.Optional(Type.String({ description: "Latest successful rebase reconciliation evidence, if history was rewritten" })),
       buildCommand: Type.Array(Type.String(), { minItems: 1 }),
       testCommand: Type.Array(Type.String(), { minItems: 1 }),
       testSuccessPattern: Type.String({ description: "Approved literal output marker demonstrating meaningful tests ran, e.g. '42 passed'. Never choose a generic exit message." }),
@@ -66,6 +107,7 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       evidenceRef: Type.String(),
+      reconciliationRef: Type.Optional(Type.String({ description: "Latest successful rebase reconciliation evidence, if history was rewritten" })),
       featureBaseRef: Type.String({ description: "Original feature-start SHA, preserved across all task checkpoints" }),
       branch: Type.String({ description: "Explicit authorized feature branch" }),
       defaultBranch: Type.String({ description: "Known actual repository default branch" }),

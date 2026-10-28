@@ -84,3 +84,13 @@ without Executor. Its own Pi UI authorization grants no source writes, commits,
 task selection or publishing. Inspect `inspect_feature_validation` and current
 applicability on resume; only authentic complete matching evidence can be handed
 to Scaffold. Keep original criteria and use approved corrective tasks for findings.
+
+After a user-performed rebase BETWEEN checkpointed tasks, use verification-only
+`reconcile_feature_rebase` with fresh Pi UI authorization; never rewrite old
+receipts, checkpoint trailers, original design or feature baseline. Inspect with
+`inspect_rebase_reconciliation` on recovery. Retain successful `evidenceRef` as
+`reconciliationRef` for all subsequent checkpoints and final feature validation;
+each new task captures the rebased HEAD as its own fixed baseline. Active task
+loops must be explicitly stopped/recovered first. This exception grants only
+verification and local evidence/audit refs, not source writes, rebasing, commits,
+task transitions or publishing. See Design's rebase recovery section.

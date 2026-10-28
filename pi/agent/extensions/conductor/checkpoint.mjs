@@ -1,9 +1,12 @@
 // One explicit local checkpoint, never task selection, source editing or publishing.
-import { sameVerification } from './verification.mjs';
+import { authenticateTaskEvidence } from './task-evidence.mjs';
+export { authenticateTaskEvidence } from './task-evidence.mjs';
+import { readReconciliation } from './reconciliation.mjs';
+import { checkpointHistory } from './history.mjs';
 import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { git, implementationTree, withTreeIndex, currentIndexTree, assertNoGitOperation } from './git-tree.mjs';
-import { validateBinding, readEvidence, snapshot, verifiedResult } from './evidence.mjs';
+import { validateBinding, snapshot } from './evidence.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
@@ -31,45 +34,6 @@ export function checkpointAuthorization(confirm) {
   return authorize;
 }
 
-// Shared authentication for task checkpoints and cumulative feature validation.
-export async function authenticateTaskEvidence(repository, reference, binding) {
-  const record = await readEvidence(repository, reference);
-  requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === binding[k]), 'Task/design identity mismatch');
-  // Authenticate the retained request against the caller's full plan. The final
-  // command is transparently wrapped to capture the source/index review boundary.
-  const requestChecks = record.request?.checks;
-  requireValue(Array.isArray(requestChecks) && requestChecks.length > 0, 'Missing requested verification plan');
-  const requestedPlan = requestChecks.map((check, index) => ({
-    name: check.name,
-    command: index === requestChecks.length - 1
-      ? JSON.parse(check.args[1]).command : [check.program, ...check.args],
-  }));
-  requireValue(sameVerification(record.args, { checks: requestedPlan }), 'Retained request verification plan mismatch');
-  requireValue(verifiedResult(record.result, record.args) && record.before?.head === record.args?.baseRef &&
-    record.after?.head === record.before.head && sha(record.after?.tree) && record.request?.review?.base_ref === record.before.head &&
-    record.request?.review?.requirements === record.args.requirements &&
-    record.reviewSnapshot?.head === record.after.head && record.reviewSnapshot?.tree === record.after.tree &&
-    record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
-    record.response?.code === 0 &&
-    verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
-  // Prove the correction chain began clean and never changed task or baseline.
-  let first = record;
-  const seen = new Set();
-  while (first.args.previousAttempt) {
-    requireValue(!seen.has(first.args.previousAttempt), 'Cyclic receipt chain'); seen.add(first.args.previousAttempt);
-    const prior = await readEvidence(repository, first.args.previousAttempt);
-    requireValue(prior.attempt + 1 === first.attempt && prior.attempt < 5 &&
-      ['featureId', 'taskId', 'designRef'].every(k => prior.task[k] === record.task[k]) &&
-      prior.args.baseRef === record.args.baseRef && prior.args.requirements === record.args.requirements &&
-      sameVerification(prior.args, record.args) &&
-      prior.result.status !== 'PASSED' && prior.before.head === record.args.baseRef && prior.after.head === record.args.baseRef &&
-      prior.after.digest === first.before.digest, 'Invalid correction receipt chain');
-    first = prior;
-  }
-  requireValue(first.attempt === 1 && first.before.clean && first.before.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), 'Task did not start from a clean isolated baseline');
-  return record;
-}
-
 export async function checkpointVerifiedTask(args, context = {}, options = {}) {
   let lock, lockPath, repository;
   try {
@@ -86,7 +50,7 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     try { remoteDefault = git(repository, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, ''); } catch {}
     requireValue(!protectedBranches.includes(branch) && branch !== remoteDefault, 'Protected branch checkpoint prohibited');
     requireValue(branch === args.branch, 'Current branch differs from authorized feature branch');
-    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches };
+    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches, ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
@@ -97,17 +61,31 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
       task.history.some(h => h.evidence?.reference === args.evidenceRef && h.evidence?.source === 'conductor' &&
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
-    git(repository, ['merge-base', '--is-ancestor', args.featureBaseRef, record.args.baseRef]);
-    if (record.args.baseRef !== args.featureBaseRef) {
-      const previousMessage = git(repository, ['show', '-s', '--format=%B', record.args.baseRef]);
-      const trailer = previousMessage.split('\n').find(line => line.startsWith('Pi-Task-Checkpoint: '));
-      const previous = JSON.parse(trailer?.slice('Pi-Task-Checkpoint: '.length) ?? 'null');
-      requireValue(previous?.schema === 'pi.task-checkpoint/v1' && previous.featureId === args.task.featureId &&
-        previous.designRef === args.task.designRef && previous.featureBaseRef === args.featureBaseRef && previous.branch === branch,
-      'Feature baseline or checkpoint lineage mismatch');
+    if (args.reconciliationRef) {
+      const anchor = await readReconciliation(repository, args.reconciliationRef, feature, args);
+      // Preserve ancestry and inherited dependencies while excluding only the
+      // current task's not-yet-created checkpoint from the preceding history.
+      // This is a temporary view; persisted Scaffold completion stays unchanged.
+      await checkpointHistory(repository, { ...feature, tasks: {
+        ...feature.tasks, [args.task.taskId]: { ...task, status: 'pending' },
+      } },
+        { head: record.args.baseRef, baseline: args.featureBaseRef, branch, anchor });
+    } else {
+      git(repository, ['merge-base', '--is-ancestor', args.featureBaseRef, record.args.baseRef]);
+      if (record.args.baseRef !== args.featureBaseRef) {
+        const previousMessage = git(repository, ['show', '-s', '--format=%B', record.args.baseRef]);
+        const trailer = previousMessage.split('\n').find(line => line.startsWith('Pi-Task-Checkpoint: '));
+        const previous = JSON.parse(trailer?.slice('Pi-Task-Checkpoint: '.length) ?? 'null');
+        requireValue(previous?.schema === 'pi.task-checkpoint/v1' && previous.featureId === args.task.featureId &&
+          previous.designRef === args.task.designRef && previous.featureBaseRef === args.featureBaseRef && previous.branch === branch &&
+          !previous.reconciliationRef && previous.baseRef === git(repository, ['show', '-s', '--format=%P', record.args.baseRef]) &&
+          previous.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']),
+        'Feature baseline or checkpoint lineage mismatch; use reconcile_feature_rebase after history rewrites');
+      }
     }
     const provenance = { schema: 'pi.task-checkpoint/v1', ...args.task, evidenceRef: args.evidenceRef,
-      featureBaseRef: args.featureBaseRef, baseRef: record.args.baseRef, tree: record.after.tree, branch };
+      featureBaseRef: args.featureBaseRef, baseRef: record.args.baseRef, tree: record.after.tree, branch,
+      ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
     const message = 'Checkpoint verified task ' + args.task.taskId.replace(/[\r\n]/g, ' ') +
       '\n\nPi-Task-Checkpoint: ' + JSON.stringify(provenance) + '\n';
     // Lock the real index before any mutation. Existing locks are never removed.

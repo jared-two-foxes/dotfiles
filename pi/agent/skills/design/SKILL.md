@@ -552,3 +552,38 @@ reports `applicable: false` when HEAD, tree, branch, task graph or underlying
 evidence changes. Scaffold's stored `verified` status describes a historical
 revision; always check native applicability before announcing the current feature
 verified. Never use an old result to authorize new source work or publishing.
+
+## Rebase recovery between tasks
+
+An explicitly user-performed rebase between completed/checkpointed tasks may be
+reconciled through native `reconcile_feature_rebase`. This is a verification-only
+exception, like final feature validation; never run the rebase, checks or Review
+through Bash as a substitute. Preserve original feature/design/baseline, receipt
+bytes and Scaffold task history. Do not rewrite checkpoint trailers. Capture the
+old checkpointed HEAD before rebasing, inspect the new upstream and actual HEAD,
+require clean source/index/worktree and no active Git operation or active/failed/
+blocked task loop. Rebasing inside a correction loop remains unsupported; stop
+and explicitly recover it before continuing, never reset or hide its partial work.
+
+Supply the existing feature validation checks/success markers/review bounds plus
+`oldHeadRef`, `upstreamBaseRef`, actual `headRef`, immutable `featureBaseRef`,
+feature/design/branch and known default/protected branches. Use
+`previousReconciliationRef` for repeated rebases. Narrow Pi UI confirmation permits
+only checks, independent review and local evidence/audit refs; no source changes,
+Git history rewriting, checkpoints, publishing or task lifecycle mutations.
+
+Inspect PASSED, actual diagnostics, review and `evidenceRef` before continuing.
+Use that reference as `reconciliationRef` on every subsequent checkpoint and final
+validation. The next task starts from the rebased HEAD as its own fixed `baseRef`;
+the original feature baseline/design remain unchanged. Checkpoint permission must
+cover this new reconciliation scope. Final validation authenticates the reconciled
+prefix, subsequent task checkpoints and original criteria. It still cumulatively
+reviews from the original baseline to comply with Scaffold's immutable binding.
+
+On resume use read-only `inspect_rebase_reconciliation` with featureId/reference.
+Historical success may be stale. Matching retained success can be recovered with
+`resumeEvidenceRef` and the exact reconciliation inputs/verification plan; partial
+intents, modified state, missing old receipts and failed checks never prove success.
+Squashed, missing, reordered or additional commits need explicit reconciliation;
+do not manufacture evidence, replace the feature or weaken its criteria to bypass
+this gate. See `extensions/conductor/README.md` for the complete input contract.
