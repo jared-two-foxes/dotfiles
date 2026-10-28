@@ -664,3 +664,21 @@ test('a terminal HEAD_CHANGED receipt preserves its consumed attempt and exact a
   const passed = await f.attempt({ ...recovered.resume, input: '{"operations":[]}' }, 'PASSED');
   assert.equal(passed.status, 'PASSED'); assert.equal(passed.evidence.attempt, 4);
 });
+
+test('interrupted recovery reaches independent review with mixed Cargo workspace and empty harness output', integration, async t => {
+  const f = await interruptedFixture(t);
+  const marker = 'test result: ok. 13 passed; 0 failed';
+  const workspaceOutput = [
+    'running 0 tests', 'test result: ok. 0 passed; 0 failed',
+    marker + '; 0 ignored; 0 measured; 0 filtered out',
+    'test result: ok. 20 passed; 0 failed', 'test result: ok. 5 passed; 0 failed',
+    'Doc-tests messages', 'running 0 tests', 'test result: ok. 0 passed; 0 failed',
+  ].join('\n');
+  const r = await f.recover({ testCommand: [process.execPath, '-e', 'console.log(' + JSON.stringify(workspaceOutput) + ')'], testSuccessPattern: marker });
+  assert.equal(r.status, 'READY', JSON.stringify(r));
+  const prefix = await readFeatureEvidence(f.dir, r.reconciliationRef);
+  assert.equal(prefix.checks.find(c => c.definition.name === 'test').stdout.trimEnd(), workspaceOutput);
+  assert.equal(prefix.review.status, 'APPROVED');
+  assert.match(JSON.parse(await readFile(f.capture, 'utf8')).requirements, /0 passed/);
+  assert.equal(r.consumedAttempts, 3);
+});
