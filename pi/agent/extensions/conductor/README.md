@@ -229,3 +229,71 @@ collection. Ordinary pushes/clones do not transfer this local evidence. Preserve
 it with the checkout. Hashes detect corruption, not hostile local rewriting.
 Rebases during an active task remain blocked: explicitly stop/recover that loop
 first, without resetting work or treating unverified edits as a fresh baseline.
+
+## Rebase after a task has already started
+
+Use `recover_interrupted_task_rebase` for an existing `in_progress`, `blocked` or
+`failed` task whose baseline was rewritten while its uncommitted work remains.
+This is the explicit interrupted-loop recovery referenced above; the ordinary
+between-task tool keeps its clean-tree restrictions. Never stash/reset the source
+checkout, rename the task, edit receipts or reset its consumed attempts to make
+that tool accept the state.
+
+Pass the same feature/rebase/branch/protection fields and completed-prefix
+verification plan as `reconcile_feature_rebase`, plus:
+
+- `task: {featureId, taskId, designRef}`: the original interrupted task identity.
+- `previousAttempt`: its latest real retained receipt, linking every earlier attempt.
+- `oldHeadRef`: that task's original fixed `baseRef`, not a new or inferred baseline.
+- `previousReconciliationRef`: the preceding feature rebase receipt for a later rebase.
+
+The native UI confirmation covers both completed-prefix verification and the
+baseline handoff. Recovery authenticates the entire receipt chain and consumed
+attempt count, and uses Git object-only three-way merging to prove the current
+implementation tree equals the retained task tree transplanted onto rebased HEAD.
+It never applies that merge to the source checkout. Conflicts, extra/missing edits,
+missing receipts/objects, divergent staged variants and exhausted five-attempt
+budgets block recovery rather than guessing. A clean index at HEAD or an index
+containing the entire current task tree is supported; other staged variants need
+explicit reconciliation. Git must support `merge-tree --write-tree --merge-base`.
+
+Completed-prefix commands and independent review run in a disposable detached
+worktree at rebased HEAD, without the interrupted task's source files. Both that
+worktree and the real source checkout are checked for concurrent changes. The
+real working tree, index, branch and Scaffold status stay unchanged. Select
+checks appropriate to the completed prefix; pending task-specific tests may not
+exist there yet. No dependency install or source repair is run automatically.
+
+A successful result is **READY**, never task PASSED. It returns:
+
+- `handoffRef`: a content-addressed task receipt with `kind: rebase-handoff`.
+- `reconciliationRef`: successful fresh evidence for the completed prefix.
+- `consumedAttempts` / `remainingAttempts`: unchanged task-wide budget.
+- `resume`: fixed original task/check settings, new `baseRef`, additive original
+  criteria/retained findings, and `previousAttempt: handoffRef`. It intentionally
+  omits `input`, so old source operations cannot be blindly replayed.
+
+For example, three consumed attempts remain three; the next Conductor invocation
+is attempt four and at most two attempts remain. The handoff links the old three
+receipts unchanged, retains all original requests/responses and diagnostics, and
+adds unresolved review findings to the new fixed requirements. Ordinary retries
+keep those requirements/checks fixed. Later rebases preserve the same budget.
+
+Inspect the handoff through `inspect_task_rebase_recovery` or
+`inspect_conductor_evidence`. If the task is blocked/failed, explicitly reconcile
+its Scaffold lifecycle with `retry` and `start`, recording the handoff reference
+and consumed count in the reason; recovery does not do this automatically.
+Author the actual correction from current source, obtain normal execution
+approval, then call `execute_and_review` with `resume` plus new exact `input`.
+Only a real subsequent successful Conductor attempt can complete the task. Pass
+`reconciliationRef` to its checkpoint and final feature validation as usual.
+
+On interruption, `prefixEvidenceRef` reuses an authentic complete matching prefix
+result; `resumeHandoffRef` recovers an already retained matching handoff without
+running checks again. Changed source/state/plan must not reuse old authorization.
+Read-only inspection reports applicability; historical READY is not task approval.
+Git audit refs under `refs/pi-task-recoveries/<receipt-hash>/` preserve every old
+and recovered snapshot against garbage collection; interrupted audit-ref writes
+are idempotently repaired without replacing unexpected existing refs. Keep all
+local evidence with the checkout. A killed process can leave a temporary worktree;
+inspect ownership before removing it, never clean the real source checkout.

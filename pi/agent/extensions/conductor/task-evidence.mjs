@@ -1,6 +1,6 @@
 // Authenticate immutable task receipts independently of current branch history.
 import { sameVerification } from './verification.mjs';
-import { git } from './git-tree.mjs';
+import { authenticateAttemptChain } from './task-chain.mjs';
 import { readEvidence, verifiedResult } from './evidence.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
@@ -26,21 +26,7 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
     record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
     record.response?.code === 0 &&
     verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
-  // Prove the correction chain began clean and never changed task or baseline.
-  let first = record;
-  const seen = new Set();
-  while (first.args.previousAttempt) {
-    requireValue(!seen.has(first.args.previousAttempt), 'Cyclic receipt chain'); seen.add(first.args.previousAttempt);
-    const prior = await readEvidence(repository, first.args.previousAttempt);
-    requireValue(prior.attempt + 1 === first.attempt && prior.attempt < 5 &&
-      ['featureId', 'taskId', 'designRef'].every(k => prior.task[k] === record.task[k]) &&
-      prior.args.baseRef === record.args.baseRef && prior.args.requirements === record.args.requirements &&
-      sameVerification(prior.args, record.args) &&
-      prior.result.status !== 'PASSED' && prior.before.head === record.args.baseRef && prior.after.head === record.args.baseRef &&
-      prior.after.digest === first.before.digest, 'Invalid correction receipt chain');
-    first = prior;
-  }
-  requireValue(first.attempt === 1 && first.before.clean && first.before.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), 'Task did not start from a clean isolated baseline');
+  await authenticateAttemptChain(repository, reference, binding);
   return record;
 }
 

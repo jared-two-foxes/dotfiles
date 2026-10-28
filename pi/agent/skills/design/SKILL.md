@@ -587,3 +587,38 @@ intents, modified state, missing old receipts and failed checks never prove succ
 Squashed, missing, reordered or additional commits need explicit reconciliation;
 do not manufacture evidence, replace the feature or weaken its criteria to bypass
 this gate. See `extensions/conductor/README.md` for the complete input contract.
+
+### Interrupted task baseline handoff after rebase
+
+If the user already rebased an active task and its uncommitted implementation is
+still present, use native `recover_interrupted_task_rebase`, not the between-task
+tool and not an invented replacement task. This is the explicit recovery path for
+the active-loop restriction above. It grants no implementation approval. Retain
+the original criteria, old attempt references, failures/findings and consumed
+five-attempt budget. Supply original task identity/latest receipt, old task
+baseline as `oldHeadRef`, actual rebased head/upstream, immutable feature baseline,
+branch/protection scope and completed-prefix verification plan. Repeated rebases
+link `previousReconciliationRef`. Never change task status merely to evade checks.
+
+Narrow Pi UI authority permits verification in a disposable detached worktree,
+Git snapshot objects, audit refs and an explicit baseline handoff only. Current
+source/index/branch and task state are preserved. Task work must exactly match a
+conflict-free three-way transplant of the retained task tree onto the rebased
+HEAD; conflicts, unrelated edits, lost evidence, divergent staged variants or an
+exhausted budget block. No stash/reset, source correction, branch rewrite or
+lifecycle transition is performed. Original correction baselines remain fixed
+within each epoch; only an authenticated handoff can bridge epochs.
+
+Inspect READY, `handoffRef`, prefix `reconciliationRef`, original consumed count
+and `resume`. READY is not PASSED and cannot complete a task. Use read-only
+`inspect_task_rebase_recovery` on resume. Explicitly reconcile blocked/failed task
+lifecycle via native Scaffold retry/start, recording the handoff/count; author
+fresh correction operations and obtain ordinary execution approval. Pass the
+returned `resume` fields plus new `input` to `execute_and_review`, using the
+handoff as `previousAttempt`. Three old attempts mean the next is four, not one.
+The fixed resumed requirements preserve original criteria and all retained review
+findings; full old diagnostics remain inspectable in the linked receipts. Never
+silently weaken them or replay the old input. Only subsequent real PASSED evidence
+can support completion/checkpointing. Use the prefix reconciliation reference for
+checkpoint/final validation. Partial intents never prove success; matching complete
+prefix/handoff retention supports `prefixEvidenceRef`/`resumeHandoffRef` recovery.

@@ -5,6 +5,7 @@
 import { verificationChecks, sameVerification } from './verification.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
+import { readTaskHandoff, assertLatestAttempt } from './task-chain.mjs';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -226,6 +227,8 @@ export async function executeAndReview(args, context = {}, options = {}) {
     });
     if (args.previousAttempt) {
       const previous = await readEvidence(repository, args.previousAttempt);
+      await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
+      if (previous.kind === 'rebase-handoff') await readTaskHandoff(repository, args.previousAttempt, args.task);
       if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
           previous.args.baseRef !== args.baseRef || previous.args.requirements !== args.requirements ||
           !sameVerification(previous.args, args) ||

@@ -11,6 +11,7 @@ import { executeAndReview } from "./adapter.mjs";
 import { checkpointVerifiedTask, checkpointAuthorization } from "./checkpoint.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
+import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -19,6 +20,48 @@ export default function (pi: ExtensionAPI) {
     checkpointContext?.hasUI === true && await checkpointContext.ui.confirm(title, message);
   const authorizeCheckpoint = checkpointAuthorization(confirmation);
   pi.on("session_start", async () => { authorizeCheckpoint.reset(); });
+  pi.registerTool({
+    name: "recover_interrupted_task_rebase",
+    label: "Recover interrupted task after rebase",
+    description: "Explicit recovery of an active/blocked/failed task after rebase. Preserve current files/index, old receipt chain, criteria/findings and consumed attempts. Verify only the completed prefix in a disposable worktree, then retain a non-PASSED handoff for execute_and_review.previousAttempt. No source writes, stash/reset, task lifecycle changes or attempt reset. Requires narrow UI authorization; next source correction needs normal execution approval.",
+    parameters: Type.Object({
+      task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
+      previousAttempt: Type.String({ description: "Latest retained receipt of the interrupted task; all consumed attempts must remain linked" }),
+      featureId: Type.String(), designRef: Type.String(), branch: Type.String(),
+      featureBaseRef: Type.String(), oldHeadRef: Type.String(), upstreamBaseRef: Type.String(), headRef: Type.String(),
+      defaultBranch: Type.String(), protectedBranches: Type.Array(Type.String()),
+      previousReconciliationRef: Type.Optional(Type.String()), prefixEvidenceRef: Type.Optional(Type.String()),
+      resumeHandoffRef: Type.Optional(Type.String()),
+      buildCommand: Type.Array(Type.String(), { minItems: 1 }),
+      testCommand: Type.Array(Type.String(), { minItems: 1 }), testSuccessPattern: Type.String(),
+      integrationChecks: Type.Optional(Type.Array(Type.Object({
+        name: Type.String(), command: Type.Array(Type.String(), { minItems: 1 }), successPattern: Type.String(),
+      }))),
+      checkTimeoutMs: Type.Optional(Type.Integer()),
+      review: Type.Optional(Type.Object({
+        model: Type.Optional(Type.String()), wallClockBudgetSecs: Type.Optional(Type.Integer()),
+        maxTurns: Type.Optional(Type.Integer()), maxCostUsd: Type.Optional(Type.Number()), maxToolCalls: Type.Optional(Type.Integer()),
+        maxRepeatedActions: Type.Optional(Type.Integer()), maxCompletionAttempts: Type.Optional(Type.Integer()),
+      })),
+    }),
+    async execute(_id, params, signal, _onUpdate, ctx) {
+      const result = await recoverInterruptedTaskRebase(params, { directory: ctx.cwd, abort: signal }, {
+        authorize: async scope => ctx.hasUI === true && await ctx.ui.confirm("Authorize interrupted task rebase recovery",
+          JSON.stringify(scope, null, 2) + "\nVerify the completed prefix in a disposable worktree and retain an explicit new-baseline handoff for this unfinished task? Preserve all source/index changes, criteria, findings and consumed attempts. This grants verification, temporary worktree and evidence/audit-ref authority only. No source correction, stash/reset, branch changes, task transitions or publishing."),
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: result.status === "BLOCKED", details: result };
+    },
+  });
+  pi.registerTool({
+    name: "inspect_task_rebase_recovery",
+    label: "Inspect interrupted task rebase handoff",
+    description: "Authenticate retained task rebase handoff, consumed attempts, completed-prefix evidence and current applicability. Read only; READY never means task verification passed.",
+    parameters: Type.Object({ reference: Type.String() }),
+    async execute(_id, params, _signal, _onUpdate, ctx) {
+      const result = await inspectTaskRebaseRecovery(params, { directory: ctx.cwd });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: !result.ok, details: result };
+    },
+  });
   pi.registerTool({
     name: "reconcile_feature_rebase",
     label: "Verify feature after rebase",
