@@ -40,9 +40,17 @@ export function planFor(args) {
     wallClockBudgetSecs: normalized.budget, maxTurns: normalized.turns } };
 }
 export function meaningful(check, output) {
+  if (output.exit_code !== 0 || output.problem) return false;
+  if (check.name === 'build') return true;
   const text = output.stdout + '\n' + output.stderr;
-  return output.exit_code === 0 && !output.problem && (check.name === 'build' ||
-    (text.includes(check.successPattern) && !/\b(?:0 tests|no tests (?:found|ran|collected)|0 passed)\b/i.test(text)));
+  if (!text.includes(check.successPattern)) return false;
+  // A workspace may contain substantive suites AND empty harnesses/doc-tests.
+  // An empty-run diagnostic only vetoes coverage when no completed positive
+  // test count is reported. Merely scheduling/running N tests is not enough.
+  // Counts and labels must share a physical line (and output stream).
+  const emptyRun = /\b(?:0[ \t]+(?:tests?|passed|passing)|no tests (?:found|ran|collected))\b|\b(?:pass|passed)[ \t]*[:=]?[ \t]*0\b/i;
+  const positivePasses = /\b[1-9]\d*[ \t]+(?:passed|passing|tests?[ \t]+passed)\b|\b(?:pass|passed)[ \t]*[:=]?[ \t]*[1-9]\d*\b/i;
+  return !emptyRun.test(text) || positivePasses.test(text);
 }
 
 export function monitorTrackedInputs(repository) {
