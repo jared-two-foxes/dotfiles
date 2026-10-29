@@ -200,3 +200,15 @@ process.stdin.on('end', () => {
     else process.env.CONDUCTOR_BIN = previous;
   }
 });
+
+test('native issue-only entry rejects an unbound legacy execution request', async t => {
+  const f = await fixture(t);
+  let called = false;
+  const result = await executeAndReview(f.args, { worktree: f.dir }, {
+    issueWorkflowOnly: true,
+    invokeConductor: async () => { called = true; throw new Error('must not run'); },
+  });
+  assert.equal(result.status, 'BLOCKED');
+  assert.equal(result.reason, 'ISSUE_REQUIRED');
+  assert.equal(called, false);
+});
