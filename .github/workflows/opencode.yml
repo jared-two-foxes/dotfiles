@@ -16,8 +16,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Phase 5 lifecycle contract; pin avoids branch drift before/after merge.
-          ref: efe144579e97f4c4b1bbee980e2af1d33cf4f1db
+          # Recursive issue lifecycle contract; pin the companion Scaffold implementation.
+          ref: 6c37ae6260476f95e10a4e816a233e8bdcf24d1e
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:

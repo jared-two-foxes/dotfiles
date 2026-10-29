@@ -1,3 +1,4 @@
+import { issueMutation } from './issue-state.mjs';
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 export { authenticateTaskEvidence } from './task-evidence.mjs';
@@ -32,6 +33,15 @@ export function checkpointAuthorization(confirm) {
   };
   authorize.reset = () => { grants.clear(); epoch++; };
   return authorize;
+}
+
+// A partially staged file is safe only when its exact blob/mode is also in the
+// independently verified tree. This preserves restored staging without accepting variants.
+function verifiedIndex(repository, baseline, index, verified) {
+  if (index === baseline || index === verified) return true;
+  const changed = git(repository, ['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', baseline, index]).split('\0').filter(Boolean);
+  return changed.every(name => git(repository, ['ls-tree', '-z', index, '--', name]) ===
+    git(repository, ['ls-tree', '-z', verified, '--', name]));
 }
 
 export async function checkpointVerifiedTask(args, context = {}, options = {}) {
@@ -113,7 +123,7 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     } else {
       requireValue(current.digest === record.after.digest, 'Current source/index differs from verification receipt');
       // Review uses tree-to-workdir, not the index. A divergent staged variant is unverified.
-      requireValue(indexTree === baselineTree || indexTree === record.after.tree, 'Staged changes cannot be isolated safely');
+      requireValue(verifiedIndex(repository, baselineTree, indexTree, record.after.tree), 'Staged changes cannot be isolated safely');
     }
     requireValue(await implementationTree(repository, record.args.baseRef) === record.after.tree, 'Current implementation differs from verified tree');
     requireValue(await options.authorize?.(args.authorizationMode === 'feature' ? featureScope : scope, args.authorizationMode),
@@ -154,6 +164,8 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     requireValue(git(repository, ['rev-parse', 'HEAD']) === commit && (await snapshot(repository)).clean,
       'Checkpoint created but repository changed; reconcile before next task');
     if (pending) git(repository, ['update-ref', '-d', pendingRef, commit]);
+    if (feature.workflow?.kind === 'recursive-issues/v1')
+      await issueMutation(repository, args.task, 'checkpoint-record', { commit, reference: args.evidenceRef }, options);
     return { ok: true, ...provenance, commit, recovered, nextBaseRef: commit };
   } catch (error) {
     return { ok: false, reason: 'CHECKPOINT_BLOCKED', message: error.message,

@@ -301,7 +301,7 @@ test('real native handoff: dependent task becomes ready but cannot cross an unre
 
 test('workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals', async () => {
   const design = await readFile(new URL('../pi/agent/skills/design/SKILL.md', import.meta.url), 'utf8');
-  for (const phrase of ['Mandatory decomposition', 'before generating Executor', 'Confirm consequential decomposition',
+  for (const phrase of ['Mandatory decomposition', 'Before generating Executor', 'Confirm consequential decomposition',
     'Verification:', 'ancestor dependencies', 'future feature criteria',
     'previousAttempt', 'inspect_conductor_evidence', 'Oversized task', 'completed descendants',
     'parent remains incomplete', 'five total application attempts', 'two consecutive attempts',

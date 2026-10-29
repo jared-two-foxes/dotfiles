@@ -12,16 +12,20 @@ const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', a
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
 const params = operation => ({ operation, feature_id: 'F1',
-  ...(['start', 'complete', 'block', 'fail', 'retry', 'decompose'].includes(operation) ? { task_id: 'T1' } : {}),
+  ...(['start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume'].includes(operation) ? { task_id: 'T1' } : {}),
   ...(['block', 'fail', 'retry'].includes(operation) ? { reason: 'Explicit decision' } : {}),
-  ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] } }[operation] ?? {}),
+  ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] },
+    'design-record': { payload: { summary: 'Approved', verification: 'Tests', approval: 'User confirmed', disposition: 'leaf' } },
+    'design-reopen': { payload: { reason: 'Review finding' } },
+    'checkpoint-record': { payload: { commit: 'a'.repeat(40), reference: 'receipt' } },
+    'issue-resume': { payload: { reference: 'suspension', handoff: 'handoff' } } }[operation] ?? {}),
 });
 const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 1, ...data }), stderr: '' });
 function response(operation) {
   if (['start', 'complete', 'block', 'fail', 'retry'].includes(operation)) {
     return success({ task: task('T1', { start: 'in_progress', complete: 'completed', block: 'blocked', fail: 'failed', retry: 'pending' }[operation]) });
   }
-  return success({ feature: { ...feature, tasks: { T1: task() } }, ...(operation === 'next' ? { task: task() } : {}) });
+  return success({ feature: { ...feature, tasks: { T1: task() } }, ...(['next', 'design-next'].includes(operation) ? { task: task() } : {}) });
 }
 async function fixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'pi-scaffold-')));
@@ -118,7 +122,7 @@ test('malformed, unsupported, mismatched and incomplete responses fail safely', 
   const dir = await fixture(t);
   const base = JSON.parse(response('next').stdout);
   const invalid = ['not json', 'null', '[]', '{}',
-    JSON.stringify({ ...base, schema_version: 2 }),
+    JSON.stringify({ ...base, schema_version: 3 }),
     JSON.stringify({ ...base, schema_version: '1' }),
     JSON.stringify({ ...base, error: 'failure' }),
     JSON.stringify({ ...base, feature: { ...base.feature, id: 'other' } }),
@@ -187,7 +191,7 @@ test('requires a current repository and refuses state symlinks', async t => {
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
   const adapter = await readFile(path.join(root, 'pi/agent/extensions/scaffold/adapter.mjs'), 'utf8');
   const extension = await readFile(path.join(root, 'pi/agent/extensions/scaffold/index.ts'), 'utf8');
-  assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|conductor|executor|push-ticket|next-step/i);
+  assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|executeAndReview|invokeConductor|push-ticket|next-step/i);
   assert.match(adapter, /shell: false/);
   assert.match(adapter, /child\.stdin\.end\(input\)/);
   assert.match(extension, /name: "scaffold_tasks"/);

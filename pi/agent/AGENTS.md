@@ -6,15 +6,16 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   reviews, load `/skill:review` and use the native `review_changes` tool.
   It reviews existing changes without applying findings or running builds/tests.
   `ERROR` and `INDETERMINATE` never mean approval.
-- **Implementation:** load `/skill:design`, agree the architecture, obtain
-  feature architecture approval for complex work, decompose and persist before
-  detailed task design, then obtain task design approval, prepare exact operations
-  with `/skill:executor`, and obtain
-  separate execution approval. Only `execute_and_review` may apply changes
-  and run build/test/review verification. Do not edit/write directly or invoke
-  executor/review-cli from Bash. Do not commit or change branches during an
-  active verification/correction loop. Standalone review cannot substitute
-  for implementation verification.
+- **Design and Implement:** load `/skill:design`. New features use the recursive
+  issue graph: persist the agreed ticket/root, design and confirm nodes downward,
+  record each approved design, then `design-finish` before implementation. Select
+  eligible leaves, recover their designs, prepare exact operations with `/skill:executor`
+  and obtain separate execution approval. Only `execute_and_review` applies source
+  changes and runs checks/review. Complete and checkpoint each issue (including
+  verification-only parents), then validate the feature. For discoveries, suspend
+  active work through UI-authorized `suspend_issue`, design/checkpoint prerequisites,
+  and restore through `resume_issue` without resetting attempts or losing findings.
+  Never stash/reset from Bash or change HEAD during an active correction epoch.
 - **Git/GitHub publishing:** follow `SYSTEM.md`. When explicitly requested,
   prepare selected feature-branch commits, push with Git, and create/update
   PRs with `gh pr create` / `gh pr edit`. Confirm the repository, remote,
@@ -33,15 +34,11 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   verification authority. Pi owns sequencing; do not automatically advance or
   retry work. Complete only with actual task-bound successful Conductor evidence.
   Scaffold validates structure and association, not evidence authenticity.
-  After architecture approval, decompose complex work, persist the agreed
-  architecture/tasks,
-  select one eligible task, design it in detail and obtain its design approval.
-  Scope review requirements to that task and its approved decisions. Never infer
-  missing task approval on recovery or silently revise immutable architecture. Recover from full
-  persisted state and retained receipts; use read-only `inspect_conductor_evidence`.
-  Recursively decompose oversized remaining work without completing parents.
-  Stop between tasks when a Git checkpoint is required; use `checkpoint_verified_task` with separate manual or session-scoped feature
-  checkpoint authorization outside the active loop.
+  New issues retain origin, criteria, constraints and dependencies. Design records
+  persist user confirmation before any attempt. Recover phase, designs, receipt
+  chains and Git provenance before selecting work. Completed descendants and prior
+  failures remain intact. Every issue needs authentic verification and a separately
+  authorized checkpoint. Existing features without the workflow flag remain legacy.
 
 Use the Linear tools when the user explicitly asks to manage shared tickets.
 Confirm proposed creations or revisions before execution. Ticket descriptions

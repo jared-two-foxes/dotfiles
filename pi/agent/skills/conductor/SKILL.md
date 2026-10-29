@@ -39,13 +39,12 @@ builds or tests.
 
 ## Approval gates
 
-For complex features Design first obtains feature architecture approval and
-persists independently designable tasks before detailed design. The gates below
-apply to the selected task; architecture approval never replaces task design or
-execution approval. Small changes keep the single-task flow. Include the approved
-task summary, decisions and actual approval record in fixed `requirements` so the
-existing receipt retains them. Missing approval on resume requires reinspection
-and reapproval, not inference from task status or feature approval.
+For new recursive issue workflows, Design persists the ticket/root, walks all
+required issue designs downward with user confirmation, and calls `design-finish`
+before implementation. Implement selects eligible leaves and recovers their approved
+designs; it does not repeat the entire design phase. Include the exact approved
+issue design suffix and criteria in fixed requirements. Existing features retain
+their legacy lifecycle. Keep separate design and execution approvals.
 
 1. Inspect the repository and discuss material design decisions iteratively,
    using focused code/text examples with changed portions marked, including
@@ -212,3 +211,13 @@ lifecycle recovery and normal execution approval, with returned `resume` plus ne
 exact operations, handoff `previousAttempt`, and prefix `reconciliationRef` for
 checkpoint/final validation. READY is never task PASSED. See Design's interrupted
 handoff guidance for conflicts, budget limits and interruption recovery.
+
+
+For new prerequisites or review discoveries, stop the active issue and use native
+`suspend_issue` with explicit UI authority. Design/checkpoint the new issues, then
+`resume_issue` restores saved source/staging and returns an authenticated handoff.
+Pass its resume fields plus fresh input to the next execute_and_review call.
+Criteria, findings and consumed attempts survive; three attempts mean four next.
+Routine corrections stay within the same issue. Never stash/reset from Bash or
+create replacement issues to reset the budget. Each resolved issue has a verified
+checkpoint commit, including empty parent verification, before dependent work.

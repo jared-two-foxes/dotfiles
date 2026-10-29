@@ -1,267 +1,151 @@
 ---
 name: scaffold
 description: >
-  Use Pi's native scaffold_tasks tool for persistent feature tasks,
-  dependencies, lifecycle history and supplied verification evidence.
-  Scaffold stores state; Pi reasons and Conductor executes and verifies.
+  Persist Pi's recursive issue graph, approved designs, dependencies, phase
+  transitions and verified lifecycle using native scaffold_tasks. Scaffold stores
+  state; Pi designs and sequences; Conductor executes and verifies.
 ---
 
-# Persistent feature tasks
+# Persistent issue graph
 
-Use **`scaffold_tasks`**, backed by the existing `scaffold` executable on PATH
-with the Phase 1 `tasks` API (schema_version 1). All operations run at the root
-of Pi's current Git repository, even from a subdirectory. There is no repo path
-parameter, second state store, or in-memory current-task pointer. State remains
-in `.scaffold/tasks.json`; do not edit it directly. The adapter also rejects
-symlinked state paths. Scaffold's own atomic writes and locking own persistence.
+Use native **`scaffold_tasks`**, backed by the installed `scaffold` executable.
+Pi owns reasoning, approvals, decomposition and sequencing. Scaffold owns its
+atomic locked state at `.scaffold/tasks.json`, dependencies and lifecycle history.
+Never edit state files directly. Native tools never automatically select the next
+issue, generate code, retry implementation or claim verification from bookkeeping.
+Use `/skill:design` for the complete Research → Design → Implement workflow.
 
-Pi owns design, decomposition, sequencing and recovery decisions. Scaffold owns
-persistence, dependency checks and lifecycle validation. Conductor owns application
-source execution, build/test checks and independent review invocation. The native
-Scaffold tool never generates code, invokes Conductor, retries implementation or
-automatically advances a task.
+The user provides a ticket; a feature retains its original objective, criteria,
+branch and baseline; all graph nodes are issues. Existing API names remain
+`task`, `task_id` and `tasks` for compatibility. Issue origin records whether it
+came from the ticket, design, review or an implementation discovery. The legacy
+criteria stack is separate; never mirror this graph into it.
 
-## Interface
+## Initialize and design downward
 
-Every call requires `operation` and `feature_id`. Preserve explicit feature and
-task IDs from requirements and results; never infer an implicit current task.
-Unknown/irrelevant arguments are rejected. Payloads are structured JSON values,
-not JSON strings or filenames. The adapter sends them on stdin with `--input -`.
+Every call supplies `operation` and explicit `feature_id`. Repository scope is
+Pi's current Git root; there is no arbitrary repo path or implicit current issue.
 
-| operation | Other required fields | Returned data |
+For a new feature initialize from the agreed ticket scope:
+
+```json
+{"operation":"init","feature_id":"F1","payload":{"id":"F1","title":"Client activity","objective":"Record and display activity","acceptance_criteria":["Recorded activity is displayed"],"context":"Exact agreed ticket, constraints, original full Git baseline and feature branch","design_ref":"sha256:context","workflow":"recursive-issues/v1","baseline":"<full original SHA>","branch":"feature/activity"}}
+```
+
+The adapter replaces `sha256:context` with the digest of the exact context. Retain
+the returned reference. A root issue with the feature ID is created automatically;
+full system design is not a prerequisite to initialization. Context/digest mismatch
+blocks recovery. Existing immutable `path@full-commit-SHA` designs remain supported.
+
+Call `list`, then `design-next` to select an undesigned issue below an approved
+parent/prerequisite contract. Selection never claims or starts work. Design only
+this issue and its immediate responsibilities; obtain user confirmation.
+
+If it requires smaller units, `decompose` with an atomic array of child definitions.
+Every definition needs ID, title, narrow objective, acceptance_criteria, relevant
+context, inherited constraints and explicit dependencies (`[]` when none). Put
+`Verification:` strategy, edge cases and expected outcomes in context. Optional
+`origin: {kind: "ticket"|"design"|"review"|"discovery", reference: "<issue/evidence>"}`
+records provenance. Forward dependencies within the batch are allowed; cycles,
+missing dependencies and duplicates fail atomically. Children inherit ancestor
+dependencies; downstream issues depend on the parent. Completed descendants remain
+intact. Definitions are immutable; designs are separately retained records.
+
+Record the confirmed design after adding its immediate children:
+
+```json
+{"operation":"design-record","feature_id":"F1","task_id":"F1","payload":{"summary":"Approved responsibility boundaries, interfaces, decisions and constraints","verification":"Actual checks and integration criteria","approval":"What the user explicitly approved","disposition":"decomposed"}}
+```
+
+A leaf uses `disposition: "leaf"`. Scaffold binds the immediate children into a
+content-addressed record; the adapter checks its digest. Reopening a design retains
+old designs and invalidates unfinished descendant designs so they receive fresh
+confirmation. Completed designs/evidence are preserved. Never invent approval.
+
+Continue `design-next` until all required nodes have confirmed designs. Then
+`design-finish` transitions the graph to implementation. It refuses incomplete
+designs. A null selection alone never grants execution authority.
+
+## Implement upward
+
+Use `list` and `next` to select an eligible issue. **`next` returning null does not
+necessarily mean the feature is complete.** It also returns null during Design,
+while an issue is active, when a checkpoint is missing or when work is suspended.
+Inspect the complete state. Recover its approved design and include the exact
+Design-specified suffix in fixed Conductor requirements. Keep separate design and execution
+approvals; obtain fresh execution approval for each issue.
+
+| Operation | Additional fields | Meaning |
 | --- | --- | --- |
-| `init` | `payload`: feature definition | Full feature |
-| `add` | `payload`: nonempty array of task definitions | Full feature |
-| `list` | none | Full feature and all task histories |
-| `next` | none | Full feature and eligible `task` or `null` |
-| `start` | `task_id` | Updated task |
-| `complete` | `task_id`, `payload`: evidence | Updated task with evidence in history |
-| `block` | `task_id`, `reason` | Updated task |
-| `fail` | `task_id`, `reason` | Updated task |
-| `retry` | `task_id`, `reason` | Updated task |
-| `decompose` | `task_id`, `payload`: nonempty array of children | Full feature |
+| `list`, `next`, `design-next`, `design-finish` | none | Inspect/select or explicitly finish design |
+| `add` | payload: issue definitions | Add top-level/dependent corrections during Design |
+| `decompose` | task_id, payload: children | Add immediate children during Design |
+| `design-record` | task_id, payload: approved design | Persist confirmation before implementation |
+| `start` | task_id | Start one ready issue during Implement |
+| `complete` | task_id, payload: evidence | Complete from actual PASSED evidence |
+| `block`, `fail`, `retry` | task_id, reason | Explicit reconciled lifecycle transition |
+| `design-reopen` | optional task_id, payload: reason and optional suspension reference | Return affected work to Design |
+| `checkpoint-record` | task_id, payload: commit and reference | Native checkpoint bookkeeping after authentic Git commit |
+| `issue-resume` | task_id, payload: reference and handoff | Native restoration bookkeeping after authenticated source handoff |
 
-Feature definitions require `id`, `title`, `objective`, `design_ref` and nonempty
-`acceptance_criteria` (string array). Use an accessible immutable reference to the
-approved feature design. Optional fields: `context` (string), `constraints`
-(string array). Task definitions require the same fields except `design_ref`;
-they also accept `dependencies` (unique task IDs within this feature). Put enough
-context and constraints in definitions for a fresh session to understand them.
-Definitions are immutable in v1.
+Only one issue may be active. Prerequisites and children must be completed; every
+completed issue must have a checkpoint before another starts. Parents remain open
+after children finish and need their own Conductor verification and checkpoint,
+including an empty commit when no integration edits are needed.
 
-Tool results have `ok`, `operation`, `feature_id`, an explicit `task_id` when
-requested, and either `data` (the original schema_version 1 response) or structured
-`reason`/`message`. Nonzero CLI failures include `exit_code`, bounded `stderr` and
-`scaffold_error` when stderr is JSON. Invalid input, missing executables, malformed
-responses and unsupported versions are failures, never successful verification.
-A timeout, cancellation or invalid response can follow a persisted mutation:
-inspect with `list` before deciding whether to retry. Never blindly replay writes.
+## Evidence, checkpoints and final validation
 
-## Explicit usage example
-
-These are native tool argument objects, not shell commands or an automatic loop.
-Only initialise from an approved design when task tracking is requested/agreed.
-Creating state or starting a task grants no source execution approval.
-
-```json
-{"operation":"init","feature_id":"F1","payload":{"id":"F1","title":"Client activity","objective":"Record and display activity","design_ref":"docs/activity.md@approved-commit","acceptance_criteria":["Activity is recorded and displayed"]}}
-```
-
-Persist independently understandable, implementable and verifiable tasks. One
-atomic add can reference other tasks in that batch; Scaffold rejects cycles and
-missing dependencies.
-
-```json
-{"operation":"add","feature_id":"F1","payload":[{"id":"domain","title":"Activity model","objective":"Define activity data","acceptance_criteria":["Activity includes client ID and timestamp"],"constraints":["No database dependencies"]},{"id":"storage","title":"Activity persistence","objective":"Store activity through the adapter","acceptance_criteria":["Recorded activity can be retrieved"],"dependencies":["domain"]}]}
-{"operation":"next","feature_id":"F1"}
-{"operation":"start","feature_id":"F1","task_id":"domain"}
-{"operation":"list","feature_id":"F1"}
-```
-
-`next` only reads/selects; it does not start work. **`next` returning null does not
-necessarily mean the feature is complete.** Inspect the full feature for
-`in_progress`, `blocked`, `failed` or unfinished `decomposed` tasks. Even all tasks
-completed does not itself prove final feature-level validation happened.
-
-For implementation load `/skill:design`. Retain separate design and execution
-approvals and the existing single-task Conductor correction behavior. Only an
-approved `execute_and_review` call can apply application source changes and run
-implementation verification. Design owns feature decomposition, task selection and recovery; this tool does
-not orchestrate execution or final feature validation. Complex work must be planned
-and persisted before Executor authoring. See `/skill:design` for the full handoff.
-
-## Recording trusted verification
-
-After an actual successful Conductor verification covering this task's approved
-criteria, inspect its result and preserve an accessible durable result reference.
-For Pi task execution supply the exact feature/task/design binding to Conductor.
-Its returned `evidence.reference` identifies the retained request, result, Git
-fingerprints and provenance. Read it with `inspect_conductor_evidence`; check exact
-identity, fixed requirements, tree, successful checks and independent APPROVED
-review, and inspect actual test output. Structural validation is necessary but
-cannot prove meaningful tests ran. Missing, invalid, mismatched or uncertain
-receipts leave work unfinished. Never use a transcript pointer as retained proof.
-Record the evidence and complete the explicit task with a single call:
-
-```json
-{"operation":"complete","feature_id":"F1","task_id":"domain","payload":{"feature_id":"F1","task_id":"domain","result":"PASSED","source":"conductor","reference":"durable-result-reference-for-domain-attempt-1","summary":"Actual build, tests and independent review passed for the domain criteria"}}
-```
-
-The reference above is a placeholder: replace it with the real retained result.
-Do not invent a reference, summary or PASSED result. If a successful result or
-usable reference is unavailable, leave the task unfinished and explain why.
-There is no separate evidence-write API: `complete` appends evidence to history
-and changes the task to `completed` atomically. It requires `in_progress` and
-completed prerequisites. An identical completion replay is a no-op; different
-evidence for a completed task is rejected.
-
+Scaffold validates structure and association, not evidence authenticity.
 **Scaffold's deterministic validation is not trusted Conductor verification.**
-Scaffold checks evidence structure, task association and transitions only. It does
-not execute, read or authenticate the evidence or its reference. A tool response
-with `ok: true` means a lifecycle operation succeeded; it never proves tests ran
-or review passed. Pi must establish trust from the actual verification result.
-Do not map NEEDS_DESIGN, BLOCKED, missing results or a well-formed JSON object to
-PASSED. Standalone review cannot substitute for Conductor verification.
-
-## Blocked, failed and oversized work
-
-- `block` records a reason for pending, in-progress or decomposed work. Blocking
-  a parent pauses descendant eligibility.
-- `fail` records a failed in-progress task; retain the actual failure reason.
-- `retry` explicitly returns in-progress/interrupted, blocked or failed work to
-  pending (or decomposed if it has children). Inspect source/state and decide on
-  recovery first. This does not retry execution or authorise implementation.
-- `decompose` preserves an oversized parent's definition/history and adds required
-  children. Pending, in-progress, blocked, failed and decomposed parents can be
-  split; completed parents cannot. It explicitly resumes blocked/failed work via
-  children. Repeated calls append uniquely identified children; a child can itself
-  be decomposed. Ancestor dependencies still gate children. Keep completed work
-  intact and put only remaining unverified work into child definitions.
+Inspect actual successful execution, checks with meaningful coverage, independent
+APPROVED review and exact feature/issue/design/tree through
+`inspect_conductor_evidence`. Missing/tampered/uncertain evidence leaves work open.
+Complete using the actual receipt:
 
 ```json
-{"operation":"block","feature_id":"F1","task_id":"storage","reason":"Adapter contract needs clarification"}
-{"operation":"retry","feature_id":"F1","task_id":"storage","reason":"Contract clarified; explicitly resume"}
-{"operation":"decompose","feature_id":"F1","task_id":"storage","payload":[{"id":"write","title":"Store activity","objective":"Implement adapter write","acceptance_criteria":["Activity is stored"]},{"id":"read","title":"Read activity","objective":"Implement adapter query","acceptance_criteria":["Stored activity can be queried"],"dependencies":["write"]}]}
+{"operation":"complete","feature_id":"F1","task_id":"storage","payload":{"feature_id":"F1","task_id":"storage","result":"PASSED","source":"conductor","reference":"<actual retained reference>","summary":"Actual checks and independent review passed"}}
 ```
 
-Parents do not complete automatically when children finish. A parent becomes
-eligible for `start` after children/prerequisites complete, then requires its own
-verification against original criteria and explicit `complete`. Downstream tasks
-continue to depend on the parent, not just its children.
+Then call UI-authorized `checkpoint_verified_task`. It authenticates the receipt,
+commits the exact tree with Git provenance and records the checkpoint in Scaffold.
+Do not invoke `checkpoint-record` manually as a substitute. If bookkeeping was
+interrupted after committing, retry the native checkpoint with the same reference.
+A checkpoint grants no execution, push or publishing authority. After all nodes
+are completed/checkpointed, use approved `validate_feature`; all completed nodes
+or `next: null` alone do not prove the root ticket has been delivered.
 
-## Resume after a session interruption
+## Discoveries and interrupted work
 
-Use the same target repository and feature ID. First call `list`; recover the
-approved design reference, definitions, dependencies, statuses and history from
-that response. Inspect application source and any retained verification artifacts.
-An `in_progress` task is interrupted work, not automatically a failed or verified
-task. Decide explicitly whether to continue it, record a failure/block, retry or
-decompose. Never initialise the feature again, erase state, assume conversation
-history is authoritative, or implicitly start whatever `next` selects. Inspect
-existing work before asking for new execution approval. No manual CLI invocation
-is required for these task operations.
+Review findings within the approved solution stay in the same issue's correction
+chain. New responsibilities/prerequisites return to Design. For unfinished active,
+blocked or failed attempts use native UI-authorized `suspend_issue`: it preserves
+source, staging, untracked files, all receipts and attempt counts in saved Git refs
+and a retained stash, then reopens design on a clean baseline. Never stash/reset
+from Bash or invoke `design-reopen` with a fabricated suspension reference.
 
-## Supported legacy inspection
+Decompose the remaining work, reconfirm the affected contract, design new issues,
+finish the graph design and implement/checkpoint eligible prerequisites. Use
+`resume_issue` to restore the saved work onto authenticated checkpoints; it returns
+an explicit handoff and fixed continuation fields. Complete native bookkeeping,
+`start` the same issue, obtain ordinary execution approval and use that handoff as
+`previousAttempt`. Three consumed attempts mean attempt four next. READY never
+means PASSED. Conflicts or exhausted budgets block with evidence retained.
 
-The CLI still supports read-only `scaffold fetch-ticket ID`, `scaffold status`
-and `scaffold stack list` when useful for ticket/criteria inspection. They are
-separate from feature tasks and not exposed by `scaffold_tasks`. Do not mirror
-feature tasks into the legacy stack, pop frames as proof of verified completion,
-or invoke a retired Scaffold execution pipeline. Source implementation always
-uses Design → approved execute_and_review → Conductor.
+Without unfinished implementation use `design-reopen` directly. Failed final
+review creates new dependent issues after completed nodes; preserve all completed
+nodes, commits and original criteria. Environmental failures are blocks, not
+invented code issues. Do not use decomposition or retry to reset attempt budgets.
 
-## Approved design and complete task definitions
+On any interruption inspect full state, persisted phase/designs, Git source/index,
+receipts and actual checkpoint history before mutating. Failed commands/timeouts
+can follow a persisted mutation; `list` before replaying. For suspension or restore
+use the returned suspensionRef/handoffRef to recover the same operation. Never
+initialize a replacement feature to hide failures.
 
-For new Design plans put the exact approved feature architecture in feature `context` and use
-`design_ref: "sha256:context"` on `init`. This Pi sentinel is replaced with a real
-SHA-256 before CLI invocation. Returned `design_ref` is the stable reference; the
-adapter checks that digest on feature responses. Existing immutable Git revision
-references remain supported. Never overwrite approved architecture silently.
+## Compatibility
 
-Every Design task includes objective, acceptance_criteria, relevant context,
-inherited constraints, stable id and explicit dependencies. Put `Verification:`
-strategy in `context`; there is no extra verification field in Scaffold's schema.
-An empty dependency list is explicit. Add dependent definitions as one batch;
-Scaffold owns graph validation. Do not mutate task JSON directly. Persist the task graph after architecture
-approval and before detailed task design; definitions need no complete internal
-implementation plan. Design each selected task immediately before implementation,
-with separate task design and execution approvals. Oversized pending tasks may be
-split during design with `decompose` without a failed execution attempt. Children
-inherit relevant architectural constraints and context as well as dependencies;
-parent verification remains required.
-
-Task definitions are immutable. Retain later approved task decisions and the
-actual approval record in Conductor's existing fixed `requirements`, which its
-content-addressed attempt receipt preserves. This is not a standalone approval
-store: before the first retained attempt, interruption requires reinspection and
-reapproval if approval cannot be established. Never misuse `block`/`retry` or
-`complete` to append design notes. Inspect receipts and actual implementation
-before new work; never replay verified changes to recreate missing notes.
-Feature-wide conflicts return to architectural discussion and explicit approval;
-there is no in-place design-reference revision operation. Block incompatible
-changes and propose controlled reconciliation separately, preserving the original
-specification, baseline, history and evidence. See Design for this limitation.
-
-The next eligible task may still require a Git checkpoint. State eligibility never
-authorises execution across previous uncommitted task changes. On recovery inspect
-receipts under `git rev-parse --git-path pi-conductor-evidence`, including unfinished
-STARTED intent records, before deciding whether to continue, retry, block or split.
-A STARTED record proves only an attempt began, never that operations finished.
-
-Before task execution, `.scaffold/` bookkeeping must be ignored and untracked so
-it cannot enter Conductor's review diff. Inspect existing ignore rules. If state
-is visible to Git, stop and have an authorised ignore rule established; do not
-silently edit `.gitignore`, Git configuration or index. The task-bound preflight
-returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
-if needed, follows its own normal approval and checkpoint workflow.
-
-
-## Local checkpoints after completion
-
-After inspected PASSED evidence and matching Scaffold completion, end the active
-correction loop. Design may invoke `checkpoint_verified_task` with separate manual
-or session-scoped feature checkpoint authorization. This tool never invokes
-Conductor, chooses tasks, pushes or opens PRs. It checks the actual retained
-request/result, clean-start correction chain, full verified Git tree and Scaffold
-history; an Executor operation list alone does not establish commit scope.
-Old receipts without Git trees and a matching post-test review-boundary snapshot
-cannot authorize checkpoints. Preserve evidence;
-reconcile and obtain fresh verification under an explicitly approved task loop.
-
-The commit trailer binds feature/task/design, receipt, original feature baseline,
-task baseline, tree and branch. A pending ref under `refs/pi-checkpoints/` is
-created atomically with the branch update and removed after index finalization.
-On resume inspect these, actual HEAD/index/worktree, Scaffold state and receipts.
-A matching checkpoint explains a committed source snapshot even though the old
-uncommitted fingerprint differs. Only current-HEAD recovery is automatic. Never
-replay older checkpoints or discard unrelated staged changes. Existing locks need
-explicit resolution after checking process ownership. New sessions require fresh
-checkpoint authorization. See Design for the complete recovery policy.
-
-`.scaffold/` must already be ignored and untracked. The tool never edits ignore
-rules, configuration or local excludes. If needed, establish an explicitly
-approved ignore rule separately before implementation. Local receipts are under
-Git metadata and never enter implementation commits. Snapshots use private indexes;
-submodules, conflicts, sparse/skip-worktree and assume-unchanged entries fail closed.
-The adapter remains backward compatible for non-task callers and retains the
-five-attempt correction ceiling. Conductor itself is unchanged.
-
-Task-bound requests transparently wrap the original approved test command in a
-Pi-local Node runner, forwarding stdout/stderr and exit status. On test success
-it captures a Git tree/fingerprint before independent review. Final fingerprints
-must match or the adapter returns `REVIEW_SNAPSHOT_CHANGED`. Original commands
-remain in the receipt and fixed throughout corrections; non-task callers keep
-the existing protocol. No Conductor, Review or Executor changes are required.
-
-## Final feature gate
-
-Use `validate_feature` after every task and recursive parent has an authentic Git
-checkpoint. It runs full-project checks and existing independent Review against
-the original baseline and approved design; it never applies Executor operations.
-`inspect_feature_validation` authenticates retained results and current applicability.
-Scaffold Phase 5 is required. Validation lifecycle writes are internal to the gate,
-not generic `scaffold_tasks` operations; arbitrary success-shaped payloads cannot
-complete a feature through the native interface. `next: null` and all tasks completed
-are insufficient. Preserve failed/blocked history and add approved corrective tasks
-through the existing per-task workflow. See Design’s “Final feature verification”
-for authorization, output markers, bounds, stale evidence and interruption recovery.
+Features without `workflow` retain their schema-v1 task lifecycle and receipt-based
+design recovery. Do not silently opt an active feature into this workflow. New workflows upgrade the shared task store to schema v2; older binaries stop
+instead of silently ignoring phase gates. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
+implementation. Legacy `scaffold stack list`, `scaffold status` and
+`scaffold fetch-ticket ID` remain read-only inspection aids outside this graph.

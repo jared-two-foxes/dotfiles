@@ -12,6 +12,7 @@ import { checkpointVerifiedTask, checkpointAuthorization } from "./checkpoint.mj
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
+import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -20,6 +21,28 @@ export default function (pi: ExtensionAPI) {
     checkpointContext?.hasUI === true && await checkpointContext.ui.confirm(title, message);
   const authorizeCheckpoint = checkpointAuthorization(confirmation);
   pi.on("session_start", async () => { authorizeCheckpoint.reset(); });
+  for (const operation of ["suspend", "resume"] as const) pi.registerTool({
+    name: operation === "suspend" ? "suspend_issue" : "resume_issue",
+    label: operation === "suspend" ? "Suspend issue for design" : "Restore suspended issue",
+    description: operation === "suspend"
+      ? "Explicitly park an unfinished recursive issue using saved Git snapshots/stash and return its graph to design. Preserves index, untracked files, receipts and consumed attempts. Requires UI authorization. Never marks implementation verified."
+      : "Restore saved issue work onto authenticated completed prerequisite checkpoints and retain a baseline handoff without resetting attempts. Requires UI authorization. A conflict blocks and preserves saved work. READY is not PASSED; start the same issue and obtain normal execution approval.",
+    parameters: Type.Object({
+      task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
+      branch: Type.String(), featureBaseRef: Type.String(), defaultBranch: Type.String(),
+      protectedBranches: Type.Array(Type.String()), reconciliationRef: Type.Optional(Type.String()),
+      ...(operation === "suspend" ? {
+        previousAttempt: Type.Optional(Type.String()), reason: Type.String(), suspensionRef: Type.Optional(Type.String()),
+      } : { suspensionRef: Type.String(), handoffRef: Type.Optional(Type.String()) }),
+    }, { additionalProperties: false }),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await (operation === "suspend" ? suspendIssue : resumeIssue)(params,
+        { directory: ctx.cwd, abort: signal }, { authorize: async scope => ctx.hasUI === true &&
+          await ctx.ui.confirm(operation === "suspend" ? "Park issue and return to design?" : "Restore suspended issue?", JSON.stringify(scope, null, 2)) });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        isError: result.status === "BLOCKED", details: result };
+    },
+  });
   pi.registerTool({
     name: "recover_interrupted_task_rebase",
     label: "Recover interrupted task after rebase",
@@ -172,6 +195,7 @@ export default function (pi: ExtensionAPI) {
       "apply exact executor operations, run caller-selected verification and independently review. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({
+      reconciliationRef: Type.Optional(Type.String({ description: "Verified rebase anchor for recursive issue execution" })),
       task: Type.Optional(Type.Object({
         featureId: Type.String(), taskId: Type.String(), designRef: Type.String(),
       }, { description: "Scaffold task identity and approved immutable design reference" })),

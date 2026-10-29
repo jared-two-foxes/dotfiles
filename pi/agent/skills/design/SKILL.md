@@ -32,273 +32,166 @@ Read the user's request, relevant repository files, local conventions, tests, an
 
 Understand the existing implementation well enough to identify the change surface and how it will interact with current code. If a crucial file or interface is unavailable, ask for it instead of inventing its contents.
 
-## 2. Collaborative technical design
+## 2. Design the issue graph downward
 
-Choose reasoning scope during discovery. A small change that can be understood,
-designed, implemented and verified as one task keeps the streamlined process:
-discuss its detailed design, approve the preview, prepare operations, then obtain
-separate execution approval. No artificial decomposition or extra architecture
-approval is required. Judge complexity by behavior and independent verification
-boundaries, not file counts, line counts or number of acceptance criteria.
+The user's ticket is the overall request. A feature retains that request and its
+original Git baseline. Every actionable node is an **issue**, whether discovered
+by decomposition, review, a failing check, or implementation. The existing API
+uses `task`/`task_id` for these nodes. Use `/skill:scaffold`; new features use
+`workflow: "recursive-issues/v1"`. Existing features without it retain their old
+lifecycle; never silently migrate or replace an active feature.
 
-For a complex feature, use this sequence:
+### Feature planning and root issue
 
-Repository discovery → high-level feature architecture → architecture approval →
-decompose and persist tasks → select one ready task → task-level detailed design →
-task design approval → exact Executor operations → separate execution approval →
-Conductor → Scaffold completion → authorized Git checkpoint → next task → final
-feature validation.
+After agreeing the ticket objective, original acceptance criteria and relevant
+existing constraints, persist those exact approved bytes in feature `context`
+with `design_ref: "sha256:context"`, `baseline: "<full original SHA>"` and
+`branch: "<feature branch>"`. Include the original full Git baseline and
+feature branch. `init` creates a root issue with the feature ID automatically.
+This approval confirms the problem and scope, not an entire system design.
+Do not require a feature-wide detailed design or author Executor operations here.
 
-### Feature-level architectural design
+Design operates read-only on application source. Use `list`, then `design-next`.
+This selects an undesigned issue whose parent contract has been approved;
+implementation dependencies do not prevent designing an issue. Inspect just its
+relevant source, inherited decisions, interfaces, constraints and criteria.
+Conversational memory is not authoritative: recover persisted definitions,
+`designs`, `design_history`, workflow history and linked evidence on resume.
 
-Before decomposition establish feature objectives and acceptance criteria,
-existing architectural constraints, component/domain ownership, shared data
-semantics and important public interfaces and interaction boundaries. Resolve
-cross-component invariants, persistence/consistency requirements, security and
-compatibility constraints, significant algorithmic choices affecting task
-boundaries, major integration risks and feature-level verification expectations.
-Investigate the actual repository and discuss consequential cross-task decisions.
-Do not decompose before understanding these boundaries and constraints.
+### One bounded design pass
 
-Design globally where necessary, decompose early, and reason locally wherever
-possible. Establish enough shared architecture to decompose reliably; defer
-internal algorithms, private structures and exact method details that affect only
-one task. Do not produce exhaustive implementations, exact Executor operations or
-a feature-wide detailed implementation preview at this stage. The discussion
-techniques below apply at the current scope; architectural examples illustrate
-shared contracts rather than solving all future tasks.
+Establish the issue's immediate responsibilities, shared models and interfaces,
+inputs/outputs, invariants, failure behavior and verification strategy. Discuss
+consequential alternatives using focused code/text excerpts and the actual
+repository conventions. Show how new structures are created and consumed, not
+just their type declarations. Ask for user confirmation of the proposed solution;
+record actual approval or explicit delegation, never silence or invented consent.
+Keep the design pass proportional to the issue.
 
-Explicitly consider whether the task introduces or changes any of these areas:
+Use focused `diff` blocks or labelled before/after excerpts with changed portions
+marked; label new code as additions and omitted context explicitly. These are
+illustrative design excerpts, not executable operations. Explain alternatives and
+tradeoffs, then wait for the user's choice or explicit delegation. Cover relevant
+representation, construction, validation, producers/consumers and ownership/lifecycle.
+For documentation/configuration use focused text excerpts; keep trivial changes
+proportionate. Before recording approval, present a concise implementation preview:
+goal, boundaries, representative code/text, how data is created and used, acceptance
+criteria, verification and edge cases. Do not introduce consequential decisions for
+the first time in that preview. Ask the user to approve or revise the design before
+generating implementation operations.
 
-- **Data structures and models:** representation, ownership, invariants, validation, serialization, schema evolution, compatibility.
-- **Algorithms:** correctness, complexity, memory usage, ordering, edge cases, alternative approaches.
-- **Interfaces:** public APIs, function signatures, events, input/output contracts, error semantics.
-- **State and persistence:** lifecycle, migrations, transactions, consistency, retries, recovery.
-- **Concurrency and security:** synchronization, races, trust boundaries, authorization, unsafe inputs.
-- **Testing:** expected behavior, failure cases, regression coverage and acceptance criteria.
+Choose one disposition:
 
-These are **review prompts, not mandatory sections**. Only raise categories relevant to the task. In particular, proactively surface meaningful data-structure and algorithm choices even when the user has not asked about them.
+- **Decomposed:** Mandatory decomposition applies when independent behaviors,
+  prerequisite stages or unresolved responsibilities exceed one understandable,
+  implementable and verifiable unit. Identify only immediate children; defer
+  detailed internal decisions to their own design passes. Confirm consequential decomposition
+  boundaries, then `decompose` the issue with an atomic array of children.
+  Preserve ancestor dependencies, original criteria, history and completed descendants.
+- **Leaf:** The solution can be explained, implemented and independently verified
+  in one bounded scope. Small changes use the root itself as the leaf; do not
+  manufacture children based on file count or line count.
 
-For each consequential decision:
-1. State the problem and constraints from the existing code.
-2. Present a small set of viable alternatives (typically two), with practical tradeoffs.
-3. Recommend an approach and explain why, using focused code samples where appropriate to make the implementation choice concrete.
-4. Ask for the user's preference or explicit delegation.
-5. Record the agreed decision. Do not silently select a consequential option.
+Every child has a stable ID, title, narrow objective, acceptance_criteria,
+nonempty context, inherited constraints and explicit dependencies (`[]` if none).
+Put `Verification:` with meaningful checks and edge cases in context. Optional
+`origin: {kind: "design"|"review"|"discovery", reference: "<source issue or retained evidence>"}`
+records why it exists. Definitions remain immutable. Reject missing dependencies
+and cycles; children inherit ancestor dependencies. Scaffold validates structure and association,
+not the truth of approval or verification claims.
 
-Do not treat silence, a generic `continue`, or approval of an unrelated choice as agreement on unresolved decisions. Do not repeatedly ask the user to approve routine details.
+After the user's confirmation, call `design-record` for this issue with:
+`{summary, verification, approval, disposition: "leaf"|"decomposed"}`. Summary retains
+its approved solution, interfaces, decisions and constraints; verification retains
+the actual strategy; approval states exactly what the user confirmed. For a parent,
+add its immediate children before recording the design. The record binds their IDs
+and has a content digest. Before that record, interruption requires confirming
+missing approval again; never fabricate a record from conversation summaries.
 
-### Code-led decision discussion
+Continue downward until `design-next` returns null. Inspect all issues and then
+call `design-finish`; it refuses any unfinished design. No implementation may run
+before this entire graph design phase completes. `next` is the separate selection
+operation for implementation and returning null never proves feature completion.
 
-Use small, focused code samples during the conversation, before generating operations, rather than saving all implementation detail for the final approval. For existing code, prefer short `diff` blocks with `+` and `-` markers or labelled before/after excerpts that clearly identify changed portions. Label new-code samples as additions and identify the relevant file or component. Show alternatives with code where that helps the user compare them; explain tradeoffs and your recommendation, then wait for the user's choice or explicit delegation before advancing.
+## 3. Implement upward; return discoveries to design
 
-For new or changed data structures, show both the representation and how the data is used: construction/population, validation and invariants, producers and consumers, reads and updates, ownership and lifecycle, and persistence or compatibility implications where relevant. A type definition alone is not enough when its use introduces consequential choices. Keep each discussion to one coherent group of decisions, not an exhaustive checklist.
+After `design-finish`, enter Implement phase. Use `list`/`next` to select one
+eligible issue, recover its approved design and inspect current source to establish
+that it still applies. Do not redo all design approvals at implementation time.
+If new consequential choices are needed, use the discovery transition below.
+Before generating Executor operations, include the exact approved design suffix
+in fixed Conductor requirements:
 
-These are illustrative design excerpts, not executable operations or a full edit list. Mark omitted context explicitly; do not imply the excerpts are complete patches or have been applied. For documentation/configuration changes, use focused text/configuration excerpts instead of artificial code examples. For trivial changes, keep the preview proportionate rather than manufacturing alternatives or data models.
-
-## 3. Design confirmation
-
-### Approve the shared architecture
-
-For a complex feature, present a concise architecture preview of the agreed
-objectives, feature acceptance criteria, ownership, shared structures/semantics,
-interfaces, global invariants, cross-cutting constraints, integration risks and
-feature verification strategy. Identify task-local details deliberately deferred.
-Summarize decisions already discussed; do not introduce consequential decisions
-for the first time here. Obtain explicit feature architecture approval before
-decomposition and persistence. Architecture approval does not approve new
-consequential task-level design decisions or task execution.
-
-For a small single-task change, use the detailed design preview and approval
-below directly; no separate architecture round is needed.
-
-### Feature planning and decomposition (before any operations)
-
-After explicit feature architecture approval, decompose complex work before any
-task-level detailed design. Mandatory decomposition applies when the change
-combines independently testable behaviors or interfaces,
-has dependency stages, or cannot be reliably understood, implemented and verified
-in one bounded attempt. Small independently verifiable changes may remain a single
-task; do not manufacture fragments merely to increase task count.
-
-Load `/skill:scaffold`. Pi is the sole reasoning-based orchestrator: propose the
-smallest independently understandable, designable, implementable and verifiable
-units of meaningful functionality. Prefer changes to models, algorithms,
-interfaces and behavior with explicit inputs, outputs and invariants. Never split solely by file,
-line count or function count. Explain boundaries, dependency order and verification.
-Confirm consequential decomposition decisions with the user; routine boundaries
-within the approved design need no repeated architecture approval. Persist only
-the agreed plan. Complex features must be decomposed before generating Executor
-operations; never generate a feature-wide operation set and split it afterwards.
-
-Use native `scaffold_tasks` only, with explicit feature and stable task IDs:
-
-1. `init`: store the exact approved feature architecture text in feature `context`, including
-   decisions, invariants, original feature-start Git SHA and feature branch, and
-   the approval record (what the user approved). Set
-   `design_ref` to `sha256:context`; the adapter replaces this sentinel with a
-   SHA-256 of the exact UTF-8 context before passing it to Scaffold. Retain the
-   returned digest, never the sentinel. Alternatively use an already committed
-   design path plus full commit SHA and content digest, and read that revision.
-   A mutable path or conversation pointer alone is insufficient. Scaffold persists
-   the reference and context across sessions; digest mismatch stops recovery.
-2. `add`: send the approved tasks in one atomic batch so forward dependencies can
-   be resolved. Each definition must include `id`, `title`, a single narrow
-   `objective`, explicit `acceptance_criteria`, nonempty `context`, inherited
-   `constraints` and explicit `dependencies` (use `[]` for none). Scaffold has no
-   verification-strategy field: put `Verification:` with actual checks, expected
-   behavior and edge cases in task `context`. Record source locations, relevant
-   design reference and earlier interfaces here too. A task definition does not need
-   a complete internal implementation design before persistence. Capture inherited
-   architectural constraints, not speculative solutions to every task's algorithms.
-   Do not invent schema fields.
-3. Inspect the returned full state. Scaffold rejects missing dependencies/cycles;
-   a failed tool call is not persistence. Do not initialise a second feature to
-   bypass a failed or interrupted mutation; `list` and reconcile first.
-
-State tracking grants no application source-edit or verification authority.
-Preserve separate design and execution approvals. Scaffold validates structure
-and association; Scaffold does not authenticate Conductor evidence.
-
-### Select exactly one eligible task
-
-Before authoring operations, use `list` and then `next` with the explicit feature
-ID. Read the selected task's complete context, criteria, constraints, history,
-ancestor dependencies and required children. Confirm all prerequisites completed
-in persisted state. `next` selects only; it never starts work. Do not substitute
-another task silently. If it returns null inspect unfinished work; this never
-proves the feature is finished. Final feature-level validation requires the gate below.
-
-Inspect this task's actual source code. Establish fixed task review requirements:
-its acceptance criteria, applicable approved architectural constraints, and
-behavior/interfaces established by earlier tasks that it must preserve. Identify
-future feature criteria as deferred context, explicitly excluded from this task's
-required implementation. Do not demand an entire feature during an early review.
-Proceed to focused task-level detailed design below, not directly to operations.
-
-### Task-level detailed design and approval
-
-Immediately before implementation inspect only the selected task's relevant source
-and existing behavior, dependencies and previously established interfaces. Resolve
-its detailed data structures and usage, algorithms and edge cases, exact interfaces
-and method contracts, validation/error handling, relevant persistence details,
-testing strategy, compatibility with completed tasks and implementation trade-offs.
-Use the code-led discussion techniques in section 2. Avoid loading implementation
-details for unrelated future tasks. Respect global invariants and constraints
-that affect future tasks. Do not reopen settled architecture for routine decisions;
-new consequential local choices require explicit task design approval.
-
-Once consequential questions are resolved, present a **concise design summary (implementation preview)** containing:
-
-- Goal and boundaries
-- Major changes grouped by behavior or component, with representative code/text excerpts and changed portions clearly marked
-- Agreed data structures, algorithms and interfaces, including how new or changed data is created and used (only those relevant)
-- Files/components expected to change and compatibility implications
-- Acceptance criteria, behavior and edge cases to verify
-- Any remaining assumptions or known risks
-
-Summarise decisions already discussed; do not introduce consequential choices for the first time in the approval preview. Refer back to agreed examples rather than repeating large code blocks. The user approves the implementation design, not the full edit list or executor JSON.
-
-Ask the user to **approve or revise the design before generating implementation operations**. If the design changes, update the summary and reconfirm affected decisions.
-
-An approved design is not yet permission to execute. Obtain a separate explicit execution confirmation after preparing the initial operations. Do not invoke an implementation agent to reinterpret the design.
-
-Include the selected feature/task IDs and inherited architectural constraints in
-this preview. Approval applies only to this task's design. Generate operations
-only for the currently selected, approved task using section 4. Every next task
-returns here for its own design and execution approvals.
-
-### Recursive decomposition during design
-
-If the selected task cannot be designed reliably within a bounded reasoning scope,
-stop before generating operations or calling `start`. No failed execution attempt
-is required. Explain coherent child responsibilities and dependencies, confirm
-consequential boundaries and use native `scaffold_tasks` `decompose` on the pending
-parent. For example, split activity persistence into storage adapter contract,
-writes and queries; design each child only when selected. Children inherit the
-approved architecture, relevant context, ancestor dependencies and verification
-expectations. Preserve the original parent objective, acceptance criteria, history,
-completed dependencies and completed descendants. Never redefine other tasks.
-Select the next eligible child for detailed design and its own approvals. A
-parent remains incomplete after children finish and requires its own Conductor
-verification of original criteria and checkpoint. For partial implementation,
-follow the oversized-task reconciliation and Git barrier in section 5.
-
-### Architectural conflict and immutable references
-
-If task design reveals incorrect or incomplete shared architecture, stop and
-return to feature-level design before operations. Discuss alternatives and obtain
-explicit user approval for consequential feature-wide changes. Do not silently
-replace the original approved design, weaken original acceptance criteria, mutate
-immutable task definitions or treat task approval as authority to redefine peers.
-Keep the original feature baseline, design reference, receipts and checkpoints.
-
-If clarification or additive corrective tasks can satisfy the original approved
-architecture unchanged, explain their impact, obtain approval and persist the
-agreed new tasks with explicit dependencies. Final validation still uses the
-original architecture and criteria. A material revision that contradicts that
-immutable specification cannot be reconciled in place by the current interfaces.
-Block affected work with a meaningful reason; preserve existing state/evidence and
-propose a separately reviewable design-revision/reconciliation mechanism. Do not
-initialize a replacement feature or fabricate revised evidence to bypass the gate.
-User approval alone cannot make old receipts applicable to a different design.
+```text
 
 
-### Resume and reconcile before selecting new work
+Approved issue design <designs[0].reference>
+<designs[0].summary>
+Verification: <designs[0].verification>
+Approval record: <designs[0].approval>
+```
 
-Conversational memory is not authoritative. In a new session query `list` for the
-full persisted feature. Recover and verify the approved feature architecture and
-design reference; inspect
-completed, pending, in_progress, failed, blocked and decomposed tasks and history.
-Read Git HEAD, status, staged/unstaged diffs and relevant retained receipts. For an
-interrupted task, discover receipts using read-only `git rev-parse --git-path
-pi-conductor-evidence` and directory inspection if its reference was not yet
-recorded in Scaffold. Use `inspect_conductor_evidence` to load the real receipt.
+Also include original issue acceptance criteria, inherited constraints and prior
+interfaces. Scope review to this issue; future feature criteria are context,
+not requirements to implement all future work now. Keep separate design and execution
+approvals. Each selected issue needs separate explicit execution confirmation.
 
-Reconcile partial changes, exact task identity, baseline, requirements, receipt
-chain/attempt count and current tree before any new operation. Do not replay input
-because a session ended. A matching successful receipt may support completion
-without re-execution after inspecting actual checks/review; a mismatch, missing or
-invalid receipt leaves work unfinished. When HEAD advanced through an explicitly
-authorised checkpoint, inspect the commit/diff and prove the verified contents
-were preserved; a matching digest alone is not an authenticity guarantee. If
-uncertain, block with a meaningful reason. Do not automatically retry blocked or
-failed tasks. Use explicit `retry` only after resolution and reconciliation.
+Complete only from authentic task-bound successful Conductor evidence, then
+checkpoint with the native tool. It records the checkpoint back into Scaffold;
+if that handoff is interrupted, replay the same native checkpoint, not a new
+implementation. Each resolved node gets its own commit, including an empty commit
+for a parent requiring verification alone. A parent remains incomplete after its
+children finish; it needs its own verification of original criteria and checkpoint.
+A parent requiring substantial extra integration must return to design and create
+an explicit issue for that work. Finally run full feature validation.
 
-### Retain and recover task design decisions
+### Discovery exit hatch
 
-Feature `context` retains the exact approved architecture; immutable task `context`
-retains the decomposition-time scope, constraints and verification strategy. Do
-not overwrite task definitions to insert later detailed designs. Include the
-approved task design summary, resolved decisions, approval record (what the user
-explicitly approved) and applicable architectural constraints in the existing
-Conductor `requirements` string alongside all task acceptance criteria. Keep this
-text fixed across corrections. The first attempt's content-addressed receipt
-retains that exact request, including in its STARTED intent, without a new store.
-Record only actual approvals; a receipt authenticates retained bytes, not consent.
+A straightforward correction covered by the approved design remains another
+attempt on the same issue, with unchanged requirements and attempt budget.
+A missing prerequisite, oversized remaining responsibility, or changed contract
+requires an explicit return to Design. Review and Pi discoveries use the same path.
 
-On resume recover the selected task from full persisted state and receipt task
-identity, not `next` alone. Inspect retained requirements and approval record,
-actual source, dependencies and checkpoint provenance. Previously recorded task
-decisions may support recovery only if their scope and implementation still match.
-Missing task design approval must not be inferred from feature approval, task
-status, an operation set, a generic success or conversational memory. If approval
-cannot be established, reinspect and obtain task design reapproval before new
-operations, then obtain appropriate execution approval. First reconcile successful
-implementation evidence; do not replay completed work to recreate a design record.
-A STARTED intent may retain design decisions but never proves execution completed.
+For an active/failed issue with retained attempts, stop its correction loop and
+use native `suspend_issue` with its latest receipt, reason, feature baseline,
+branch/protection scope and current reconciliation reference when applicable.
+Its explicit UI confirmation authorizes saved Git snapshots and a retained stash
+of this issue's tracked, staged and untracked changes, leaving a clean baseline.
+Ignored build artifacts remain outside source scope. This is the only parking
+exception: never stash/reset from Bash. Do not discard saved stashes or audit refs.
+Original issue identity, definitions, findings, receipt history and consumed attempts
+remain intact. A receipt mismatch, exhausted budget, uncertain state or unavailable
+UI blocks; do not invent a replacement issue to reset the count.
 
-Limitation: there is no separate task-design note/approval operation before the
-first Conductor attempt. If interrupted after design approval but before a receipt
-is retained, reinspect and reapprove the task design. Do not issue dummy attempts,
-misuse lifecycle transitions as a note store, write task JSON, or add a workflow
-database. Local receipt retention does not grant execution, checkpoint or publishing
-authority across sessions.
+Inspect `DESIGN` and `suspensionRef`. On an interrupted call, inspect its retained
+intent and Git stash list read-only, then retry `suspend_issue` with that same
+`suspensionRef` and exact scope. Never blindly replay a stash operation.
+Add remaining work as child issues, reconfirm the affected parent's contract,
+and design the new issues downward. Use `design-finish` again, implement the new
+leaves and checkpoint each one. Before continuing the suspended parent, call
+`resume_issue` with its suspension reference and the same feature/branch scope.
+It authenticates the checkpoint history and restores saved source/staging; conflicts
+block with saved work intact. It returns `READY`, a `handoffRef`, consumed count and
+`resume` arguments. READY is not PASSED. Use `handoffRef` to finish an interrupted
+retention/Scaffold handoff; inspect with `inspect_conductor_evidence`.
+
+Start the same issue through Scaffold, author fresh operations, obtain execution
+approval and pass returned `resume` fields plus new `input` to `execute_and_review`.
+Three consumed attempts mean the next is four. New design is additive to retained
+criteria/findings; never weaken old requirements or reapply old operations blindly.
+The authenticated handoff is the only baseline change across these execution epochs.
+
+When there is no unfinished implementation, use `design-reopen` with a reason
+and optional pending issue ID, then add/design work normally. After final feature
+review, preserve completed nodes and add dependent corrective issues with the review
+reference as origin; do not rewrite completed nodes or their checkpoint history.
+An issue's design is approved once per design epoch. Substantive revisions require
+reopening design; a feature change contradicting the original ticket criteria
+requires explicit specification reconciliation and must block rather than weaken them.
 
 ## 4. Prepare executor handoff
 
-After explicit task design approval and the planning/selection stage above (or
-the small-change design approval), load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
+After recovering this issue’s persisted design approval and selecting it in Implement phase, load **`/skill:executor`**. Follow that skill's instructions to produce the **actual, complete input** accepted by the standalone executor CLI. Do not embed or independently maintain executor's JSON schema or operation list here; the skill owns that guidance.
 
 Inspect exact source contents before authoring executor operations. Use `edit_file` for in-place text changes as documented in the executor skill; do not generate unified diffs as executor input. If a change cannot be expressed reliably with supported operations in one response, request the missing information or propose a smaller coherent implementation slice. Do not present pseudocode or speculative operations as executable.
 
@@ -309,6 +202,9 @@ If preparing exact operations exposes a new consequential choice or a departure 
 **Do not directly invoke executor, write files, or claim the operations have been applied or verified.** Only after the user explicitly approves execution may you pass the exact input to `execute_and_review`.
 
 ## 5. Own the execution and review loop
+
+The API calls issues `tasks`. Legacy features without `workflow` retain the
+original single-task lifecycle; the issue graph phase gates below apply to new features.
 
 You are the **primary conversational agent and sole generator of executor input**, including every corrective change. The deterministic `execute_and_review` tool forwards your exact operations and verification commands to the shared `conductor` CLI. Conductor applies them through its executor library, runs build/tests, and invokes the review library. It never generates or repairs code and does not invoke an additional AI orchestration agent.
 
@@ -346,7 +242,7 @@ result and provenance through its returned receipt; never fabricate a reference.
   then call `checkpoint_verified_task` only with checkpoint authorization; inspect
   its successful result before selecting the next task.
 - **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, executor operation conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
-- **Oversized task:** Stop the current correction loop before another large fix.
+- **Oversized task:** Use the discovery exit hatch above; never decompose active dirty work without suspension. For legacy features only, stop the current correction loop before another large fix.
   Inspect partial source changes and verified progress, then reconcile repository
   and task state. Explain smaller children for only the remaining unverified work;
   obtain decisions on consequential boundaries. Use Scaffold `decompose`, preserving
@@ -380,7 +276,7 @@ result and provenance through its returned receipt; never fabricate a reference.
 - If two consecutive attempts return the same substantive failure without progress, stop and ask for user direction rather than generating another equivalent operation set; record `fail` for the explicit in-progress task with the repeated failure and retained receipt reference.
 - If executor partially applies an operation or an invocation fails, inspect the actual working tree before any further operation. Never blindly replay an earlier input; never reset, revert, or silently clean up.
 - Do not automatically apply additional changes after PASS. A new feature or optional refactor needs a new design decision and execution approval.
-- The original baseline remains fixed throughout the implementation verification/correction loop; do not create intermediate commits or change branches. Stop if HEAD changes unexpectedly. After the loop finishes or is explicitly stopped, a separately requested publishing workflow may create commits; never rebase the old baseline to accommodate them.
+- The original baseline remains fixed within each implementation verification/correction epoch; only the explicit issue/rebase handoff can bridge epochs; do not create intermediate commits or change branches. Stop if HEAD changes unexpectedly. After the loop finishes or is explicitly stopped, a separately requested publishing workflow may create commits; never rebase the old baseline to accommodate them.
 - Retain architectural reasoning in the approved Scaffold design and recover attempt receipts across sessions. The deterministic tool never selects or advances tasks.
 
 ### Git checkpoint barrier between separately verified tasks
@@ -525,9 +421,9 @@ Inspect the versioned `pi.feature-validation/v1` result and diagnostic output.
 retained evidence and Scaffold completion handoff. `NEEDS_DESIGN` returns actionable
 check/review findings to Pi; `BLOCKED` means indeterminate verification, missing
 evidence, environment failure or inconsistent state. The gate has no correction
-or retry loop. Pi interprets findings and agrees corrective tasks (or renewed
-architecture approval) with the user, adds explicit verifiable dependent tasks
-through Scaffold, then obtains normal design/execution/checkpoint authorization
+or retry loop. Pi interprets findings, calls `design-reopen` for an issue workflow, and agrees corrective issues (or renewed
+architecture approval) with the user, adds explicit verifiable dependent issues
+through Scaffold, returns the graph to Design and obtains normal design/execution/checkpoint authorization
 and reruns the complete feature validation from the original baseline. Preserve
 original acceptance criteria and all historical failures.
 

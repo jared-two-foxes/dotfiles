@@ -2,10 +2,11 @@
 // Pi extensions are deployed independently of ~/.config/opencode, so this must
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // Conductor alone owns apply/check/review.
+import { issueFeature, approvedIssue, issueDesignRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
 import { verificationChecks, sameVerification } from './verification.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
-import { readTaskHandoff, assertLatestAttempt } from './task-chain.mjs';
+import { readTaskHandoff, assertLatestAttempt, authenticateAttemptChain } from './task-chain.mjs';
 import { randomUUID } from 'node:crypto';
 import { readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -128,6 +129,7 @@ async function executeAttempt(args, context = {}, options = {}) {
     }
     const directory = path.resolve(context.worktree ?? context.directory ?? '.');
     repository = path.resolve(await git(directory, ['rev-parse', '--show-toplevel'], context.abort));
+    if (!args.task) await requireIssueBinding(repository);
     const head = await git(repository, ['rev-parse', 'HEAD'], context.abort);
     const base = await git(repository, ['rev-parse', '--verify', args.baseRef + '^{commit}'], context.abort);
     if (head !== base) {
@@ -220,6 +222,19 @@ export async function executeAndReview(args, context = {}, options = {}) {
     const checks = verificationChecks(args);
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));
+    const feature = await issueFeature(repository, args.task, options);
+    if (feature) {
+      const issue = approvedIssue(feature, args.task);
+      await issueExecutionScope(repository, feature, args);
+      if (issue.status !== 'in_progress' || !args.requirements.includes(issueDesignRequirements(issue)))
+        throw new Error('Start the explicit issue and include its complete approved design in fixed requirements');
+      if (!args.previousAttempt) await assertLatestAttempt(repository, undefined, args.task, 0);
+      else {
+        const chain = await authenticateAttemptChain(repository, args.previousAttempt, args.task);
+        if (issue.suspension && !chain.records.some(r => r.kind === 'issue-handoff' && r.recovery.suspensionRef === issue.suspension.reference))
+          throw new Error('Suspended issue requires its authenticated continuation chain');
+      }
+    }
     before = await snapshot(repository);
     if (before.bookkeepingVisible) return outcome('BLOCKED', 'PRECHECK', {
       repository, reason: 'SCAFFOLD_REVIEW_SCOPE',
@@ -228,7 +243,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (args.previousAttempt) {
       const previous = await readEvidence(repository, args.previousAttempt);
       await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
-      if (previous.kind === 'rebase-handoff') await readTaskHandoff(repository, args.previousAttempt, args.task);
+      if (['rebase-handoff', 'issue-handoff'].includes(previous.kind)) await readTaskHandoff(repository, args.previousAttempt, args.task);
       if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
           previous.args.baseRef !== args.baseRef || previous.args.requirements !== args.requirements ||
           !sameVerification(previous.args, args) ||
