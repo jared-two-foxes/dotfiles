@@ -3,13 +3,13 @@
 `index.ts` registers one `scaffold_tasks` tool. `adapter.mjs` validates requests,
 resolves Pi's current Git repository root, and invokes exactly one
 `scaffold tasks OPERATION` command with explicit arguments and JSON stdin. Install
-Scaffold with the Phase 1 task API (merged in scaffold PR #10) on Pi's PATH.
+Scaffold with the schema-v2 issue graph API on Pi's PATH.
 The extension peer dependencies match Pi's native `typebox` convention.
 
 No application source edits, Conductor invocation, automatic decomposition,
 sequencing, retry loop or second state store live here. Completion evidence is
 caller supplied, not authenticated. See [the Scaffold skill](../../skills/scaffold/SKILL.md)
-for all ten operations, payloads, explicit lifecycle examples and resume guidance.
+for the design and lifecycle operations, payloads, explicit lifecycle examples and resume guidance.
 The tool schema has an object root for provider compatibility; operation-specific
 required and forbidden arguments are validated again before launching Scaffold.
 
@@ -43,8 +43,8 @@ have persisted, so inspect full state with `list` before recovery.
 
 New Design plans can pass `design_ref: "sha256:context"` on `init` with the exact
 approved design in feature `context`. The adapter computes the digest before CLI
-invocation and checks it on returned feature state. Scaffold's CLI/schema remains
-unchanged; immutable Git revision references remain supported. Verification
+invocation and checks it on returned feature state. Scaffold uses schema v2 exclusively; older task-state files are rejected without
+modification. There is no workflow selector or alternate lifecycle; immutable Git revision references remain supported. Verification
 strategies belong in task context, not invented schema fields. See the current
 [workflow overview](../../../../workflow-overview.md) and
 `tests/pi-task-workflow.test.mjs` for planning, receipts and the checkpoint barrier.

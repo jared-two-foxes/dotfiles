@@ -1,3 +1,4 @@
+import { issueMutation } from './issue-state.mjs';
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 export { authenticateTaskEvidence } from './task-evidence.mjs';
@@ -32,6 +33,15 @@ export function checkpointAuthorization(confirm) {
   };
   authorize.reset = () => { grants.clear(); epoch++; };
   return authorize;
+}
+
+// A partially staged file is safe only when its exact blob/mode is also in the
+// independently verified tree. This preserves restored staging without accepting variants.
+function verifiedIndex(repository, baseline, index, verified) {
+  if (index === baseline || index === verified) return true;
+  const changed = git(repository, ['diff-tree', '-r', '--no-commit-id', '--name-only', '-z', baseline, index]).split('\0').filter(Boolean);
+  return changed.every(name => git(repository, ['ls-tree', '-z', index, '--', name]) ===
+    git(repository, ['ls-tree', '-z', verified, '--', name]));
 }
 
 export async function checkpointVerifiedTask(args, context = {}, options = {}) {
@@ -99,6 +109,9 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     const indexTree = await currentIndexTree(repository, indexPath);
     const baselineTree = git(repository, ['rev-parse', record.args.baseRef + '^{tree}']);
     const pendingRef = 'refs/pi-checkpoints/' + args.evidenceRef.split(':').at(-1);
+    const pendingIndexRef = pendingRef + '-index';
+    let pendingIndex;
+    try { pendingIndex = git(repository, ['rev-parse', '--verify', '--quiet', pendingIndexRef + '^{tree}']); } catch {}
     let pending;
     try { pending = git(repository, ['rev-parse', '--verify', '--quiet', pendingRef]); } catch {}
     let recovered = false, commit;
@@ -108,12 +121,12 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
         git(repository, ['rev-parse', head + '^{tree}']) === record.after.tree,
       'HEAD changed unexpectedly; no matching checkpoint at HEAD');
       recovered = true; commit = head;
-      requireValue(indexTree === record.after.tree || (pending === head && indexTree === baselineTree),
+      requireValue(indexTree === record.after.tree || (pending === head && indexTree === pendingIndex),
         'Unrelated staged changes or ambiguous index after checkpoint');
     } else {
       requireValue(current.digest === record.after.digest, 'Current source/index differs from verification receipt');
       // Review uses tree-to-workdir, not the index. A divergent staged variant is unverified.
-      requireValue(indexTree === baselineTree || indexTree === record.after.tree, 'Staged changes cannot be isolated safely');
+      requireValue(verifiedIndex(repository, baselineTree, indexTree, record.after.tree), 'Staged changes cannot be isolated safely');
     }
     requireValue(await implementationTree(repository, record.args.baseRef) === record.after.tree, 'Current implementation differs from verified tree');
     requireValue(await options.authorize?.(args.authorizationMode === 'feature' ? featureScope : scope, args.authorizationMode),
@@ -135,13 +148,16 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
         commit = git(repository, ['commit-tree', record.after.tree, '-p', record.args.baseRef], {
           input: message, env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
         });
+        const indexSnapshot = git(repository, ['commit-tree', indexTree, '-p', record.args.baseRef], {
+          input: 'Pi pending checkpoint index\n', env: { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+        });
         // Recheck after UI interaction; update-ref is a compare-and-swap.
         requireValue(git(repository, ['symbolic-ref', '--short', 'HEAD']) === branch &&
           (await snapshot(repository)).digest === record.after.digest, 'Repository changed during authorization');
         context.abort?.throwIfAborted();
         git(repository, ['update-ref', '-m', 'Pi verified task checkpoint', '--stdin'], { input:
           'start\nupdate refs/heads/' + branch + ' ' + commit + ' ' + head +
-          '\ncreate ' + pendingRef + ' ' + commit + '\nprepare\ncommit\n' });
+          '\ncreate ' + pendingRef + ' ' + commit + '\ncreate ' + pendingIndexRef + ' ' + indexSnapshot + '\nprepare\ncommit\n' });
         pending = commit;
         await options.interrupt?.('afterCommit');
       }
@@ -153,7 +169,11 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     });
     requireValue(git(repository, ['rev-parse', 'HEAD']) === commit && (await snapshot(repository)).clean,
       'Checkpoint created but repository changed; reconcile before next task');
-    if (pending) git(repository, ['update-ref', '-d', pendingRef, commit]);
+    if (pending) {
+      git(repository, ['update-ref', '-d', pendingRef, commit]);
+      git(repository, ['update-ref', '-d', pendingIndexRef]);
+    }
+    await issueMutation(repository, args.task, 'checkpoint-record', { commit, reference: args.evidenceRef }, options);
     return { ok: true, ...provenance, commit, recovered, nextBaseRef: commit };
   } catch (error) {
     return { ok: false, reason: 'CHECKPOINT_BLOCKED', message: error.message,

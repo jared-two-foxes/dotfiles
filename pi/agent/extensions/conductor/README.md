@@ -297,3 +297,64 @@ and recovered snapshot against garbage collection; interrupted audit-ref writes
 are idempotently repaired without replacing unexpected existing refs. Keep all
 local evidence with the checkout. A killed process can leave a temporary worktree;
 inspect ownership before removing it, never clean the real source checkout.
+
+
+## Recursive issues: design then implement
+
+All Scaffold features use the recursive issue graph (requires the matching
+Scaffold release). There is no opt-in field or alternate lifecycle. The stored
+workflow kind is `recursive-issues/v1`; the state schema is version 2. The root is created from the agreed
+ticket. Pi uses `design-next`, `decompose` and `design-record` to approve designs
+downward; `design-finish` gates all implementation. The API retains task IDs.
+`execute_and_review` requires an explicit started issue and its exact approved
+design suffix (see Design skill) in fixed requirements. Unbound execution cannot
+bypass an unfinished recursive feature. Older task-state files are rejected without modification.
+
+`checkpoint_verified_task` records its verified commit back into Scaffold. Retry
+that native operation after interrupted bookkeeping; never fabricate a checkpoint
+record. Empty parent verification still creates its own commit. Final verification
+includes the original ticket and retained issue design contracts.
+
+`suspend_issue` explicitly parks unfinished work for newly discovered issues.
+Inputs: task binding, latest `previousAttempt`, reason, original featureBaseRef,
+branch/default/protected scope and optional reconciliationRef. UI authority covers
+saved snapshots/index refs and a retained stash including untracked source; it
+never publishes, completes an issue or resets attempts. A content-addressed intent
+is retained first and returned as suspensionRef, including on failure. Retry that
+same intent with suspensionRef and exact reason/scope; inspect source and stash
+state first. Saved stashes/private refs are deliberately never automatically removed.
+The original source must match the latest unsuccessful receipt and remaining budget.
+
+After new children are designed, implemented and checkpointed, `resume_issue`
+requires the same scope and suspensionRef. It authenticates checkpoint lineage,
+precomputes source/index transplants to reject conflicts before source writes,
+restores saved work with `git stash apply --index`, and retains a non-PASSED
+`issue-handoff`. READY supplies consumedAttempts and resume arguments without old
+executor input. Start the original issue and obtain fresh execution approval.
+Use the returned handoff as previousAttempt; three attempts mean four next. A
+handoffRef recovers interrupted evidence/Scaffold bookkeeping. Read snapshots and
+receipts with inspect_conductor_evidence. Conflicts or unexpected changes block;
+preserve saved refs/stash and reconcile explicitly. Ignore files/generated ignored
+artifacts are outside snapshot coverage. A user-performed rebase still requires
+the separate authenticated rebase-reconciliation path before prerequisite checkpoints.
+
+
+### Issue recovery boundaries
+
+A started issue with no retained attempt may return to Design through
+`suspend_issue` without `previousAttempt`. This path requires a clean source/index
+and confirms that no attempt receipt exists; it consumes zero attempts. Resume
+returns an authenticated zero-attempt handoff. Supply fresh approved requirements,
+checks and executor input for its first real execution; that execution is attempt 1.
+Dirty unretained changes or any existing consumed attempt require normal receipt
+reconciliation rather than this path. No dummy Conductor invocation is needed.
+
+An issue may remain suspended while the user rebases its completed prerequisites.
+Pass the current successful `reconciliationRef` to resume. It must authenticate as
+a successor of the saved reconciliation and include the suspension's checkpoint
+history. The continuation records this successor; unrelated anchors are rejected.
+
+Pending checkpoint recovery pins the original staged subset atomically with the
+checkpoint commit. A retry accepts that exact original index or an already finalized
+verified index; another staged subset remains blocked. The private pending index
+ref is removed after successful finalization.

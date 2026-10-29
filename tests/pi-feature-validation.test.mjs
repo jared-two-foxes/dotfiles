@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from '../pi/agent/extensions/conductor/git-tree.mjs';
 import { snapshot, readFeatureEvidence, featureEvidenceReferences } from '../pi/agent/extensions/conductor/evidence.mjs';
-import { executeAndReview } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview as executeTaskAttempt } from '../pi/agent/extensions/conductor/adapter.mjs';
 import { checkpointVerifiedTask } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { validateFeature, inspectFeatureValidation } from '../pi/agent/extensions/conductor/feature.mjs';
@@ -14,6 +14,16 @@ import { reconcileFeature, inspectReconciliation, readReconciliation } from '../
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from '../pi/agent/extensions/conductor/interrupted-rebase.mjs';
 import { readEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { runCheck } from '../pi/agent/extensions/conductor/feature-process.mjs';
+
+import { approveGraph, requirementsFor } from './helpers/issue-plan.mjs';
+import { checkpointHistory } from '../pi/agent/extensions/conductor/history.mjs';
+const fixtureScaffold = new Map();
+async function executeAndReview(args, context, options) {
+  const scaffoldOptions = fixtureScaffold.get(context.directory);
+  const r = await scaffoldTasks({operation:'list', feature_id: args.task.featureId}, context, scaffoldOptions);
+  if (r.ok) args = {...args, requirements: requirementsFor(r.data.feature.tasks[args.task.taskId], args.requirements)};
+  return executeTaskAttempt(args, context, {...options, scaffoldOptions});
+}
 
 const integration = { skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE to Phase 5 Scaffold checkout' : false };
 async function fixture(t, legacy = false) {
@@ -38,21 +48,27 @@ async function fixture(t, legacy = false) {
     } catch (e) { return { code: e.status, stdout: e.stdout?.toString(), stderr: e.stderr?.toString() }; }
   };
   const scaffoldOptions = { invokeScaffold };
+  fixtureScaffold.set(dir, scaffoldOptions); t.after(() => fixtureScaffold.delete(dir));
   const call = async (operation, extra = {}) => {
+    if (operation === 'start') await approveGraph(call);
     const response = await scaffoldTasks({ operation, feature_id: 'F5', ...extra }, { directory: dir }, scaffoldOptions);
     assert.equal(response.ok, true, JSON.stringify(response)); return response.data;
   };
   const context = 'Approved feature: producer and consumer must interoperate. Preserve errors.\nOriginal baseline: ' + base;
   const designRef = legacy ? 'approved.md@' + base : designReference(context);
   await call('init', { payload: { id: 'F5', title: 'Complete feature', objective: 'Integrated behavior',
-    context, design_ref: designRef, acceptance_criteria: ['Producer and consumer interoperate', 'Errors handled'] } });
-  const add = (id, dependencies = [], parent) => call(parent ? 'decompose' : 'add', {
-    ...(parent ? { task_id: parent } : {}), payload: [{ id, title: id, objective: id,
-      acceptance_criteria: ['Verified ' + id], dependencies }] });
+    context, design_ref: designRef, baseline: base, branch: 'feature/test', acceptance_criteria: ['Producer and consumer interoperate', 'Errors handled'] } });
+  const add = async (id, dependencies = [], parent) => {
+    const feature = (await call('list')).feature;
+    if (feature.workflow.phase === 'implement') await call('design-reopen', {payload: {reason: 'Plan additional fixture issues'}});
+    return call(parent ? 'decompose' : 'add', {
+      ...(parent ? {task_id: parent} : {}), payload: [{id, title:id, objective:id,
+        acceptance_criteria:['Verified ' + id], dependencies}] });
+  };
   async function finish(id, empty = false, reconciliationRef) {
     await call('start', { task_id: id });
     const args = { task: { featureId: 'F5', taskId: id, designRef }, baseRef: g('rev-parse', 'HEAD'),
-      input: '{"operations":[]}', requirements: 'Only task ' + id, buildCommand: ['build'], testCommand: ['test'] };
+      reconciliationRef, input: '{"operations":[]}', requirements: 'Only task ' + id, buildCommand: ['build'], testCommand: ['test'] };
     const attempt = await executeAndReview(args, { directory: dir }, { invokeConductor: async json => {
       if (!empty) await writeFile(path.join(dir, id + '.txt'), id + '\n');
       const req = JSON.parse(json), boundary = JSON.parse(req.checks[1].args[1]);
@@ -83,7 +99,17 @@ console.log(JSON.stringify({schema:'review.result/v1',status:${JSON.stringify(st
     buildCommand: [process.execPath, '-e', 'console.log("project built")'],
     testCommand: [process.execPath, '-e', 'console.log("12 integration tests passed")'], testSuccessPattern: '12 integration tests passed',
     review: { maxTurns: 8, maxToolCalls: 30, wallClockBudgetSecs: 30 } });
-  const validate = (patch = {}, optionPatch = {}) => validateFeature({ ...args(), ...patch }, { directory: dir }, { ...options, ...optionPatch });
+  const validate = async (patch = {}, optionPatch = {}) => {
+    const feature = (await call('list')).feature;
+    if (feature.tasks.F5.status !== 'completed' && Object.values(feature.tasks).filter(t => t.id !== 'F5').every(t => t.status === 'completed')) {
+      try {
+        const anchor = patch.reconciliationRef ? await readReconciliation(dir, patch.reconciliationRef, feature, args()) : undefined;
+        await checkpointHistory(dir, feature, {head:g('rev-parse','HEAD'), baseline:base, branch:'feature/test', anchor});
+        if ((await snapshot(dir)).clean) await finish('F5', true, patch.reconciliationRef);
+      } catch {} // Invalid checkpoints/source are tested by the real final gate below.
+    }
+    return validateFeature({...args(), ...patch}, {directory:dir}, {...options, ...optionPatch});
+  };
   return { dir, g, base, add, finish, call, reviewer, options, args, validate, capture };
 }
 
@@ -96,7 +122,7 @@ test('A → B → C → D feature review, failed integration, corrective E and r
   const failed = await f.validate(); assert.equal(failed.status, 'NEEDS_DESIGN', JSON.stringify(failed));
   assert.equal((await f.call('list')).feature.validation.status, 'failed');
   let capture = JSON.parse(await readFile(f.capture, 'utf8'));
-  assert.equal(capture.req.base_ref, f.base); assert.equal(capture.req.head_ref, d.commit);
+  assert.equal(capture.req.base_ref, f.base); assert.equal(capture.req.head_ref, f.g('rev-parse','HEAD'));
   assert.match(capture.requirements, /Approved feature: producer and consumer/);
   assert.match(capture.requirements, /Producer and consumer interoperate/);
   assert.match(capture.requirements, /12 integration tests passed/);
@@ -454,10 +480,10 @@ test('reconciled children retain recursive ancestry when checkpointing their par
   assert.equal(feature.tasks.one.parent_id, 'group');
   assert.equal(feature.tasks.two.parent_id, 'group');
   assert.equal(feature.tasks.group.parent_id, 'root');
-  assert.ok(Object.values(feature.tasks).every(task => task.status === 'completed'));
+  assert.ok(Object.values(feature.tasks).filter(task => task.id !== 'F5').every(task => task.status === 'completed'));
   const passed = await f.validate({ reconciliationRef: reconciled.evidenceRef });
   assert.equal(passed.status, 'PASSED', JSON.stringify(passed));
-  assert.equal(passed.binding.head, root.commit);
+  assert.equal(passed.binding.head, f.g('rev-parse','HEAD'));
 });
 
 async function interruptedFixture(t, attempts = 3) {
@@ -525,6 +551,8 @@ test('interrupted rebase preserves five dirty files and three receipts, resumes 
 
 test('interrupted recovery cannot reset attempts or weaken carried requirements/checks', integration, async t => {
   const f = await interruptedFixture(t); const r = await f.recover(); assert.equal(r.status, 'READY', JSON.stringify(r));
+  await f.call('retry', {task_id:'two',reason:'Resume authenticated recovery'});
+  await f.call('start', {task_id:'two'});
   for (const patch of [{ requirements: f.taskArgs.requirements }, { testCommand: ['weaker'] }, { baseRef: f.taskArgs.baseRef }]) {
     const invalid = await executeAndReview({ ...r.resume, ...patch, input: '{"operations":[]}' }, { directory: f.dir }, {
       invokeConductor: () => assert.fail('must not invoke altered recovery'),
@@ -644,6 +672,8 @@ test('a terminal HEAD_CHANGED receipt preserves its consumed attempt and exact a
   const f = await interruptedFixture(t, 2);
   // Return to the old feature HEAD in this disposable fixture, retaining pending source.
   f.g('stash', 'push', '-u'); f.g('reset', '--hard', f.taskArgs.baseRef); f.g('stash', 'pop');
+  await f.call('retry', {task_id:'two',reason:'Resume before simulated HEAD change'});
+  await f.call('start', {task_id:'two'});
   const changed = await executeAndReview({ ...f.taskArgs, previousAttempt: f.receipts.at(-1) }, { directory: f.dir }, {
     invokeConductor: async () => {
       await writeFile(path.join(f.dir, 'source.txt'), 'third attempt before rebase\r\n');

@@ -5,9 +5,9 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose'];
-const taskActions = new Set(['start', 'complete', 'block', 'fail', 'retry', 'decompose']);
-const inputActions = new Set(['init', 'add', 'complete', 'decompose']);
+export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'];
+const taskActions = new Set(['start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
+const inputActions = new Set(['init', 'add', 'complete', 'decompose', 'design-record', 'design-reopen', 'checkpoint-record', 'issue-resume']);
 const reasonActions = new Set(['block', 'fail', 'retry']);
 const statuses = new Set(['pending', 'in_progress', 'completed', 'blocked', 'failed', 'decomposed']);
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -28,11 +28,16 @@ function validateDesign(feature) {
 }
 function definition(value, feature = false) {
   fields(value, ['id', 'title', 'objective', 'acceptance_criteria', 'context', 'constraints',
-    ...(feature ? ['design_ref'] : ['dependencies'])]);
+    ...(feature ? ['design_ref', 'baseline', 'branch'] : ['dependencies', 'origin'])]);
   requireValue(['id', 'title', 'objective', ...(feature ? ['design_ref'] : [])].every(k => text(value[k])), 'Definition requires nonempty id, title, objective and (for features) design_ref');
   requireValue(strings(value.acceptance_criteria) && value.acceptance_criteria.length > 0, 'acceptance_criteria must be a nonempty string array');
   requireValue(value.context === undefined || typeof value.context === 'string', 'context must be a string');
   requireValue(value.constraints === undefined || strings(value.constraints), 'constraints must be a string array');
+  if (feature) requireValue( /^[a-f0-9]{40}$/.test(value.baseline) && text(value.branch), 'Issue workflow requires full baseline and feature branch');
+  if (!feature && value.origin !== undefined) {
+    fields(value.origin, ['kind', 'reference']);
+    requireValue(['ticket', 'design', 'review', 'discovery'].includes(value.origin.kind) && text(value.origin.reference), 'Invalid issue origin');
+  }
   if (!feature) requireValue(value.dependencies === undefined || (strings(value.dependencies) && new Set(value.dependencies).size === value.dependencies.length), 'dependencies must be unique task IDs');
 }
 
@@ -48,7 +53,7 @@ export function buildCommand(params) {
   }
   requireValue(OPERATIONS.includes(operation), 'Unsupported operation');
   requireValue(text(feature_id), 'feature_id is required');
-  requireValue(taskActions.has(operation) ? text(task_id) : task_id === undefined, 'task_id is required only for task transitions/decompose');
+  requireValue(operation === 'design-reopen' ? (task_id === undefined || text(task_id)) : taskActions.has(operation) ? text(task_id) : task_id === undefined, 'task_id is required only for task transitions/decompose');
   requireValue(reasonActions.has(operation) ? text(reason) : reason === undefined, 'reason is required only for block/fail/retry');
   requireValue(inputActions.has(operation) ? payload !== undefined : payload === undefined, 'payload is required only for init/add/complete/decompose');
   if (operation === 'init') {
@@ -58,12 +63,21 @@ export function buildCommand(params) {
   } else if (operation === 'add' || operation === 'decompose') {
     requireValue(Array.isArray(payload) && payload.length > 0, 'payload must be a nonempty task array');
     payload.forEach(t => definition(t));
+  } else if (operation === 'design-record') {
+    fields(payload, ['summary', 'verification', 'approval', 'disposition']);
+    requireValue(['summary', 'verification', 'approval'].every(k => text(payload[k])) && ['leaf', 'decomposed'].includes(payload.disposition), 'Invalid approved issue design');
+  } else if (operation === 'design-reopen') {
+    fields(payload, ['reason', 'reference']); requireValue(text(payload.reason) && (payload.reference === undefined || text(payload.reference)), 'Reason required');
+  } else if (operation === 'checkpoint-record') {
+    fields(payload, ['commit', 'reference']); requireValue(/^[a-f0-9]{40}$/.test(payload.commit) && text(payload.reference), 'Invalid checkpoint');
+  } else if (operation === 'issue-resume') {
+    fields(payload, ['reference', 'handoff']); requireValue(text(payload.reference) && text(payload.handoff), 'Suspension/handoff required');
   } else if (operation === 'complete') {
     fields(payload, ['feature_id', 'task_id', 'result', 'source', 'reference', 'summary']);
     requireValue(payload.feature_id === feature_id && payload.task_id === task_id && payload.result === 'PASSED' && ['source', 'reference', 'summary'].every(k => text(payload[k])), 'Completion requires task-bound PASSED evidence with source, reference and summary');
   }
   const args = ['tasks', operation, '--feature=' + feature_id];
-  if (taskActions.has(operation)) args.push('--task=' + task_id);
+  if (taskActions.has(operation) || (operation === 'design-reopen' && task_id !== undefined)) args.push('--task=' + task_id);
   // Use = to allow free-text reasons beginning with a dash without argparse ambiguity.
   if (reasonActions.has(operation)) args.push('--reason=' + reason);
   if (inputActions.has(operation)) args.push('--input', '-');
@@ -90,15 +104,29 @@ function validateTask(task, featureId, taskId) {
 }
 function validateResponse(data, params) {
   requireValue(object(data), 'Expected JSON object');
-  requireValue(data.schema_version === 1, 'Unsupported schema_version');
+  requireValue(data.schema_version === 2, 'Unsupported schema_version');
   requireValue(!Object.hasOwn(data, 'error'), 'Error in successful response');
-  const needsFeature = ['init', 'add', 'list', 'next', 'decompose'].includes(params.operation);
+  const needsFeature = ['init', 'add', 'list', 'next', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation);
   if (needsFeature) {
     requireValue(object(data.feature) && data.feature.id === params.feature_id && object(data.feature.tasks), 'Invalid feature response or feature identity mismatch');
     validateDesign(data.feature);
+    requireValue(object(data.feature.workflow), 'Recursive issue graph required');
+    {
+      requireValue(data.schema_version === 2 && data.feature.workflow.kind === 'recursive-issues/v1' &&
+        ['design', 'implement'].includes(data.feature.workflow.phase) &&
+        data.feature.tasks[data.feature.workflow.root_id] && data.feature.original_baseline === data.feature.baseline &&
+        /^[a-f0-9]{40}$/.test(data.feature.baseline) && text(data.feature.branch), 'Unsupported issue workflow response');
+      for (const task of Object.values(data.feature.tasks)) for (const d of task.designs ?? []) {
+        const { reference, ...body } = d;
+        const canonical = JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b))));
+        requireValue(['summary', 'verification', 'approval'].every(k => text(d[k])) &&
+          ['leaf', 'decomposed'].includes(d.disposition) && strings(d.children) &&
+          reference === designReference(canonical), 'Issue design digest mismatch');
+      }
+    }
     for (const [id, task] of Object.entries(data.feature.tasks)) validateTask(task, params.feature_id, id);
   }
-  if (params.operation === 'next') {
+  if (['next', 'design-next'].includes(params.operation)) {
     requireValue(Object.hasOwn(data, 'task'), 'Missing next task');
     if (data.task !== null) {
       validateTask(data.task, params.feature_id);
@@ -136,6 +164,12 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
     requireValue(git.code === 0, 'Current directory must be inside the target Git repository');
     const repository = await realpath(git.stdout.trim());
     await checkStatePaths(repository);
+    if (['design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation)) {
+      const { issueFeature } = await import('../conductor/issue-state.mjs');
+      const feature = await issueFeature(repository, { featureId: params.feature_id,
+        designRef: await featureDesignRef(repository, params.feature_id) }, { scaffoldOptions: options });
+      if (feature) await authenticateIssueMutation(repository, feature, params);
+    }
     stage = 'command';
     const response = await (options.invokeScaffold ?? invoke)('scaffold', command.args,
       { cwd: repository, signal: context.abort, input: command.input });
@@ -157,5 +191,40 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
       error.code === 'ENOENT' ? 'EXECUTABLE_NOT_FOUND' :
       stage === 'response' ? 'INVALID_RESPONSE' : 'EXECUTION_ERROR',
     error.message + (stage === 'command' || stage === 'response' ? '; inspect persisted state before retrying' : ''));
+  }
+}
+
+async function featureDesignRef(repository, featureId) {
+  try { return JSON.parse(await (await import('node:fs/promises')).readFile(path.join(repository, '.scaffold/tasks.json'), 'utf8')).features?.[featureId]?.design_ref; }
+  catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
+}
+async function authenticateIssueMutation(repository, feature, params) {
+  const { snapshot, readEvidence } = await import('../conductor/evidence.mjs');
+  const current = await snapshot(repository);
+  const binding = { featureId: feature.id, taskId: params.task_id, designRef: feature.design_ref };
+  if (params.operation === 'design-reopen') {
+    requireValue(current.clean && !current.bookkeepingVisible, 'Park unfinished source with suspend_issue before reopening design');
+    if (params.payload.reference) {
+      const r = await readEvidence(repository, params.payload.reference);
+      const { git } = await import('../conductor/git-tree.mjs');
+      requireValue(r.kind === 'issue-suspension' && isDeepStrictEqual(r.task, binding) &&
+        r.before.head === current.head && git(repository, ['rev-parse', 'refs/pi-issue-suspensions/' + params.payload.reference.split(':').at(-1) + '^{tree}']) === r.before.tree,
+      'Authenticated saved issue suspension required');
+    }
+  } else if (params.operation === 'issue-resume') {
+    const { readTaskHandoff } = await import('../conductor/task-chain.mjs');
+    const h = await readTaskHandoff(repository, params.payload.handoff, binding);
+    requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
+  } else {
+    const { authenticateTaskEvidence } = await import('../conductor/task-evidence.mjs');
+    const { checkpointProvenance } = await import('../conductor/history.mjs');
+    const { git } = await import('../conductor/git-tree.mjs');
+    const record = await authenticateTaskEvidence(repository, params.payload.reference, binding);
+    const p = checkpointProvenance(repository, params.payload.commit);
+    requireValue(p.evidenceRef === params.payload.reference && p.taskId === params.task_id && p.featureId === feature.id &&
+      p.designRef === feature.design_ref && p.tree === record.after.tree &&
+      git(repository, ['rev-parse', params.payload.commit + '^{tree}']) === record.after.tree &&
+      git(repository, ['show', '-s', '--format=%P', params.payload.commit]) === record.args.baseRef && current.head === params.payload.commit && current.clean,
+    'Authentic current verified checkpoint required');
   }
 }

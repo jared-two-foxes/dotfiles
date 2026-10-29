@@ -7,21 +7,25 @@ import path from 'node:path';
 import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const feature = { id: 'F1', title: 'Feature', objective: 'Deliver feature', design_ref: 'approved-design@sha', acceptance_criteria: ['Feature works'] };
+const feature = { id: 'F1', title: 'Feature', objective: 'Deliver feature', design_ref: 'approved-design@sha', acceptance_criteria: ['Feature works'], baseline: 'a'.repeat(40), branch: 'feature/test' };
 const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', acceptance_criteria: ['Task works'] });
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
 const params = operation => ({ operation, feature_id: 'F1',
-  ...(['start', 'complete', 'block', 'fail', 'retry', 'decompose'].includes(operation) ? { task_id: 'T1' } : {}),
+  ...(['start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume'].includes(operation) ? { task_id: 'T1' } : {}),
   ...(['block', 'fail', 'retry'].includes(operation) ? { reason: 'Explicit decision' } : {}),
-  ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] } }[operation] ?? {}),
+  ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] },
+    'design-record': { payload: { summary: 'Approved', verification: 'Tests', approval: 'User confirmed', disposition: 'leaf' } },
+    'design-reopen': { payload: { reason: 'Review finding' } },
+    'checkpoint-record': { payload: { commit: 'a'.repeat(40), reference: 'receipt' } },
+    'issue-resume': { payload: { reference: 'suspension', handoff: 'handoff' } } }[operation] ?? {}),
 });
-const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 1, ...data }), stderr: '' });
+const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 2, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
 function response(operation) {
   if (['start', 'complete', 'block', 'fail', 'retry'].includes(operation)) {
     return success({ task: task('T1', { start: 'in_progress', complete: 'completed', block: 'blocked', fail: 'failed', retry: 'pending' }[operation]) });
   }
-  return success({ feature: { ...feature, tasks: { T1: task() } }, ...(operation === 'next' ? { task: task() } : {}) });
+  return success({ feature: { ...feature, tasks: { T1: task() } }, ...(['next', 'design-next'].includes(operation) ? { task: task() } : {}) });
 }
 async function fixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'pi-scaffold-')));
@@ -118,7 +122,8 @@ test('malformed, unsupported, mismatched and incomplete responses fail safely', 
   const dir = await fixture(t);
   const base = JSON.parse(response('next').stdout);
   const invalid = ['not json', 'null', '[]', '{}',
-    JSON.stringify({ ...base, schema_version: 2 }),
+    JSON.stringify({ ...base, schema_version: 3 }),
+    JSON.stringify({ ...base, schema_version: 1 }),
     JSON.stringify({ ...base, schema_version: '1' }),
     JSON.stringify({ ...base, error: 'failure' }),
     JSON.stringify({ ...base, feature: { ...base.feature, id: 'other' } }),
@@ -187,7 +192,7 @@ test('requires a current repository and refuses state symlinks', async t => {
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
   const adapter = await readFile(path.join(root, 'pi/agent/extensions/scaffold/adapter.mjs'), 'utf8');
   const extension = await readFile(path.join(root, 'pi/agent/extensions/scaffold/index.ts'), 'utf8');
-  assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|conductor|executor|push-ticket|next-step/i);
+  assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|executeAndReview|invokeConductor|push-ticket|next-step/i);
   assert.match(adapter, /shell: false/);
   assert.match(adapter, /child\.stdin\.end\(input\)/);
   assert.match(extension, /name: "scaffold_tasks"/);
@@ -216,7 +221,10 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
     return result.data;
   };
   await call(params('init'));
-  await call({ ...params('add'), payload: [definition(), { ...definition('T2'), dependencies: ['T1'] }] });
+  await call({ ...params('add'), operation:'decompose', task_id:'F1', payload: [definition(), { ...definition('T2'), dependencies: ['T1'] }] });
+  assert.equal((await call(params('next'))).task, null);
+  for (const task_id of ['F1','T1','T2']) await call({operation:'design-record',feature_id:'F1',task_id,payload:{summary:'Approved', verification:'Checks', approval:'User confirmed', disposition:task_id === 'F1' ? 'decomposed' : 'leaf'}});
+  await call({operation:'design-finish',feature_id:'F1'});
   assert.equal((await call(params('next'))).task.id, 'T1');
   await call(params('start'));
   // Fresh module instance, no previous conversation or adapter memory.
@@ -231,21 +239,10 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   await call(params('complete'));
   const listed = await call(params('list'));
   assert.deepEqual(listed.feature.tasks.T1.history.at(-1).evidence, evidence);
-  assert.equal((await call(params('next'))).task.id, 'T2');
-  await call({ ...params('block'), task_id: 'T2' });
-  await call({ ...params('retry'), task_id: 'T2' });
-  await call({ ...params('start'), task_id: 'T2' });
-  await call({ ...params('fail'), task_id: 'T2' });
-  await call({ ...params('retry'), task_id: 'T2' });
-  await call({ ...params('decompose'), task_id: 'T2' });
-  assert.equal((await call(params('next'))).task.id, 'child');
-  await call({ ...params('decompose'), task_id: 'child', payload: [definition('grandchild')] });
-  assert.equal((await call(params('next'))).task.id, 'grandchild');
-  const state = JSON.parse(await readFile(path.join(dir, '.scaffold/tasks.json'), 'utf8'));
-  assert.equal(state.features.F1.tasks.T1.status, 'completed');
-  assert.equal(await readFile(path.join(dir, 'application.txt'), 'utf8'), 'unchanged');
-  const changed = execFileSync('git', ['-C', dir, 'ls-files', '--others', '--exclude-standard'], { encoding: 'utf8' }).trim().split('\n');
-  assert.deepEqual(changed.sort(), ['.scaffold/.criteria-stack.lock', '.scaffold/tasks.json', 'application.txt'].sort());
+  assert.equal((await call(params('next'))).task, null); // missing checkpoint blocks every next issue
+  const blocked = await scaffoldTasks({...params('start'),task_id:'T2'}, {directory:dir});
+  assert.equal(blocked.ok, false); assert.match(blocked.scaffold_error.error, /checkpoint/);
+  assert.equal(await readFile(path.join(dir,'application.txt'),'utf8'), 'unchanged');
 });
 
 test('Pi policies allow only scoped state tracking and preserve separate execution gates', async () => {

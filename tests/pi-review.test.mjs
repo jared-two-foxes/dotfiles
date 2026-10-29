@@ -187,7 +187,7 @@ test('Pi and shared policies allow standalone review without weakening implement
   const agents = await read('pi/agent/AGENTS.md');
   const skill = await read('pi/agent/skills/review/SKILL.md');
   assert.match(system, /Standalone\s+review stays in Research mode/);
-  assert.match(system, /review_changes/); assert.match(system, /sole repository-writing/);
+  assert.match(system, /review_changes/); assert.match(system, /Only native `execute_and_review`/);
   assert.match(system, /Do not run builds, tests, review-cli, executor, Conductor/);
   assert.match(skill, /Use the native `review_changes` tool/);
   assert.match(agents, /execute_and_review/); assert.doesNotMatch(agents, /skill:tdd|writes tests and implementation code directly/);

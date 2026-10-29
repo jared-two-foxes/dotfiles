@@ -84,6 +84,7 @@ export function featureRequirements(feature, design) {
   return design + '\n\nOriginal feature acceptance criteria:\n' +
       feature.acceptance_criteria.map(c => '- ' + c).join('\n') + '\n\nConstraints:\n' +
       (feature.constraints ?? []).join('\n') +
+      ('\n\nApproved issue designs and contracts:\n' + JSON.stringify(Object.values(feature.tasks).map(t => ({ id: t.id, parent: t.parent_id, origin: t.origin, criteria: t.acceptance_criteria, constraints: t.constraints, designs: t.designs, earlierDesigns: t.design_history })))) +
       '\n\nIndependently assess the COMPLETE feature, cross-task integration, interfaces, data structures, invariants, architecture, regressions, missing behavior, errors and edge cases. Inspect check diagnostics for meaningful coverage; zero exits alone are insufficient. Never weaken the original acceptance criteria.';
 }
 export const reviewScope = (requirements, checks) => requirements +

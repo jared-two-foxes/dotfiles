@@ -24,7 +24,7 @@ function resumeArgs(handoff, reference) {
 
 // Pin every historical snapshot, not just the latest tree. Compare existing audit
 // refs on retry; repair only missing refs, never replace an unexpected object.
-async function pinHandoff(repository, reference, handoff) {
+export async function pinHandoff(repository, reference, handoff) {
   const { records } = await authenticateAttemptChain(repository, reference, handoff.task, new Set(), reference);
   const prefix = 'refs/pi-task-recoveries/' + reference.split(':').at(-1);
   const updates = [];
@@ -113,7 +113,7 @@ export async function recoverInterruptedTaskRebase(args, context = {}, options =
     await unchanged(); await options.interrupt?.('afterPrefix');
     const handoff = {
       kind: 'rebase-handoff', repository, task: args.task, attempt: previous.attempt,
-      args: { ...previous.args, baseRef: args.headRef, requirements, previousAttempt: args.previousAttempt },
+      args: { ...previous.args, baseRef: args.headRef, requirements, reconciliationRef, previousAttempt: args.previousAttempt },
       before, after: before, request: null, response: null,
       result: { status: 'BLOCKED', stage: 'RECOVERY', reason: 'REBASE_RECOVERY_READY',
         message: 'Explicit baseline handoff only; task implementation and verification remain unfinished' },

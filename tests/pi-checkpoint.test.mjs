@@ -7,6 +7,7 @@ import path from 'node:path';
 import { git } from '../pi/agent/extensions/conductor/git-tree.mjs';
 import { executeAndReview as executeTaskAttempt } from '../pi/agent/extensions/conductor/adapter.mjs';
 import { readEvidence, retainEvidence, snapshot } from '../pi/agent/extensions/conductor/evidence.mjs';
+import { approveGraph, requirementsFor } from './helpers/issue-plan.mjs';
 import { checkpointVerifiedTask, checkpointAuthorization } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 
 
@@ -31,17 +32,19 @@ async function fixture(t) {
   await writeFile(path.join(dir, '.gitignore'), '.scaffold/\n');
   g('add', '.'); g('commit', '-qm', 'baseline'); g('switch', '-qc', 'feature/test');
   const base = g('rev-parse', 'HEAD');
-  const feature = { id: 'F4', design_ref: 'approved@v1', tasks: {} };
+  const feature = { id: 'F4', design_ref: 'approved@v1', baseline:base, original_baseline:base, branch:'feature/test', workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'one'}, tasks: {} };
   const options = { authorize: async () => true, scaffoldOptions: { invokeScaffold: async () => ({
-    code: 0, stdout: JSON.stringify({ schema_version: 1, feature }), stderr: '',
+    code: 0, stdout: JSON.stringify({ schema_version: 2, feature }), stderr: '',
   }) } };
   async function verify(id = 'one', baseRef = g('rev-parse', 'HEAD'), changes = async () => {
     await writeFile(path.join(dir, 'value.txt'), id + '\n');
   }) {
     const task = { featureId: 'F4', taskId: id, designRef: feature.design_ref };
-    const args = { task, baseRef, requirements: id + ' criteria', input: '{"operations":[]}',
+    let requirements = id + ' criteria';
+    try { const state = JSON.parse(await readFile(path.join(dir,'.scaffold/tasks.json'),'utf8')); requirements = requirementsFor(state.features.F4.tasks[id], requirements); } catch {}
+    const args = { task, baseRef, requirements, input: '{"operations":[]}',
       buildCommand: ['fixture', 'build'], testCommand: ['fixture', 'test'] };
-    const result = await executeAndReview(args, { directory: dir }, { invokeConductor: async json => {
+    const result = await executeAndReview(args, { directory: dir }, { scaffoldOptions: options.scaffoldOptions, invokeConductor: async json => {
       assert.equal(JSON.parse(json).review.base_ref, baseRef);
       await changes();
       return { code: 0, stderr: '', stdout: JSON.stringify({ schema: 'conductor.result/v1',
@@ -316,9 +319,10 @@ test('real Scaffold handoff: complete/checkpoint two dependent tasks and isolate
     assert.equal(result.ok, true, JSON.stringify(result)); return result.data;
   };
   await call('init', { payload: { id: 'F4', title: 'Feature', objective: 'Two independent review scopes',
-    design_ref: 'approved@v1', context: 'Feature baseline ' + f.base, acceptance_criteria: ['Dependent consumer works'] } });
-  await call('add', { payload: ['one', 'two'].map(id => ({ id, title: id, objective: id,
+    baseline: f.base, branch:'feature/test', design_ref: 'approved@v1', context: 'Feature baseline ' + f.base, acceptance_criteria: ['Dependent consumer works'] } });
+  await call('decompose', { task_id:'F4', payload: ['one', 'two'].map(id => ({ id, title: id, objective: id,
     acceptance_criteria: [id + ' verified'], dependencies: id === 'two' ? ['one'] : [] })) });
+  await approveGraph(call);
   let last = f.base;
   for (const id of ['one', 'two']) {
     assert.equal((await call('next')).task.id, id);
@@ -332,6 +336,13 @@ test('real Scaffold handoff: complete/checkpoint two dependent tasks and isolate
     assert.equal((await readEvidence(f.dir, args.evidenceRef)).request.review.base_ref, last);
     last = checkpoint.commit;
   }
+  assert.equal((await call('next')).task.id, 'F4');
+  await call('start', {task_id:'F4'});
+  const parent = await f.verify('F4', last, async () => {});
+  await call('complete', {task_id:'F4', payload:{feature_id:'F4',task_id:'F4',result:'PASSED',source:'conductor',reference:parent.evidenceRef,summary:'Parent integration verified'}});
+  const parentCommit = await f.checkpoint(parent);
+  assert.equal(parentCommit.ok, true, JSON.stringify(parentCommit));
+  assert.equal(f.g('rev-parse', last + '^{tree}'), f.g('rev-parse', parentCommit.commit + '^{tree}'));
   assert.equal((await call('next')).task, null);
-  assert.equal(f.g('rev-list', '--count', f.base + '..HEAD'), '2');
+  assert.equal(f.g('rev-list', '--count', f.base + '..HEAD'), '3');
 });
