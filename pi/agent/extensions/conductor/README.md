@@ -301,13 +301,14 @@ inspect ownership before removing it, never clean the real source checkout.
 
 ## Recursive issues: design then implement
 
-New Scaffold features opt in with `workflow: "recursive-issues/v1"` (requires the
-matching Scaffold issue-workflow release). The root is created from the agreed
+All Scaffold features use the recursive issue graph (requires the matching
+Scaffold release). There is no opt-in field or alternate lifecycle. The stored
+workflow kind is `recursive-issues/v1`; the state schema is version 2. The root is created from the agreed
 ticket. Pi uses `design-next`, `decompose` and `design-record` to approve designs
 downward; `design-finish` gates all implementation. The API retains task IDs.
 `execute_and_review` requires an explicit started issue and its exact approved
 design suffix (see Design skill) in fixed requirements. Unbound execution cannot
-bypass an unfinished recursive feature. Legacy features keep their existing API.
+bypass an unfinished recursive feature. Older task-state files are rejected without modification.
 
 `checkpoint_verified_task` records its verified commit back into Scaffold. Retry
 that native operation after interrupted bookkeeping; never fabricate a checkpoint

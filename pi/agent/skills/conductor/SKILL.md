@@ -39,12 +39,11 @@ builds or tests.
 
 ## Approval gates
 
-For new recursive issue workflows, Design persists the ticket/root, walks all
+For every feature, Design persists the ticket/root, walks all
 required issue designs downward with user confirmation, and calls `design-finish`
 before implementation. Implement selects eligible leaves and recovers their approved
 designs; it does not repeat the entire design phase. Include the exact approved
-issue design suffix and criteria in fixed requirements. Existing features retain
-their legacy lifecycle. Keep separate design and execution approvals.
+issue design suffix and criteria in fixed requirements. Older task-state files are unsupported. Keep separate design and execution approvals.
 
 1. Inspect the repository and discuss material design decisions iteratively,
    using focused code/text examples with changed portions marked, including

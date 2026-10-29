@@ -164,8 +164,7 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     requireValue(git(repository, ['rev-parse', 'HEAD']) === commit && (await snapshot(repository)).clean,
       'Checkpoint created but repository changed; reconcile before next task');
     if (pending) git(repository, ['update-ref', '-d', pendingRef, commit]);
-    if (feature.workflow?.kind === 'recursive-issues/v1')
-      await issueMutation(repository, args.task, 'checkpoint-record', { commit, reference: args.evidenceRef }, options);
+    await issueMutation(repository, args.task, 'checkpoint-record', { commit, reference: args.evidenceRef }, options);
     return { ok: true, ...provenance, commit, recovered, nextBaseRef: commit };
   } catch (error) {
     return { ok: false, reason: 'CHECKPOINT_BLOCKED', message: error.message,

@@ -22,7 +22,7 @@ async function executeAndReview(args, context, options) {
 
 const designText = 'Approved: independent value model, then consumer. Preserve existing interfaces.';
 const feature = { id: 'F3', title: 'Value feature', objective: 'Deliver value behavior',
-  context: designText, design_ref: 'sha256:context', acceptance_criteria: ['Consumer displays valid value'] };
+  baseline: 'a'.repeat(40), branch: 'feature/test', context: designText, design_ref: 'sha256:context', acceptance_criteria: ['Consumer displays valid value'] };
 const definition = (id, dependencies = []) => ({ id, title: id, objective: 'One bounded behavior: ' + id,
   acceptance_criteria: [id + ' handles valid and invalid values'], dependencies,
   constraints: ['Preserve existing interfaces'], context: 'Source: value.txt. Verification: assert valid and invalid inputs; run build and tests.' });
@@ -217,86 +217,29 @@ test('receipt retention must succeed before applying operations; HEAD changes ne
 // This is a scripted Pi/tool conversation, not an LLM compliance test. Scaffold
 // is real, Conductor responses are deterministic fixtures; production never
 // uses this launcher or runs a new orchestration loop.
-test('real native handoff: dependent task becomes ready but cannot cross an unresolved checkpoint; recursive recovery', {
-  skip: !process.env.SCAFFOLD_SOURCE || process.platform === 'win32' ? 'Set SCAFFOLD_SOURCE (POSIX launcher)' : false,
+test('real Scaffold rejects the original execution-first lifecycle', {
+  skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE' : false,
 }, async t => {
   const f = await fixture(t);
-  const bin = await mkdtemp(path.join(tmpdir(), 'pi-phase3-scaffold-bin-'));
-  t.after(() => rm(bin, { recursive: true, force: true }));
-  await writeFile(path.join(bin, 'scaffold'), '#!/usr/bin/env python3\nimport sys\nsys.path.insert(0, ' +
-    JSON.stringify(path.resolve(process.env.SCAFFOLD_SOURCE, 'src')) + ')\nfrom scaffold_cli.cli import main\nmain()\n');
-  await chmod(path.join(bin, 'scaffold'), 0o755);
-  await writeFile(path.join(f.dir, '.git/info/exclude'), '.scaffold/\n');
-  const previous = process.env.PATH;
-  process.env.PATH = bin + path.delimiter + previous;
-  t.after(() => { process.env.PATH = previous; });
-  const call = async (operation, task_id, payload, reason) => {
-    const result = await scaffoldTasks({ operation, feature_id: 'F3', ...(task_id ? { task_id } : {}),
-      ...(payload ? { payload } : {}), ...(reason ? { reason } : {}) }, { directory: f.dir });
-    assert.equal(result.ok, true, JSON.stringify(result)); return result.data;
-  };
-  await call('init', undefined, feature);
-  // Invalid graphs must fail in Scaffold itself, not in a parallel Pi graph engine.
-  const cycle = await scaffoldTasks({ operation: 'add', feature_id: 'F3', payload: [definition('a', ['b']), definition('b', ['a'])] }, { directory: f.dir });
-  assert.equal(cycle.ok, false);
-  const missing = await scaffoldTasks({ operation: 'add', feature_id: 'F3', payload: [definition('a', ['missing'])] }, { directory: f.dir });
-  assert.equal(missing.ok, false);
-  await call('add', undefined, [definition('model'), definition('consumer', ['model'])]);
-  assert.equal((await call('next')).task.id, 'model');
-  await call('start', 'model');
-  const passed = await executeAndReview(f.args, { directory: f.dir }, { invokeConductor: async () => {
-    await writeFile(path.join(f.dir, 'value.txt'), 'after'); return response();
-  } });
-  const recovered = await inspectEvidence(passed.evidence.reference, { directory: f.dir });
-  assert.equal(recovered.matchesWorkingTree && recovered.structurallyVerified, true);
-  await call('complete', 'model', { feature_id: 'F3', task_id: 'model', result: 'PASSED', source: 'conductor',
-    reference: passed.evidence.reference, summary: 'Fixture build and 2 relevant tests succeeded; independent review fixture approved' });
-  assert.equal((await call('next')).task.id, 'consumer');
-  let calls = 0;
-  const barrier = await executeAndReview({ ...f.args, task: { ...task, taskId: 'consumer' } }, { directory: f.dir }, {
-    invokeConductor: () => { calls++; return response(); },
-  });
-  assert.equal(barrier.reason, 'CHECKPOINT_REQUIRED'); assert.equal(calls, 0);
-  assert.equal((await call('list')).feature.tasks.consumer.status, 'pending');
-  // Simulate the separately authorised human checkpoint, never production auto-commit.
-  f.git('add', 'value.txt'); f.git('commit', '-qm', 'authorised checkpoint');
-  await call('start', 'consumer');
-  const fresh = await import('../pi/agent/extensions/scaffold/adapter.mjs?phase3-session');
-  const state = await fresh.scaffoldTasks({ operation: 'list', feature_id: 'F3' }, { directory: f.dir });
-  assert.equal(state.data.feature.design_ref, task.designRef);
-  assert.equal(state.data.feature.tasks.consumer.status, 'in_progress');
-  assert.equal((await call('next')).task, null); // interrupted does not mean done
-  await call('fail', 'consumer', undefined, 'Oversized remaining work; no verified consumer changes');
-  await call('decompose', 'consumer', [definition('parse'), definition('display', ['parse'])]);
-  await call('decompose', 'parse', [definition('validate')]);
-  assert.equal((await call('next')).task.id, 'validate');
-  const listed = (await call('list')).feature.tasks;
-  assert.equal(listed.model.status, 'completed');
-  assert.equal(listed.consumer.status, 'decomposed');
-  assert.deepEqual(listed.consumer.acceptance_criteria, definition('consumer').acceptance_criteria);
-  await call('block', 'consumer', undefined, 'Awaiting boundary decision');
-  assert.equal((await call('next')).task, null);
-  await call('retry', 'consumer', undefined, 'Boundary decision resolved; explicit resume');
-  const premature = await scaffoldTasks({ operation: 'start', feature_id: 'F3', task_id: 'consumer' }, { directory: f.dir });
-  assert.equal(premature.ok, false);
-  for (const id of ['validate', 'parse', 'display', 'consumer']) {
-    assert.equal((await call('next')).task.id, id);
-    await call('start', id);
-    const checked = await executeAndReview({ ...f.args, task: { ...task, taskId: id },
-      baseRef: f.git('rev-parse', 'HEAD'), input: '{"operations":[]}',
-      requirements: definition(id).acceptance_criteria.join('; ') }, { directory: f.dir }, {
-      invokeConductor: async () => response(),
-    });
-    assert.equal(checked.status, 'PASSED');
-    await call('complete', id, { feature_id: 'F3', task_id: id, result: 'PASSED', source: 'conductor',
-      reference: checked.evidence.reference, summary: 'Mocked checks and review for explicit parent/child criteria' });
-    if (id === 'display') assert.equal((await call('list')).feature.tasks.consumer.status, 'decomposed');
-  }
-  // Mutation after approval is detected when recovering full feature state.
-  const stateFile = path.join(f.dir, '.scaffold/tasks.json');
-  const raw = JSON.parse(await readFile(stateFile, 'utf8')); raw.features.F3.context = 'silently changed';
-  await writeFile(stateFile, JSON.stringify(raw));
-  assert.equal((await fresh.scaffoldTasks({ operation: 'list', feature_id: 'F3' }, { directory: f.dir })).ok, false);
+  const { invoke } = await import('../pi/agent/extensions/scaffold/adapter.mjs');
+  const invokeScaffold = async (_program, args, options) => invoke('python3', ['-c',
+    'import sys;sys.path.insert(0,sys.argv.pop(1));from scaffold_cli.cli import main;main()',
+    path.join(process.env.SCAFFOLD_SOURCE, 'src'), ...args], options);
+  const call = (operation, extra = {}) => scaffoldTasks({operation, feature_id:'F3', ...extra}, {directory:f.dir}, {invokeScaffold});
+  const initialized = await call('init', {payload:feature});
+  assert.equal(initialized.ok, true, JSON.stringify(initialized));
+  assert.equal(initialized.data.feature.workflow.phase, 'design');
+  assert.ok(initialized.data.feature.tasks.F3);
+  assert.equal((await call('add', {payload:[definition('model')]})).ok, true);
+  assert.equal((await call('next')).data.task, null);
+  const rejected = await call('start', {task_id:'model'});
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.scaffold_error.error, /design/);
+  const versionOne = JSON.parse(await readFile(path.join(f.dir,'.scaffold/tasks.json'),'utf8'));
+  versionOne.schema_version = 1;
+  await writeFile(path.join(f.dir,'.scaffold/tasks.json'), JSON.stringify(versionOne));
+  const old = await call('retry', {task_id:'model',reason:'Attempt to use old state'});
+  assert.equal(old.ok, false); assert.match(old.scaffold_error.error, /schema_version/);
 });
 
 test('workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals', async () => {
@@ -363,7 +306,8 @@ test('real Scaffold permits recursive design decomposition before any implementa
   assert.equal((await call({ operation: 'init', payload: feature })).ok, true);
   assert.equal((await call({ operation: 'add', payload: [definition('model'), definition('consumer', ['model'])] })).ok, true);
   const before = (await call({ operation: 'list' })).data.feature;
-  assert.equal((await call({ operation: 'next' })).data.task.id, 'model');
+  assert.equal((await call({ operation: 'next' })).data.task, null);
+  assert.equal((await call({ operation: 'design-next' })).data.task.id, 'F3');
   const children = [definition('contract'), definition('writes', ['contract']), definition('queries', ['writes'])];
   const split = await call({ operation: 'decompose', task_id: 'model', payload: children });
   assert.equal(split.ok, true, JSON.stringify(split));
@@ -382,7 +326,7 @@ test('real Scaffold permits recursive design decomposition before any implementa
     assert.equal(after.tasks[child.id].context, child.context);
   }
   assert.deepEqual(after.tasks.consumer.dependencies, ['model']);
-  assert.equal((await call({ operation: 'next' })).data.task.id, 'contract');
+  assert.equal((await call({ operation: 'next' })).data.task, null);
   assert.equal((await call({ operation: 'start', task_id: 'model' })).ok, false);
   assert.equal(f.git('rev-parse', 'HEAD'), f.args.baseRef);
   assert.equal(await readFile(path.join(f.dir, 'value.txt'), 'utf8'), 'before');

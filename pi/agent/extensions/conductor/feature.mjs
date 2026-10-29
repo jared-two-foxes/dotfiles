@@ -26,7 +26,7 @@ async function lifecycle(repository, operation, featureId, payload, options) {
     ['tasks', operation, '--feature=' + featureId, '--input', '-'], { cwd: repository, input: JSON.stringify(payload) });
   requireValue(response.code === 0, 'Scaffold validation transition failed: ' + response.stderr?.slice(0, 4000));
   const data = JSON.parse(response.stdout);
-  requireValue([1, 2].includes(data.schema_version) && data.feature?.id === featureId && data.feature.validation,
+  requireValue(data.schema_version === 2 && data.feature?.id === featureId && data.feature.validation,
     'Unsupported Scaffold validation response; install Phase 5 Scaffold');
   return data.feature;
 }
@@ -41,7 +41,7 @@ export async function featurePreconditions(repository, args, options = {}) {
   requireValue(feature.design_ref === args.designRef, 'Approved design identity mismatch');
   const design = approvedDesign(repository, feature);
   requireValue(!feature.original_baseline || feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
-  requireValue(!feature.workflow || feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
+  requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
   const tasks = feature.tasks;
   const identifiers = Object.keys(tasks);
   requireValue(identifiers.length > 0 && identifiers.every(id => tasks[id].status === 'completed'),

@@ -165,7 +165,7 @@ test('Pi retains exact operations and separate execution approval without defaul
 // These contracts complement real Scaffold/Git integration tests; they do not simulate reasoning.
 test('design walks bounded issues downward and gates implementation until all designs are approved', () => {
   const design = read('pi/agent/skills/design/SKILL.md').replace(/\s+/g, ' ');
-  for (const phrase of ['root issue', 'recursive-issues/v1', 'design-next', 'design-record', 'design-finish',
+  for (const phrase of ['root issue', 'recursive issue graph', 'design-next', 'design-record', 'design-finish',
     'immediate children', 'Definitions remain immutable', 'approval states exactly what the user confirmed',
     'No implementation may run before this entire graph design phase completes',
     'Small changes use the root itself as the leaf']) assert.ok(design.includes(phrase), phrase);

@@ -28,12 +28,12 @@ function validateDesign(feature) {
 }
 function definition(value, feature = false) {
   fields(value, ['id', 'title', 'objective', 'acceptance_criteria', 'context', 'constraints',
-    ...(feature ? ['design_ref', 'workflow', 'baseline', 'branch'] : ['dependencies', 'origin'])]);
+    ...(feature ? ['design_ref', 'baseline', 'branch'] : ['dependencies', 'origin'])]);
   requireValue(['id', 'title', 'objective', ...(feature ? ['design_ref'] : [])].every(k => text(value[k])), 'Definition requires nonempty id, title, objective and (for features) design_ref');
   requireValue(strings(value.acceptance_criteria) && value.acceptance_criteria.length > 0, 'acceptance_criteria must be a nonempty string array');
   requireValue(value.context === undefined || typeof value.context === 'string', 'context must be a string');
   requireValue(value.constraints === undefined || strings(value.constraints), 'constraints must be a string array');
-  if (feature && value.workflow !== undefined) requireValue(value.workflow === 'recursive-issues/v1' && /^[a-f0-9]{40}$/.test(value.baseline) && text(value.branch), 'Issue workflow requires full baseline and feature branch');
+  if (feature) requireValue( /^[a-f0-9]{40}$/.test(value.baseline) && text(value.branch), 'Issue workflow requires full baseline and feature branch');
   if (!feature && value.origin !== undefined) {
     fields(value.origin, ['kind', 'reference']);
     requireValue(['ticket', 'design', 'review', 'discovery'].includes(value.origin.kind) && text(value.origin.reference), 'Invalid issue origin');
@@ -104,13 +104,14 @@ function validateTask(task, featureId, taskId) {
 }
 function validateResponse(data, params) {
   requireValue(object(data), 'Expected JSON object');
-  requireValue([1, 2].includes(data.schema_version), 'Unsupported schema_version');
+  requireValue(data.schema_version === 2, 'Unsupported schema_version');
   requireValue(!Object.hasOwn(data, 'error'), 'Error in successful response');
   const needsFeature = ['init', 'add', 'list', 'next', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation);
   if (needsFeature) {
     requireValue(object(data.feature) && data.feature.id === params.feature_id && object(data.feature.tasks), 'Invalid feature response or feature identity mismatch');
     validateDesign(data.feature);
-    if (data.feature.workflow) {
+    requireValue(object(data.feature.workflow), 'Recursive issue graph required');
+    {
       requireValue(data.schema_version === 2 && data.feature.workflow.kind === 'recursive-issues/v1' &&
         ['design', 'implement'].includes(data.feature.workflow.phase) &&
         data.feature.tasks[data.feature.workflow.root_id] && data.feature.original_baseline === data.feature.baseline &&

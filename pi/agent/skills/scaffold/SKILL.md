@@ -29,7 +29,7 @@ Pi's current Git root; there is no arbitrary repo path or implicit current issue
 For a new feature initialize from the agreed ticket scope:
 
 ```json
-{"operation":"init","feature_id":"F1","payload":{"id":"F1","title":"Client activity","objective":"Record and display activity","acceptance_criteria":["Recorded activity is displayed"],"context":"Exact agreed ticket, constraints, original full Git baseline and feature branch","design_ref":"sha256:context","workflow":"recursive-issues/v1","baseline":"<full original SHA>","branch":"feature/activity"}}
+{"operation":"init","feature_id":"F1","payload":{"id":"F1","title":"Client activity","objective":"Record and display activity","acceptance_criteria":["Recorded activity is displayed"],"context":"Exact agreed ticket, constraints, original full Git baseline and feature branch","design_ref":"sha256:context","baseline":"<full original SHA>","branch":"feature/activity"}}
 ```
 
 The adapter replaces `sha256:context` with the digest of the exact context. Retain
@@ -144,7 +144,6 @@ initialize a replacement feature to hide failures.
 
 ## Compatibility
 
-Features without an issue graph require explicit migration of their original scope, source and receipts before implementation. New workflows upgrade the shared task store to schema v2; older binaries stop
-instead of silently ignoring phase gates. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
+Features without an issue graph require explicit migration of their original scope, source and receipts before implementation. The task store uses schema v2 exclusively; older state is rejected without modification. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
 implementation. Legacy `scaffold stack list`, `scaffold status` and
 `scaffold fetch-ticket ID` remain read-only inspection aids outside this graph.

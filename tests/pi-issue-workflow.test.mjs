@@ -36,7 +36,7 @@ async function fixture(t) {
     assert.equal(r.ok, true, JSON.stringify(r)); return r.data;
   };
   await call('init', { payload: { id: 'F', title: 'Ticket', objective: 'Preserve behavior', acceptance_criteria: ['Behavior works'],
-    design_ref: designRef, context: 'User ticket: preserve behavior. Baseline ' + base, baseline: base, branch: 'feature/issues', workflow: 'recursive-issues/v1' } });
+    design_ref: designRef, context: 'User ticket: preserve behavior. Baseline ' + base, baseline: base, branch: 'feature/issues' } });
   const approve = async (id, parent = false) => call('design-record', { task_id: id,
     payload: { summary: 'Approved solution ' + id, verification: 'Regression tests for ' + id,
       approval: 'User confirmed design ' + id, disposition: parent ? 'decomposed' : 'leaf' } });

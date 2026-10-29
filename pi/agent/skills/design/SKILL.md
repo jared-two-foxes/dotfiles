@@ -37,8 +37,7 @@ Understand the existing implementation well enough to identify the change surfac
 The user's ticket is the overall request. A feature retains that request and its
 original Git baseline. Every actionable node is an **issue**, whether discovered
 by decomposition, review, a failing check, or implementation. The existing API
-uses `task`/`task_id` for these nodes. Use `/skill:scaffold`; new features use
-`workflow: "recursive-issues/v1"`. Existing features require an explicit migration before further implementation; preserve their source, receipts and criteria.
+uses `task`/`task_id` for these nodes. Use `/skill:scaffold`; every feature uses the recursive issue graph. Old task-state files are unsupported; preserve their source, receipts and criteria.
 
 ### Feature planning and root issue
 
@@ -202,7 +201,7 @@ If preparing exact operations exposes a new consequential choice or a departure 
 
 ## 5. Own the execution and review loop
 
-The API calls issues `tasks`. All new implementation uses the issue graph phase gates. Existing features require an explicit migration before continuing.
+The API calls issues `tasks`. All new implementation uses the issue graph phase gates. Old task-state files are unsupported.
 
 You are the **primary conversational agent and sole generator of executor input**, including every corrective change. The deterministic `execute_and_review` tool forwards your exact operations and verification commands to the shared `conductor` CLI. Conductor applies them through its executor library, runs build/tests, and invokes the review library. It never generates or repairs code and does not invoke an additional AI orchestration agent.
 

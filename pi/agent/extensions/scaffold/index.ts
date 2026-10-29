@@ -14,7 +14,7 @@ const task = Type.Object({ ...definition,
   origin: Type.Optional(Type.Object({ kind: Type.Union(["ticket", "design", "review", "discovery"].map(v => Type.Literal(v))), reference: text() }, { additionalProperties: false })),
   dependencies: Type.Optional(Type.Array(text(), { uniqueItems: true })),
 }, { additionalProperties: false });
-const feature = Type.Object({ ...definition, design_ref: text(), workflow: Type.Optional(Type.Literal("recursive-issues/v1")), baseline: Type.Optional(text()), branch: Type.Optional(text()) }, { additionalProperties: false });
+const feature = Type.Object({ ...definition, design_ref: text(), baseline: text(), branch: text() }, { additionalProperties: false });
 const evidence = Type.Object({
   feature_id: text(), task_id: text(), result: Type.Literal("PASSED"),
   source: text(), reference: text(), summary: text(),
@@ -43,10 +43,6 @@ export default function (pi: ExtensionAPI) {
       "Use list to resume/inspect full state; next returning null does not imply feature completion.",
     parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      if (params.operation === "init" && params.payload?.workflow !== "recursive-issues/v1") {
-        const result = { ok: false, reason: "ISSUE_WORKFLOW_REQUIRED", message: "New features require the recursive issue graph, original baseline and feature branch" };
-        return { content: [{ type: "text" as const, text: JSON.stringify(result) }], isError: true, details: result };
-      }
       const result = await scaffoldTasks(params, { directory: ctx.cwd, abort: signal });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],

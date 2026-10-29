@@ -38,7 +38,7 @@ Follow `SYSTEM.md` for mode boundaries and approval gates.
   persist user confirmation before any attempt. Recover phase, designs, receipt
   chains and Git provenance before selecting work. Completed descendants and prior
   failures remain intact. Every issue needs authentic verification and a separately
-  authorized checkpoint. Existing features need explicit migration before continuing implementation.
+  authorized checkpoint. Old task-state files are unsupported.
 
 Use the Linear tools when the user explicitly asks to manage shared tickets.
 Confirm proposed creations or revisions before execution. Ticket descriptions

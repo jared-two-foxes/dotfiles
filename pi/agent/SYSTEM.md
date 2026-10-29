@@ -39,13 +39,13 @@ to shell `review-cli` or invent an executor list to obtain a review.
 ### Design phase
 
 When implementation is requested, load `/skill:design` and enter Design. Persist
-an agreed ticket as a feature with `workflow: "recursive-issues/v1"`; its root
+an agreed ticket as a feature through `init`; its root
 issue is created automatically. Walk the graph downward using `design-next`.
 Each issue receives a bounded design pass and user confirmation, then an approved
 `design-record` as a leaf or a parent with immediate children. Do not design the
 whole system before creating its root. Persist all required designs, then call
 `design-finish`. No application source edits, executor operations or build/test
-commands run during this phase. Existing features require explicit migration before implementation continues.
+commands run during this phase. Old task-state files are unsupported and are never silently converted.
 
 ### Implement phase
 
