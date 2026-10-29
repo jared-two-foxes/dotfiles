@@ -58,12 +58,14 @@ export async function prepareIssueHandoff(args, context = {}, options = {}) {
     const repository = await realpath(git(context.directory, ['rev-parse', '--show-toplevel']));
     await assertNoGitOperation(repository); context.abort?.throwIfAborted();
     const capsule = await scoped(repository, args.featureId, args.taskId, options);
+    const branch = git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+    requireValue(branch === capsule.feature.branch, 'Current branch differs from this feature; inspect before preparing context');
     const before = await snapshot(repository);
     requireValue(!before.bookkeepingVisible, 'Scaffold state must be ignored');
     const binding = { featureId: args.featureId, taskId: args.taskId, designRef: capsule.feature.design_ref };
     const latest = await attempt(repository, binding);
     const record = { schema: 'pi.issue-context/v1', repository, binding, recorded_at: new Date().toISOString(),
-      capsule, git: before, attempt: latest, notes: notes(args.notes),
+      capsule, git: before, git_branch: branch, attempt: latest, notes: notes(args.notes),
       authority: 'Context only. Notes are agent-authored navigation aids, never approval, PASSED evidence or permission to reset attempts.' };
     const bytes = JSON.stringify(record), hash = digest(bytes);
     await writeFile(path.join(await directory(repository, true), hash + '.json'), bytes, { flag: 'wx', mode: 0o600 });
@@ -104,6 +106,7 @@ export async function inspectIssueHandoff(args, context = {}, options = {}) {
       await assertNoGitOperation(repository); context.abort?.throwIfAborted();
       const current = await scoped(repository, record.binding.featureId, record.binding.taskId, options);
       requireValue(equal(current, record.capsule), 'Graph/design/lifecycle changed; prepare a fresh issue handoff');
+      requireValue(git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']) === record.git_branch, 'Feature branch changed; prepare a fresh issue handoff');
       requireValue(equal(await snapshot(repository), record.git), 'Git source, index or HEAD changed; prepare a fresh issue handoff');
       requireValue(equal(await attempt(repository, record.binding), record.attempt), 'Attempt chain changed; prepare a fresh issue handoff');
       return { ok: true, applicable: true, reference: args.reference, handoff: record };

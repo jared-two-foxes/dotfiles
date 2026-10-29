@@ -300,6 +300,9 @@ test('scoped handoff survives fresh module load and detects graph, source and re
   assert.equal(await readFile(path.join(f.dir, '.scaffold/tasks.json'), 'utf8'), stateBefore);
   const fresh = await import('../pi/agent/extensions/conductor/issue-context.mjs?fresh');
   assert.equal((await fresh.inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options)).applicable, true);
+  f.g('switch', '-qc', 'feature/other');
+  assert.equal((await inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options)).applicable, false);
+  f.g('switch', 'feature/issues');
   await writeFile(path.join(f.dir, 'source.txt'), 'changed\n');
   const stale = await inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options);
   assert.equal(stale.applicable, false); assert.equal(stale.handoff, undefined);
