@@ -16,8 +16,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Recursive issue lifecycle contract; pin the companion Scaffold implementation.
-          ref: 2d7045bcbc130896064e64371e82c0fcc1bd4701
+          # Recursive issue lifecycle contract; pin the merged Scaffold implementation.
+          ref: 6b32ac6f737aa01df01955395fa37d76b0440f62
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
