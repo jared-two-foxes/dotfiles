@@ -12,6 +12,7 @@ import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/
 import { issueDesignRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
 import { suspendIssue, resumeIssue } from '../pi/agent/extensions/conductor/issue-recovery.mjs';
 import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
+import { reconcileFeature } from '../pi/agent/extensions/conductor/reconciliation.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
 import { checkpointHistory } from '../pi/agent/extensions/conductor/history.mjs';
 const integration = { skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE to recursive-issues Scaffold checkout' : false };
@@ -58,13 +59,13 @@ async function fixture(t) {
         review: { status: status === 'PASSED' ? 'APPROVED' : 'CHANGES_REQUESTED', findings: status === 'PASSED' ? [] : [{ message: 'Missing prerequisite and regression' }] } }) };
     } });
   }
-  async function finish(id, a, change) {
+  async function finish(id, a, change, checkpointOptions = {}) {
     if (!a) { await call('start', { task_id: id }); a = await args(id); }
     const r = await run(a, 'PASSED', change); assert.equal(r.status, 'PASSED', JSON.stringify(r));
     await call('complete', { task_id: id, payload: { feature_id: 'F', task_id: id, source: 'conductor', result: 'PASSED', reference: r.evidence.reference, summary: 'Checks and review passed' } });
-    const c = await checkpointVerifiedTask({ ...scope(id), evidenceRef: r.evidence.reference, authorizationMode: 'manual' },
-      { directory: dir }, { scaffoldOptions, authorize: async () => true });
-    assert.equal(c.ok, true, JSON.stringify(c)); return c;
+    const c = await checkpointVerifiedTask({ ...scope(id), evidenceRef: r.evidence.reference, authorizationMode: 'manual', reconciliationRef: checkpointOptions.reconciliationRef },
+      { directory: dir }, { scaffoldOptions, authorize: async () => true, ...checkpointOptions });
+    if (!checkpointOptions.interrupt) assert.equal(c.ok, true, JSON.stringify(c)); return { ...c, evidenceRef: r.evidence.reference };
   }
   const options = { scaffoldOptions, authorize: async () => true };
   return { dir, g, base, call, approve, add, binding, scope, args, run, finish, options };
@@ -210,4 +211,77 @@ test('final review findings return to the same graph and full feature validation
   const feature = (await f.call('list')).feature;
   assert.equal(feature.validation.status, 'verified'); assert.deepEqual(feature.tasks.F, root);
   assert.deepEqual(feature.validation.history.filter(h => h.event === 'finished').map(h => h.result.status), ['NEEDS_DESIGN', 'PASSED']);
+});
+
+
+test('pending checkpoint authenticates the exact original subset index and rejects later staging changes', integration, async t => {
+  for (const mutate of [false, true]) {
+    const f = await fixture(t); await f.approve('F'); await f.call('design-finish');
+    const failed = await f.finish('F', null, async () => {
+      await writeFile(path.join(f.dir, 'source.txt'), 'verified staged\n'); f.g('add', 'source.txt');
+      await writeFile(path.join(f.dir, 'other.txt'), 'verified unstaged\n');
+    }, { interrupt: async stage => { if (stage === 'afterCommit') throw new Error('interrupted'); } });
+    assert.equal(failed.ok, false);
+    const head = f.g('rev-parse', 'HEAD');
+    if (mutate) { f.g('read-tree', f.base); f.g('add', 'other.txt'); }
+    const index = f.g('write-tree');
+    const retried = await checkpointVerifiedTask({ ...f.scope('F'), evidenceRef: failed.evidenceRef, authorizationMode: 'manual' }, { directory: f.dir }, f.options);
+    assert.equal(retried.ok, !mutate, JSON.stringify(retried));
+    assert.equal(f.g('rev-parse', 'HEAD'), head);
+    if (mutate) assert.equal(f.g('write-tree'), index);
+    else assert.equal((await f.call('list')).feature.tasks.F.checkpoint.commit, head);
+  }
+});
+
+test('started issue with no receipts returns to design without consuming an attempt', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const parked = await suspendIssue({ ...f.scope('F'), reason: 'Precheck discovery before first attempt' }, { directory: f.dir }, f.options);
+  assert.equal(parked.status, 'DESIGN', JSON.stringify(parked)); assert.equal(parked.consumedAttempts, 0);
+  await f.approve('F'); await f.call('design-finish');
+  const resumed = await resumeIssue({ ...f.scope('F'), suspensionRef: parked.suspensionRef }, { directory: f.dir }, f.options);
+  assert.equal(resumed.status, 'READY', JSON.stringify(resumed)); assert.equal(resumed.consumedAttempts, 0);
+  await f.call('start', { task_id: 'F' });
+  const bypass = await f.run(await f.args('F')); assert.equal(bypass.status, 'BLOCKED');
+  const c = await f.finish('F', { ...await f.args('F'), ...resumed.resume, input: '{"operations":[]}' });
+  assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 1);
+  const chain = await authenticateAttemptChain(f.dir, c.evidenceRef, f.binding('F'));
+  assert.deepEqual(chain.records.map(r => r.attempt), [0, 1]);
+});
+
+test('suspended work resumes through a successor reconciliation after upstream rebase', integration, async t => {
+  const f = await fixture(t); await f.add('F', ['pre', 'active']); await f.approve('F', true); await f.approve('pre'); await f.approve('active'); await f.call('design-finish');
+  const checkpoint = await f.finish('pre', null, () => writeFile(path.join(f.dir, 'pre.txt'), 'prefix\n'));
+  await f.call('start', { task_id: 'active' });
+  const attempt = await f.run(await f.args('active'), 'NEEDS_DESIGN', () => writeFile(path.join(f.dir, 'source.txt'), 'suspended work\n'));
+  const parked = await suspendIssue({ ...f.scope('active'), previousAttempt: attempt.evidence.reference, reason: 'Review design' }, { directory: f.dir }, f.options);
+  assert.equal(parked.status, 'DESIGN', JSON.stringify(parked));
+  await f.approve('active'); await f.call('design-finish');
+  f.g('switch', 'main'); await writeFile(path.join(f.dir, 'upstream.txt'), 'upstream\n'); f.g('add', '.'); f.g('commit', '-qm', 'upstream'); const upstream = f.g('rev-parse', 'HEAD');
+  f.g('switch', 'feature/issues'); f.g('rebase', '--onto', upstream, f.base);
+  const outside = await mkdtemp(path.join(tmpdir(), 'issue-rebase-review-')); t.after(() => rm(outside, { recursive: true, force: true }));
+  const script = path.join(outside, 'review.cjs'); await writeFile(script, `console.log(JSON.stringify({schema:'review.result/v1',status:'APPROVED',reason:'REVIEW_COMPLETED',review_id:'rebase',completed_at:'2026-10-29T00:00:00Z',findings:[]}));`);
+  const anchor = await reconcileFeature({ ...f.scope('active'), featureId: 'F', designRef: f.binding('active').designRef,
+    oldHeadRef: checkpoint.commit, upstreamBaseRef: upstream, headRef: f.g('rev-parse', 'HEAD'),
+    buildCommand: [process.execPath, '-e', 'console.log("build passed")'], testCommand: [process.execPath, '-e', 'console.log("3 passed")'], testSuccessPattern: '3 passed' },
+    { directory: f.dir }, { ...f.options, reviewOptions: { executable: process.execPath, prefixArgs: [script] } });
+  assert.equal(anchor.status, 'PASSED', JSON.stringify(anchor));
+  const resumed = await resumeIssue({ ...f.scope('active'), suspensionRef: parked.suspensionRef, reconciliationRef: anchor.evidenceRef }, { directory: f.dir }, f.options);
+  assert.equal(resumed.status, 'READY', JSON.stringify(resumed));
+  assert.equal(resumed.resume.reconciliationRef, anchor.evidenceRef);
+  await f.call('start', { task_id: 'active' });
+  const c = await f.finish('active', { ...resumed.resume, input: '{"operations":[]}' }, undefined, { reconciliationRef: anchor.evidenceRef });
+  assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 2);
+});
+
+
+test('zero-attempt suspension rejects dirty source and hidden consumed attempts', integration, async t => {
+  for (const receipt of [false, true]) {
+    const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+    if (receipt) await f.run(await f.args('F'), 'NEEDS_DESIGN');
+    else await writeFile(path.join(f.dir, 'source.txt'), 'unretained edits\n');
+    const before = await snapshot(f.dir);
+    const r = await suspendIssue({ ...f.scope('F'), reason: 'Missing receipt' }, { directory: f.dir }, f.options);
+    assert.equal(r.status, 'BLOCKED'); assert.deepEqual(await snapshot(f.dir), before);
+    assert.equal((await f.call('list')).feature.workflow.phase, 'implement');
+  }
 });

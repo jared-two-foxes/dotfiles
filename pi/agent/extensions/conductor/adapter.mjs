@@ -230,10 +230,11 @@ export async function executeAndReview(args, context = {}, options = {}) {
       await issueExecutionScope(repository, feature, args);
       if (issue.status !== 'in_progress' || !args.requirements.includes(issueDesignRequirements(issue)))
         throw new Error('Start the explicit issue and include its complete approved design in fixed requirements');
+      if (issue.suspension && !args.previousAttempt) throw new Error('Resumed issue requires its authenticated handoff');
       if (!args.previousAttempt) await assertLatestAttempt(repository, undefined, args.task, 0);
       else {
         const chain = await authenticateAttemptChain(repository, args.previousAttempt, args.task);
-        if (issue.suspension && !chain.records.some(r => r.kind === 'issue-handoff' && r.recovery.suspensionRef === issue.suspension.reference))
+        if (issue.suspension && !chain.records.some(r => ['issue-handoff', 'issue-zero-handoff'].includes(r.kind) && r.recovery.suspensionRef === issue.suspension.reference))
           throw new Error('Suspended issue requires its authenticated continuation chain');
       }
     }
@@ -245,10 +246,10 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (args.previousAttempt) {
       const previous = await readEvidence(repository, args.previousAttempt);
       await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
-      if (['rebase-handoff', 'issue-handoff'].includes(previous.kind)) await readTaskHandoff(repository, args.previousAttempt, args.task);
+      if (['rebase-handoff', 'issue-handoff', 'issue-zero-handoff'].includes(previous.kind)) await readTaskHandoff(repository, args.previousAttempt, args.task);
       if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
-          previous.args.baseRef !== args.baseRef || previous.args.requirements !== args.requirements ||
-          !sameVerification(previous.args, args) ||
+          previous.args.baseRef !== args.baseRef || (previous.kind !== 'issue-zero-handoff' && (previous.args.requirements !== args.requirements ||
+          !sameVerification(previous.args, args))) ||
           previous.result.status === 'PASSED' || before.head !== previous.after.head ||
           before.digest !== previous.after.digest) {
         throw new Error('Previous attempt does not match this task, fixed requirements or current tree; reconcile before continuing');

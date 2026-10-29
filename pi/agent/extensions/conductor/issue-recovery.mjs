@@ -1,4 +1,5 @@
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
+import { suspensionAnchor } from './issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation, currentIndexTree } from './git-tree.mjs';
@@ -45,7 +46,14 @@ export async function suspendIssue(args, context = {}, options = {}) {
     } else {
       requireValue(feature.workflow.phase === 'implement' && task && ['in_progress', 'blocked', 'failed'].includes(task.status), 'An active unfinished issue is required');
       requireValue(typeof args.reason === 'string' && args.reason.trim(), 'Discovery reason required');
-      const chain = await authenticateAttemptChain(repository, args.previousAttempt, args.task), previous = chain.record;
+      const beforeStart = await snapshot(repository);
+      const chain = args.previousAttempt ? await authenticateAttemptChain(repository, args.previousAttempt, args.task) : null;
+      if (!chain) {
+        await assertLatestAttempt(repository, undefined, args.task, 0);
+        requireValue(beforeStart.clean && !beforeStart.bookkeepingVisible, 'Zero-attempt suspension requires clean source/index');
+      }
+      const previous = chain?.record ?? { attempt: 0, result: { status: 'BLOCKED' }, after: beforeStart,
+        args: { task: args.task, baseRef: beforeStart.head } };
       await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
       const before = await snapshot(repository);
       requireValue(previous.result.status !== 'PASSED' && previous.attempt < 5 && equal(before, previous.after) &&
@@ -81,7 +89,7 @@ export async function suspendIssue(args, context = {}, options = {}) {
     try { sourceExisting = git(repository, ['rev-parse', '--verify', sourceRef]); } catch {}
     requireValue(!sourceExisting || sourceExisting === saved.sourceCommit, 'Suspension snapshot ref changed');
     if (!sourceExisting) git(repository, ['update-ref', sourceRef, saved.sourceCommit, '0'.repeat(40)]);
-    await pinHandoff(repository, record.args.previousAttempt, record);
+    if (record.attempt) await pinHandoff(repository, record.args.previousAttempt, record);
     const indexCommit = git(repository, ['commit-tree', saved.indexTree, '-p', record.before.head],
       { input: 'Pi suspended issue index snapshot\n', env: recoveryCommitEnvironment });
     let indexSaved;
@@ -115,9 +123,10 @@ export async function resumeIssue(args, context = {}, options = {}) {
     const parked = await readEvidence(repository, args.suspensionRef);
     requireValue(parked.kind === 'issue-suspension' && equal(parked.task, args.task) &&
       task.suspension?.reference === args.suspensionRef && parked.suspension.branch === args.branch &&
-      parked.suspension.featureBaseRef === args.featureBaseRef &&
-      (parked.suspension.reconciliationRef ?? null) === (args.reconciliationRef ?? null), 'Suspension binding mismatch');
-    const chain = await authenticateAttemptChain(repository, parked.args.previousAttempt, args.task), previous = chain.record;
+      parked.suspension.featureBaseRef === args.featureBaseRef, 'Suspension binding mismatch');
+    await suspensionAnchor(repository, parked, feature, args);
+    const chain = parked.attempt ? await authenticateAttemptChain(repository, parked.args.previousAttempt, args.task) : { records: [] };
+    const previous = chain.record ?? parked;
     await assertLatestAttempt(repository, parked.args.previousAttempt, args.task, previous.attempt);
     requireValue(equal(parked.after, previous.after) && equal(definition(task), definition(parked.suspension.feature.tasks[args.task.taskId])), 'Suspended source/task mismatch');
     const head = git(repository, ['rev-parse', 'HEAD']);
@@ -129,12 +138,14 @@ export async function resumeIssue(args, context = {}, options = {}) {
     const indexCommit = git(repository, ['rev-parse', sourceRef + '-index']);
     requireValue(git(repository, ['rev-parse', indexCommit + '^{tree}']) === parked.suspension.indexTree, 'Saved index snapshot changed');
     const expectedIndex = git(repository, ['merge-tree', '--write-tree', '--merge-base=' + previous.args.baseRef, head, indexCommit]).split('\n')[0];
-    const requirements = carriedRequirements(previous.args.requirements, chain.records) + issueDesignRequirements(task);
+    const requirements = (parked.attempt ? carriedRequirements(previous.args.requirements, chain.records) :
+      [...task.acceptance_criteria, ...task.constraints].join('\n')) + issueDesignRequirements(task);
     if (args.handoffRef || task.suspension.handoff) {
       handoffRef = args.handoffRef ?? task.suspension.handoff;
       await pinHandoff(repository, handoffRef, await readEvidence(repository, handoffRef));
       const h = await readTaskHandoff(repository, handoffRef, args.task);
-      requireValue(h.kind === 'issue-handoff' && h.recovery.suspensionRef === args.suspensionRef && equal(await snapshot(repository), h.after), 'Stale issue handoff');
+      requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === args.suspensionRef &&
+        (h.recovery.reconciliationRef ?? null) === (args.reconciliationRef ?? null) && equal(await snapshot(repository), h.after), 'Stale issue handoff');
       await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
       const { input, ...resume } = h.args;
       return { status: 'READY', handoffRef, consumedAttempts: h.attempt, resume: { ...resume, previousAttempt: handoffRef } };
@@ -156,7 +167,7 @@ export async function resumeIssue(args, context = {}, options = {}) {
     const after = await snapshot(repository);
     requireValue(after.head === head && after.tree === expected && !after.bookkeepingVisible &&
       await currentIndexTree(repository, path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index']))) === expectedIndex, 'Restored source differs from authenticated transplant; preserve saved snapshots');
-    const h = { kind: 'issue-handoff', repository, task: args.task, attempt: previous.attempt,
+    const h = { kind: parked.attempt ? 'issue-handoff' : 'issue-zero-handoff', repository, task: args.task, attempt: previous.attempt,
       args: { ...previous.args, baseRef: head, requirements, reconciliationRef: args.reconciliationRef, previousAttempt: parked.args.previousAttempt },
       before: after, after, result: { status: 'BLOCKED', reason: 'ISSUE_RECOVERY_READY' },
       recovery: { suspensionRef: args.suspensionRef, feature, featureBaseRef: args.featureBaseRef, branch: args.branch,

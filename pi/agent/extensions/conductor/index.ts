@@ -25,8 +25,8 @@ export default function (pi: ExtensionAPI) {
     name: operation === "suspend" ? "suspend_issue" : "resume_issue",
     label: operation === "suspend" ? "Suspend issue for design" : "Restore suspended issue",
     description: operation === "suspend"
-      ? "Explicitly park an unfinished recursive issue using saved Git snapshots/stash and return its graph to design. Preserves index, untracked files, receipts and consumed attempts. Requires UI authorization. Never marks implementation verified."
-      : "Restore saved issue work onto authenticated completed prerequisite checkpoints and retain a baseline handoff without resetting attempts. Requires UI authorization. A conflict blocks and preserves saved work. READY is not PASSED; start the same issue and obtain normal execution approval.",
+      ? "Explicitly park an unfinished recursive issue using saved Git snapshots/stash and return its graph to design. Preserves index, untracked files, receipts and consumed attempts. Without previousAttempt, requires clean source and no existing attempt receipts (zero attempts consumed). Requires UI authorization. Never marks implementation verified."
+      : "Restore saved issue work onto authenticated completed prerequisite checkpoints and retain a baseline handoff without resetting attempts. Requires UI authorization. A conflict blocks and preserves saved work. READY is not PASSED; start the same issue and obtain normal execution approval. Zero-attempt handoffs require freshly supplied verification commands.",
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       branch: Type.String(), featureBaseRef: Type.String(), defaultBranch: Type.String(),

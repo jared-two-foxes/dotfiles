@@ -214,7 +214,7 @@ async function authenticateIssueMutation(repository, feature, params) {
   } else if (params.operation === 'issue-resume') {
     const { readTaskHandoff } = await import('../conductor/task-chain.mjs');
     const h = await readTaskHandoff(repository, params.payload.handoff, binding);
-    requireValue(h.kind === 'issue-handoff' && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
+    requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
   } else {
     const { authenticateTaskEvidence } = await import('../conductor/task-evidence.mjs');
     const { checkpointProvenance } = await import('../conductor/history.mjs');

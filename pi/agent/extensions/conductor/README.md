@@ -337,3 +337,24 @@ receipts with inspect_conductor_evidence. Conflicts or unexpected changes block;
 preserve saved refs/stash and reconcile explicitly. Ignore files/generated ignored
 artifacts are outside snapshot coverage. A user-performed rebase still requires
 the separate authenticated rebase-reconciliation path before prerequisite checkpoints.
+
+
+### Issue recovery boundaries
+
+A started issue with no retained attempt may return to Design through
+`suspend_issue` without `previousAttempt`. This path requires a clean source/index
+and confirms that no attempt receipt exists; it consumes zero attempts. Resume
+returns an authenticated zero-attempt handoff. Supply fresh approved requirements,
+checks and executor input for its first real execution; that execution is attempt 1.
+Dirty unretained changes or any existing consumed attempt require normal receipt
+reconciliation rather than this path. No dummy Conductor invocation is needed.
+
+An issue may remain suspended while the user rebases its completed prerequisites.
+Pass the current successful `reconciliationRef` to resume. It must authenticate as
+a successor of the saved reconciliation and include the suspension's checkpoint
+history. The continuation records this successor; unrelated anchors are rejected.
+
+Pending checkpoint recovery pins the original staged subset atomically with the
+checkpoint commit. A retry accepts that exact original index or an already finalized
+verified index; another staged subset remains blocked. The private pending index
+ref is removed after successful finalization.

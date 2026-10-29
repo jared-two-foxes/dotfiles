@@ -49,7 +49,7 @@ export async function assertLatestAttempt(repository, reference, binding, attemp
   for (const otherRef of await taskEvidenceReferences(repository)) {
     const other = await readEvidence(repository, otherRef);
     if (!equal(other.task, binding)) continue;
-    requireValue(!(other.attempt > attempt) && other.startedReference !== reference,
+    requireValue(!(other.attempt > attempt) && (!reference || other.startedReference !== reference),
       'A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count');
   }
 }
@@ -59,16 +59,40 @@ export async function authenticateAttemptChain(repository, reference, binding, s
   validateBinding(binding);
   const record = await readEvidence(repository, reference);
   requireValue(equal(record.task, binding) && equal(record.args?.task, binding) &&
-    Number.isInteger(record.attempt) && record.attempt >= 1 && record.attempt <= 5 &&
+    Number.isInteger(record.attempt) && (record.attempt >= 1 || (record.attempt === 0 && record.kind === 'issue-zero-handoff')) && record.attempt <= 5 &&
     sha(record.args.baseRef) && record.before?.head === record.args.baseRef && sha(record.after?.head) &&
     (record.after.head === record.args.baseRef || (record.result?.status === 'BLOCKED' && record.result.reason === 'HEAD_CHANGED')) &&
     sha(record.before.tree) && sha(record.after.tree) &&
     typeof record.before.digest === 'string' && typeof record.after.digest === 'string' &&
     ['PASSED', 'NEEDS_DESIGN', 'BLOCKED'].includes(record.result?.status), 'Invalid task correction receipt');
+  if (record.kind === 'issue-zero-handoff') {
+    const parked = await readEvidence(repository, record.recovery.suspensionRef);
+    const { suspensionAnchor } = await import('./issue-anchors.mjs');
+    const { checkpointHistory } = await import('./history.mjs');
+    requireValue(parked.kind === 'issue-suspension' && parked.attempt === 0 && !parked.args.previousAttempt &&
+      parked.args.baseRef === parked.before.head && equal(parked.args.task, binding) &&
+      record.result.reason === 'ISSUE_RECOVERY_READY' && parked.result.reason === 'ISSUE_SUSPENDED' &&
+      record.recovery.feature.tasks[binding.taskId].suspension?.reference === record.recovery.suspensionRef &&
+      equal(parked.task, binding) && parked.before.clean && equal(parked.before, parked.after) &&
+      !record.args.previousAttempt && record.before.clean && equal(record.before, record.after) &&
+      record.before.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), 'Invalid zero-attempt issue handoff');
+    const sourceRef = 'refs/pi-issue-suspensions/' + record.recovery.suspensionRef.split(':').at(-1);
+    requireValue(git(repository, ['rev-parse', sourceRef + '^{tree}']) === parked.before.tree &&
+      git(repository, ['show', '-s', '--format=%P', sourceRef]) === parked.before.head &&
+      git(repository, ['rev-parse', sourceRef + '-index^{tree}']) === parked.before.tree, 'Missing zero-attempt suspension snapshots');
+    await suspensionAnchor(repository, parked, record.recovery.feature, record.recovery);
+    const anchor = record.recovery.reconciliationRef ? await readReconciliation(repository, record.recovery.reconciliationRef,
+      record.recovery.feature, record.recovery) : null;
+    await checkpointHistory(repository, record.recovery.feature, { head: record.args.baseRef,
+      baseline: record.recovery.featureBaseRef, branch: record.recovery.branch, anchor });
+    return { record, records: [record] };
+  }
   if (record.kind === 'issue-handoff') {
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record, recovery = record.recovery;
     const parked = await readEvidence(repository, recovery.suspensionRef);
+    const { suspensionAnchor } = await import('./issue-anchors.mjs');
+    await suspensionAnchor(repository, parked, recovery.feature, recovery);
     const { issueDesignRequirements } = await import('./issue-state.mjs');
     const { checkpointHistory } = await import('./history.mjs');
     requireValue(parked.kind === 'issue-suspension' && equal(parked.task, binding) &&
@@ -135,8 +159,8 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record;
     requireValue(previous.result.status !== 'PASSED' && previous.attempt + 1 === record.attempt &&
-      previous.args.baseRef === record.args.baseRef && previous.args.requirements === record.args.requirements &&
-      sameVerification(previous.args, record.args) && previous.after.head === record.before.head &&
+      previous.args.baseRef === record.args.baseRef && (previous.kind === 'issue-zero-handoff' || (previous.args.requirements === record.args.requirements &&
+      sameVerification(previous.args, record.args))) && previous.after.head === record.before.head &&
       previous.after.digest === record.before.digest &&
       previous.after.tree === record.before.tree, 'Invalid correction receipt chain');
     return { record, records: [...prior.records, record] };
@@ -148,7 +172,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
 
 export async function readTaskHandoff(repository, reference, binding) {
   const chain = await authenticateAttemptChain(repository, reference, binding);
-  requireValue(['rebase-handoff', 'issue-handoff'].includes(chain.record.kind), 'Expected an authenticated task rebase handoff');
+  requireValue(['rebase-handoff', 'issue-handoff', 'issue-zero-handoff'].includes(chain.record.kind), 'Expected an authenticated task rebase handoff');
   await assertLatestAttempt(repository, reference, binding, chain.record.attempt);
   return chain.record;
 }
