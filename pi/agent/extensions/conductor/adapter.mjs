@@ -211,6 +211,7 @@ async function executeAttempt(args, context = {}, options = {}) {
 // Optional task binding leaves legacy single-change callers unchanged. Receipts
 // retain one attempt only; Pi still owns approvals, interpretation and lifecycle.
 export async function executeAndReview(args, context = {}, options = {}) {
+  if (options.issueWorkflowOnly && !args?.task) return outcome('BLOCKED', 'PRECHECK', { reason: 'ISSUE_REQUIRED' });
   if (!args?.task) {
     if (args?.previousAttempt) return outcome('BLOCKED', 'PRECHECK', { reason: 'TASK_REQUIRED' });
     return executeAttempt(args, context, options);
@@ -223,6 +224,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));
     const feature = await issueFeature(repository, args.task, options);
+    if (options.issueWorkflowOnly && !feature) throw new Error('Recursive issue graph required; migrate this feature through Design');
     if (feature) {
       const issue = approvedIssue(feature, args.task);
       await issueExecutionScope(repository, feature, args);

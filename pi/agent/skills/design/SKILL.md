@@ -38,8 +38,7 @@ The user's ticket is the overall request. A feature retains that request and its
 original Git baseline. Every actionable node is an **issue**, whether discovered
 by decomposition, review, a failing check, or implementation. The existing API
 uses `task`/`task_id` for these nodes. Use `/skill:scaffold`; new features use
-`workflow: "recursive-issues/v1"`. Existing features without it retain their old
-lifecycle; never silently migrate or replace an active feature.
+`workflow: "recursive-issues/v1"`. Existing features require an explicit migration before further implementation; preserve their source, receipts and criteria.
 
 ### Feature planning and root issue
 
@@ -203,8 +202,7 @@ If preparing exact operations exposes a new consequential choice or a departure 
 
 ## 5. Own the execution and review loop
 
-The API calls issues `tasks`. Legacy features without `workflow` retain the
-original single-task lifecycle; the issue graph phase gates below apply to new features.
+The API calls issues `tasks`. All new implementation uses the issue graph phase gates. Existing features require an explicit migration before continuing.
 
 You are the **primary conversational agent and sole generator of executor input**, including every corrective change. The deterministic `execute_and_review` tool forwards your exact operations and verification commands to the shared `conductor` CLI. Conductor applies them through its executor library, runs build/tests, and invokes the review library. It never generates or repairs code and does not invoke an additional AI orchestration agent.
 
@@ -242,7 +240,7 @@ result and provenance through its returned receipt; never fabricate a reference.
   then call `checkpoint_verified_task` only with checkpoint authorization; inspect
   its successful result before selecting the next task.
 - **NEEDS_DESIGN:** Inspect the current source and diff, then assess the feedback yourself. For a compiler error, failing test, executor operation conflict or straightforward review defect **within the agreed architecture**, generate a new minimal corrective executor input using the `executor` skill. The new input must be relative to the **current** working tree, not the original snapshot. Invoke `execute_and_review` again with the same BASE_REF and REQUIREMENTS.
-- **Oversized task:** Use the discovery exit hatch above; never decompose active dirty work without suspension. For legacy features only, stop the current correction loop before another large fix.
+- **Oversized task:** Use the discovery exit hatch above; never decompose active dirty work without suspension. Preserve the original issue and its attempt budget.
   Inspect partial source changes and verified progress, then reconcile repository
   and task state. Explain smaller children for only the remaining unverified work;
   obtain decisions on consequential boundaries. Use Scaffold `decompose`, preserving

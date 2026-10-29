@@ -45,7 +45,7 @@ Each issue receives a bounded design pass and user confirmation, then an approve
 `design-record` as a leaf or a parent with immediate children. Do not design the
 whole system before creating its root. Persist all required designs, then call
 `design-finish`. No application source edits, executor operations or build/test
-commands run during this phase. Existing features retain their legacy lifecycle.
+commands run during this phase. Existing features require explicit migration before implementation continues.
 
 ### Implement phase
 

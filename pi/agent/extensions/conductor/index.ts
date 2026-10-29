@@ -265,7 +265,7 @@ export default function (pi: ExtensionAPI) {
       const result = await executeAndReview(params, {
         directory: ctx.cwd,
         abort: signal,
-      });
+      }, { issueWorkflowOnly: true });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: result.status === "BLOCKED",

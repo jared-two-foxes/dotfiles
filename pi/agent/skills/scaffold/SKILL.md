@@ -144,8 +144,7 @@ initialize a replacement feature to hide failures.
 
 ## Compatibility
 
-Features without `workflow` retain their schema-v1 task lifecycle and receipt-based
-design recovery. Do not silently opt an active feature into this workflow. New workflows upgrade the shared task store to schema v2; older binaries stop
+Features without an issue graph require explicit migration of their original scope, source and receipts before implementation. New workflows upgrade the shared task store to schema v2; older binaries stop
 instead of silently ignoring phase gates. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
 implementation. Legacy `scaffold stack list`, `scaffold status` and
 `scaffold fetch-ticket ID` remain read-only inspection aids outside this graph.
