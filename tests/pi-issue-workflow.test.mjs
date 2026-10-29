@@ -14,6 +14,7 @@ import { suspendIssue, resumeIssue } from '../pi/agent/extensions/conductor/issu
 import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
 import { reconcileFeature } from '../pi/agent/extensions/conductor/reconciliation.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
+import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from '../pi/agent/extensions/conductor/issue-context.mjs';
 import { checkpointHistory } from '../pi/agent/extensions/conductor/history.mjs';
 const integration = { skip: !process.env.SCAFFOLD_SOURCE ? 'Set SCAFFOLD_SOURCE to recursive-issues Scaffold checkout' : false };
 async function fixture(t) {
@@ -284,4 +285,55 @@ test('zero-attempt suspension rejects dirty source and hidden consumed attempts'
     assert.equal(r.status, 'BLOCKED'); assert.deepEqual(await snapshot(f.dir), before);
     assert.equal((await f.call('list')).feature.workflow.phase, 'implement');
   }
+});
+
+
+test('scoped handoff survives fresh module load and detects graph, source and receipt changes', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish');
+  const args = { featureId: 'F', taskId: 'F', notes: { next_action: 'Inspect source then request execution approval', source_locations: ['source.txt'], open_questions: [] } };
+  const before = await snapshot(f.dir), stateBefore = await readFile(path.join(f.dir, '.scaffold/tasks.json'), 'utf8');
+  const saved = await prepareIssueHandoff(args, { directory: f.dir }, f.options);
+  assert.equal(saved.ok, true, JSON.stringify(saved)); assert.equal(saved.applicable, true);
+  assert.equal((await inspectIssueHandoff({ featureId: 'F', taskId: 'F' }, { directory: f.dir }, f.options)).reference, saved.reference);
+  assert.equal(saved.handoff.attempt, null); assert.equal(saved.handoff.capsule.issue.design.summary, 'Approved solution F');
+  assert.deepEqual(await snapshot(f.dir), before);
+  assert.equal(await readFile(path.join(f.dir, '.scaffold/tasks.json'), 'utf8'), stateBefore);
+  const fresh = await import('../pi/agent/extensions/conductor/issue-context.mjs?fresh');
+  assert.equal((await fresh.inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options)).applicable, true);
+  await writeFile(path.join(f.dir, 'source.txt'), 'changed\n');
+  const stale = await inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options);
+  assert.equal(stale.applicable, false); assert.equal(stale.handoff, undefined);
+  await writeFile(path.join(f.dir, 'source.txt'), 'base\n');
+  await f.call('start', { task_id: 'F' });
+  assert.equal((await inspectIssueHandoff({ reference: saved.reference }, { directory: f.dir }, f.options)).applicable, false);
+  const active = await prepareIssueHandoff(args, { directory: f.dir }, f.options);
+  const failed = await f.run(await f.args('F'), 'NEEDS_DESIGN');
+  assert.equal((await inspectIssueHandoff({ reference: active.reference }, { directory: f.dir }, f.options)).applicable, false);
+  const updated = await prepareIssueHandoff(args, { directory: f.dir }, f.options);
+  assert.equal(updated.applicable, true, JSON.stringify(updated));
+  assert.equal(updated.handoff.attempt.consumed_attempts, 1);
+  assert.match(updated.handoff.attempt.latest_findings[0].message, /Missing prerequisite/);
+  const exact = await inspectIssueAttempt({ reference: failed.evidence.reference }, { directory: f.dir });
+  assert.equal(exact.ok, true); assert.equal(exact.continuation.input, undefined);
+  assert.equal(exact.continuation.requirements, (await f.args('F')).requirements);
+  assert.equal(exact.matches_source, true);
+  const dir = path.resolve(f.dir, f.g('rev-parse', '--git-path', 'pi-issue-context'));
+  const file = path.join(dir, updated.reference.split(':').at(-1) + '.json');
+  await writeFile(file, '{}');
+  assert.equal((await inspectIssueHandoff({ reference: updated.reference }, { directory: f.dir }, f.options)).ok, false);
+});
+
+test('scoped selection matches internal full selection and mutation acknowledgements omit full graph', integration, async t => {
+  const f = await fixture(t);
+  assert.equal((await f.call('design-select')).context.issue.id, (await f.call('design-next')).task.id);
+  assert.equal((await f.call('select')).context, null);
+  await f.approve('F'); await f.call('design-finish');
+  assert.equal((await f.call('select')).context.issue.id, (await f.call('next')).task.id);
+  const { compactMutation } = await import('../pi/agent/extensions/scaffold/adapter.mjs');
+  const result = await scaffoldTasks({ operation: 'start', feature_id: 'F', task_id: 'F' }, { directory: f.dir }, f.options.scaffoldOptions);
+  assert.equal(compactMutation(result).data.status, 'in_progress');
+  assert.equal(compactMutation(result).data.task, undefined);
+  assert.equal(compactMutation(result).data.feature, undefined);
+  const scope = await f.call('issue', { task_id: 'F' });
+  assert.equal(scope.context.issue.history, undefined);
 });

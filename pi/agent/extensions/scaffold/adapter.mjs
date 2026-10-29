@@ -5,8 +5,8 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'];
-const taskActions = new Set(['start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
+export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume', 'summary', 'issue', 'select', 'design-select'];
+const taskActions = new Set(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
 const inputActions = new Set(['init', 'add', 'complete', 'decompose', 'design-record', 'design-reopen', 'checkpoint-record', 'issue-resume']);
 const reasonActions = new Set(['block', 'fail', 'retry']);
 const statuses = new Set(['pending', 'in_progress', 'completed', 'blocked', 'failed', 'decomposed']);
@@ -102,10 +102,38 @@ function validateTask(task, featureId, taskId) {
     (task.parent_id === null || text(task.parent_id)) && strings(task.dependencies) &&
     Array.isArray(task.history), 'Invalid task response or task identity mismatch');
 }
+function validateContract(t) {
+  requireValue(object(t) && text(t.id) && text(t.objective) && strings(t.acceptance_criteria) &&
+    t.acceptance_criteria.length > 0 && strings(t.dependencies) && strings(t.constraints) && statuses.has(t.status), 'Invalid issue contract');
+  if (t.design) {
+    const { reference, ...body } = t.design;
+    const canonical = JSON.stringify(Object.fromEntries(Object.entries(body).sort(([a], [b]) => a.localeCompare(b))));
+    requireValue(['summary', 'verification', 'approval'].every(k => text(t.design[k])) &&
+      reference === designReference(canonical), 'Scoped design digest mismatch');
+  }
+}
 function validateResponse(data, params) {
   requireValue(object(data), 'Expected JSON object');
   requireValue(data.schema_version === 2, 'Unsupported schema_version');
   requireValue(!Object.hasOwn(data, 'error'), 'Error in successful response');
+  if (['summary', 'issue', 'select', 'design-select'].includes(params.operation)) {
+    const v = data.summary;
+    requireValue(object(v) && v.id === params.feature_id && text(v.design_ref) &&
+      ['design', 'implement'].includes(v.phase) && Number.isSafeInteger(v.task_revision) &&
+      /^[a-f0-9]{64}$/.test(v.state_digest) && /^[a-f0-9]{40}$/.test(v.baseline) && text(v.branch) && object(v.counts), 'Invalid scoped feature summary');
+    if (params.operation !== 'summary') {
+      requireValue(Object.hasOwn(data, 'context'), 'Missing scoped context');
+      if (data.context !== null) {
+        const c = data.context;
+        requireValue(c.schema === 'scaffold.issue-context/v1' && isDeepStrictEqual(c.feature, v) &&
+          object(c.issue) && text(c.issue.id) && (params.operation !== 'issue' || c.issue.id === params.task_id) &&
+          strings(c.issue.acceptance_criteria) && statuses.has(c.issue.status) &&
+          ['ancestors', 'prerequisites', 'children'].every(k => Array.isArray(c[k])), 'Invalid scoped issue context');
+        [c.issue, ...c.ancestors, ...c.prerequisites, ...c.children].forEach(validateContract);
+      } else requireValue(params.operation !== 'issue', 'Missing requested issue');
+    }
+    return;
+  }
   const needsFeature = ['init', 'add', 'list', 'next', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation);
   if (needsFeature) {
     requireValue(object(data.feature) && data.feature.id === params.feature_id && object(data.feature.tasks), 'Invalid feature response or feature identity mismatch');
@@ -227,4 +255,16 @@ async function authenticateIssueMutation(repository, feature, params) {
       git(repository, ['show', '-s', '--format=%P', params.payload.commit]) === record.args.baseRef && current.head === params.payload.commit && current.clean,
     'Authentic current verified checkpoint required');
   }
+}
+
+// Full responses are validated above and retained by native callers. The model only
+// needs an acknowledgement after a mutation; full list is an explicit diagnostic query.
+export function compactMutation(result) {
+  if (!result.ok || ['list', 'next', 'design-next', 'summary', 'issue', 'select', 'design-select'].includes(result.operation)) return result;
+  const f = result.data.feature, t = result.data.task;
+  return { ok: true, operation: result.operation, feature_id: result.feature_id,
+    ...(result.task_id ? { task_id: result.task_id } : {}),
+    data: { schema_version: 2, phase: f?.workflow.phase,
+      task_revision: f?.task_revision, status: t?.status ?? f?.tasks?.[result.task_id]?.status,
+      next_query: { operation: 'summary', feature_id: result.feature_id } } };
 }

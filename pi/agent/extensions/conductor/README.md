@@ -358,3 +358,23 @@ Pending checkpoint recovery pins the original staged subset atomically with the
 checkpoint commit. A retry accepts that exact original index or an already finalized
 verified index; another staged subset remains blocked. The private pending index
 ref is removed after successful finalization.
+
+
+## Scoped issue context
+
+Scaffold `summary`, `issue --task`, `select` and `design-select` return bounded-by-scope
+projections rather than the full feature/history. The Pi Scaffold tool uses scoped
+selection and compact acknowledgements by default; explicit list remains available.
+Native execution/checkpoint/recovery validation still reads complete state.
+
+`prepare_issue_handoff` persists a content-addressed capsule in the repository's
+Git metadata (`pi-issue-context`), containing scoped contracts, current Git fingerprint,
+latest authenticated attempt/findings excerpt and bounded agent navigation notes.
+`inspect_issue_handoff` discovers by feature/issue or reads by reference and checks
+current graph digest, source/index/HEAD and latest attempt. Stale handoffs return
+only diagnostics and refresh instructions. `inspect_issue_attempt` loads exact fixed
+continuation requirements/checks by receipt reference without executor input or raw
+logs. None of these tools executes source, changes lifecycle state, grants approval,
+resets attempts or substitutes summaries for full evidence validation. Handoffs are
+local to this checkout; they are not pushed with commits. Large individual contracts
+are retained intact rather than silently truncating criteria or decisions.

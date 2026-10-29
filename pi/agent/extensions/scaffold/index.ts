@@ -1,7 +1,7 @@
 /** Native task persistence only. Pi reasons; Scaffold validates; Conductor executes. */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { scaffoldTasks } from "./adapter.mjs";
+import { scaffoldTasks, compactMutation } from "./adapter.mjs";
 
 const text = () => Type.String({ minLength: 1 });
 const definition = {
@@ -22,7 +22,7 @@ const evidence = Type.Object({
 // Keep the tool schema an object for Pi/provider function-tool compatibility.
 // The adapter enforces operation-specific required/forbidden fields as well.
 const parameters = Type.Object({
-  operation: Type.Union((["init", "add", "list", "next", "start", "complete", "block", "fail", "retry", "decompose", "design-next", "design-record", "design-finish", "design-reopen", "checkpoint-record", "issue-resume"] as const).map(value => Type.Literal(value))),
+  operation: Type.Union((["init", "add", "list", "next", "start", "complete", "block", "fail", "retry", "decompose", "design-next", "design-record", "design-finish", "design-reopen", "checkpoint-record", "issue-resume", "summary", "issue", "select", "design-select"] as const).map(value => Type.Literal(value))),
   feature_id: text(),
   task_id: Type.Optional(text()),
   payload: Type.Optional(Type.Union([feature, Type.Array(task, { minItems: 1 }), evidence,
@@ -40,14 +40,15 @@ export default function (pi: ExtensionAPI) {
     description: "Perform ONE explicit Scaffold task lifecycle operation in Pi's current repository. " +
       "Persists task state only; never implements, verifies, invokes Conductor or automatically advances work. " +
       "Completion records externally obtained task-bound PASSED evidence; Scaffold does not authenticate it. " +
-      "Use list to resume/inspect full state; next returning null does not imply feature completion.",
+      "Use summary for phase/counts; issue for one scoped context; select/design-select for eligible scoped work. list is an explicit full-state diagnostic. Null selection never implies completion.",
     parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await scaffoldTasks(params, { directory: ctx.cwd, abort: signal });
+      const scopedParams = { ...params, operation: params.operation === "next" ? "select" : params.operation === "design-next" ? "design-select" : params.operation };
+      const result = await scaffoldTasks(scopedParams, { directory: ctx.cwd, abort: signal });
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(compactMutation(result), null, 2) }],
         isError: !result.ok,
-        details: result,
+        details: compactMutation(result),
       };
     },
   });

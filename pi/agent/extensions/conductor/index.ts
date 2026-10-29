@@ -13,6 +13,7 @@ import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
+import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -41,6 +42,28 @@ export default function (pi: ExtensionAPI) {
           await ctx.ui.confirm(operation === "suspend" ? "Park issue and return to design?" : "Restore suspended issue?", JSON.stringify(scope, null, 2)) });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: result.status === "BLOCKED", details: result };
+    },
+  });
+  pi.registerTool({
+    name: "prepare_issue_handoff", label: "Prepare issue context",
+    description: "Persist scoped issue context bound to current graph, Git source/index/HEAD and authenticated latest attempt. Context only; no source execution, approval or lifecycle authority. Returns a reference for a fresh session.",
+    parameters: Type.Object({ featureId: Type.String(), taskId: Type.String(), notes: Type.Optional(Type.Object({
+      next_action: Type.Optional(Type.String()), source_locations: Type.Optional(Type.Array(Type.String())),
+      open_questions: Type.Optional(Type.Array(Type.String())),
+    }, { additionalProperties: false })) }, { additionalProperties: false }),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await prepareIssueHandoff(params, { directory: ctx.cwd, abort: signal });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result, isError: !result.ok || !result.applicable };
+    },
+  });
+  for (const [name, inspect] of [["inspect_issue_handoff", inspectIssueHandoff], ["inspect_issue_attempt", inspectIssueAttempt]] as const) pi.registerTool({
+    name, label: name === "inspect_issue_handoff" ? "Resume issue context" : "Inspect issue continuation",
+    description: name === "inspect_issue_handoff" ? "Read persisted issue context and reauthenticate applicability. Stale handoffs return a refresh instruction, never current context. Grants no execution authority."
+      : "Read authenticated fixed continuation requirements, checks and attempt count by receipt reference, without executor input, raw logs or historical request dumps. Grants no approval or execution authority.",
+    parameters: name === "inspect_issue_handoff" ? Type.Object({ reference: Type.Optional(Type.String()), featureId: Type.Optional(Type.String()), taskId: Type.Optional(Type.String()) }, { additionalProperties: false }) : Type.Object({ reference: Type.String() }, { additionalProperties: false }),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await inspect(params, { directory: ctx.cwd, abort: signal });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result, isError: !result.ok };
     },
   });
   pi.registerTool({

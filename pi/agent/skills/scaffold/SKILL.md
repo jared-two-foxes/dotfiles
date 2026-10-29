@@ -37,7 +37,7 @@ the returned reference. A root issue with the feature ID is created automaticall
 full system design is not a prerequisite to initialization. Context/digest mismatch
 blocks recovery. Existing immutable `path@full-commit-SHA` designs remain supported.
 
-Call `list`, then `design-next` to select an undesigned issue below an approved
+Call `summary`, then `design-select` to select an undesigned issue below an approved
 parent/prerequisite contract. Selection never claims or starts work. Design only
 this issue and its immediate responsibilities; obtain user confirmation.
 
@@ -62,13 +62,13 @@ content-addressed record; the adapter checks its digest. Reopening a design reta
 old designs and invalidates unfinished descendant designs so they receive fresh
 confirmation. Completed designs/evidence are preserved. Never invent approval.
 
-Continue `design-next` until all required nodes have confirmed designs. Then
+Continue `design-select` until all required nodes have confirmed designs. Then
 `design-finish` transitions the graph to implementation. It refuses incomplete
 designs. A null selection alone never grants execution authority.
 
 ## Implement upward
 
-Use `list` and `next` to select an eligible issue. **`next` returning null does not
+Use `summary` and `select` to select an eligible issue. **`next` returning null does not
 necessarily mean the feature is complete.** It also returns null during Design,
 while an issue is active, when a checkpoint is missing or when work is suspended.
 Inspect the complete state. Recover its approved design and include the exact
@@ -77,7 +77,9 @@ approvals; obtain fresh execution approval for each issue.
 
 | Operation | Additional fields | Meaning |
 | --- | --- | --- |
-| `list`, `next`, `design-next`, `design-finish` | none | Inspect/select or explicitly finish design |
+| `summary`, `select`, `design-select`, `design-finish` | none | Scoped phase/selection or explicitly finish design |
+| `issue` | task_id | Current issue and relevant contracts |
+| `list` | none | Explicit full-state diagnostics |
 | `add` | payload: issue definitions | Add top-level/dependent corrections during Design |
 | `decompose` | task_id, payload: children | Add immediate children during Design |
 | `design-record` | task_id, payload: approved design | Persist confirmation before implementation |
@@ -136,9 +138,10 @@ review creates new dependent issues after completed nodes; preserve all complete
 nodes, commits and original criteria. Environmental failures are blocks, not
 invented code issues. Do not use decomposition or retry to reset attempt budgets.
 
-On any interruption inspect full state, persisted phase/designs, Git source/index,
-receipts and actual checkpoint history before mutating. Failed commands/timeouts
-can follow a persisted mutation; `list` before replaying. For suspension or restore
+On interruption reload the issue handoff and scoped summary/issue state, then
+inspect relevant Git source/index and receipt references before mutating. Native
+validators authenticate complete state and checkpoint history. Failed commands/timeouts
+can follow a persisted mutation; query summary/issue before replaying; request full list only for unresolved diagnostics. For suspension or restore
 use the returned suspensionRef/handoffRef to recover the same operation. Never
 initialize a replacement feature to hide failures.
 
@@ -147,3 +150,34 @@ initialize a replacement feature to hide failures.
 Features without an issue graph require explicit migration of their original scope, source and receipts before implementation. The task store uses schema v2 exclusively; older state is rejected without modification. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
 implementation. Legacy `scaffold stack list`, `scaffold status` and
 `scaffold fetch-ticket ID` remain read-only inspection aids outside this graph.
+
+
+## Scoped context and persisted issue handoff
+
+Use `scaffold_tasks` `summary` for phase, counts and state digest; `design-select`
+for the next design issue; `select` for the next implementable issue; and `issue`
+with explicit task_id to fetch one issue. Scoped context includes its approved
+design, ancestor contracts, inherited prerequisite contracts and immediate children.
+It omits lifecycle transcripts, sibling bodies and old executor inputs. Selection
+is read-only and null never proves completion. The native Pi tool also projects
+old next/design-next calls into scoped selection and returns compact mutation
+acknowledgements. Full `list` remains an explicit diagnostic operation; native
+verification continues to inspect complete state and receipts internally.
+
+After selecting an issue, use native `prepare_issue_handoff` with featureId/taskId
+and optional notes `{next_action, source_locations, open_questions}`. Save useful
+navigation notes before ending the issue session. The returned reference identifies
+an immutable context capsule bound to graph state, approved contracts, Git source,
+index/HEAD and latest authenticated attempt. No implementation or graph transition
+occurs. Notes are agent-authored reminders, never user approval or verification.
+
+On a fresh context use `inspect_issue_handoff` with reference, or featureId/taskId
+to discover the newest saved handoff. Inspect `applicable`; stale context is omitted
+and a refresh instruction is returned. Prepare a fresh handoff after graph, source
+or attempt changes. Refresh does not carry old notes automatically: inspect actual
+state and reconcile open questions. `inspect_issue_attempt` retrieves exact retained
+requirements/checks and consumed attempts without loading raw logs or executor
+input. Retrieve full diagnostics through inspect_conductor_evidence only when needed.
+Latest finding excerpts never establish that earlier findings were resolved.
+These context tools grant no design/execution/checkpoint authority and never replace
+receipt authentication, fixed requirements or the attempt budget.
