@@ -16,7 +16,15 @@ material changes outside that scope. Final feature checks and review remain mand
 Before execute_and_review, inspect current source, select one issue, persist its
 agent-designed contract and prepare complete executor JSON using /skill:executor.
 The removed `patch` variants are unsupported. Pass exact input, task identity,
-fixed requirements and baseRef plus checks or buildCommand/testCommand arrays.
+fixed requirements and baseRef plus an explicit `checks` array. Prefer targeted
+regressions for leaves and scoped integration tests for intermediate parents;
+exclude the full repository/workspace test command whenever the runner supports
+meaningful selection. Retain exact commands and coverage in the issue design.
+Explain any unavoidable broader command. Reserve the full suite for final root
+verification through validate_feature after checkpoints; corrective issues use
+targeted checks before rerunning that final gate. Keep ordered checks fixed across
+corrections. The buildCommand/testCommand pair remains an alternative input shape,
+not a requirement to run the entire suite for each issue.
 Use meaningful tests and inspect actual output. Offer full operations on request,
 not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 

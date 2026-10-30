@@ -26,3 +26,11 @@ approval. Report actual check/review results and reviewable commits/PR at comple
 
 See Pi's Design and Scaffold skills and the native Conductor README for detailed
 contracts, context handoff and recovery procedures.
+
+Issue verification uses explicit targeted `checks`: filtered regressions for leaves
+and scoped integration checks for intermediate parents. Exclude the full repository
+or workspace test command wherever the runner can select meaningful coverage.
+Retain exact commands and coverage in issue designs; explain unavoidable broader
+checks. Reserve the full test suite for final root/feature verification through
+`validate_feature` after checkpoints, including revalidation after corrective work.
+Keep a receipt chain's selected checks fixed across corrections.
