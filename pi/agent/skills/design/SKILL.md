@@ -140,6 +140,38 @@ set split afterwards. Pass exact JSON and meaningful verification commands as
 executable/argument arrays to `execute_and_review`. Retained feature direction
 approval already covers this action; do not ask again.
 
+### Select checks for the current issue
+
+Prefer an explicit `checks` array with the smallest meaningful verification plan
+for this issue. During its design pass, identify the affected behavior, relevant
+tests, exact executable/argument arrays and expected coverage; retain that plan in
+its design verification record. Inspect the repository's test runner and existing
+scripts rather than guessing filters. Use test-name, file, package, module or target
+filters as supported. For example, a Rust crate change may use
+`["cargo", "test", "-p", "affected-crate", "regression_name"]`; a Node test change
+may use `["node", "--test", "tests/affected.test.mjs"]`. Include a scoped build,
+type check or lint check when it establishes relevant correctness.
+
+Leaf issues run targeted regressions; intermediate parents run scoped integration
+checks for their immediate children and interfaces. Exclude the full repository or
+workspace test command from these nodes' `checks` whenever targeted coverage is
+available. Do not append an unfiltered full-suite command as a default safety check.
+If the runner cannot select the necessary tests, explain and retain why the broader
+command is needed; never substitute an irrelevant passing check or omit required
+coverage merely to keep commands narrow. Inspect output to prove the selected tests
+actually ran, including correct handling of filters matching no tests.
+
+Reserve the full test suite for the final root/feature verification through
+`validate_feature` after required issue checkpoints. The root's implementation
+attempt may use focused integration checks; the final gate supplies full-project
+build/test commands and independently reviews the complete result. Avoid duplicating
+that expensive suite across each issue or parent. If final review creates corrective
+issues, use targeted checks for those issues, then rerun the full final gate.
+
+The selected ordered plan stays fixed within a correction epoch. Do not silently
+replace checks in an existing receipt chain to adopt this policy; reconcile a
+required plan change explicitly while retaining criteria, history and attempt count.
+
 ## 5. Own the execution and review loop
 
 Capture the current checkpoint HEAD once as the issue's baseRef and keep requirements,
