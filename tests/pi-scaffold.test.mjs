@@ -253,7 +253,7 @@ test('Pi policies allow only scoped state tracking and preserve separate executi
   for (const file of ['pi/agent/AGENTS.md', 'pi/agent/SYSTEM.md', 'pi/agent/skills/design/SKILL.md']) {
     const text = (await readFile(path.join(root, file), 'utf8')).replace(/\s+/g, ' ');
     assert.match(text, /scaffold_tasks/);
-    assert.match(text, /separate (?:design and execution|execution)/);
+    assert.match(text, /overall (?:feature )?direction|overall feature/);
     assert.match(text, /Scaffold (?:validates structure and association|does not authenticate)/);
   }
   const skill = await readFile(path.join(root, 'pi/agent/skills/scaffold/SKILL.md'), 'utf8');

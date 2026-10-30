@@ -1,222 +1,42 @@
 ---
 name: conductor
 description: >
-  Execute an approved, exact executor operations JSON through the Pi
-  execute_and_review tool and the deterministic Conductor CLI. Use for
-  design-first implementation with explicit approval, build/test checks,
-  and independent review. Used by the Design implementation workflow.
+  Native bounded implementation, checks and independent review under the retained
+  overall feature direction approval. Pi designs and authors every correction.
 ---
 
-# Conductor — design-first execution
+# Conductor execution
 
-Use this skill as the lower-level Conductor execution reference. For the
-full collaborative architecture conversation, load `/skill:design` first;
-that skill owns decisions, design confirmation and executor authoring.
-Conductor is the sole implementation path; never substitute direct edits.
+Load /skill:design for the complete workflow. Obtain one approve_feature_direction
+confirmation of the overall direction; it covers local design, implementation,
+checks, independent review, verified checkpoints and recovery across sessions.
+Do not ask again for individual designs, execution, commits or validation. Stop for
+material changes outside that scope. Final feature checks and review remain mandatory.
 
-Explicitly requested Git/GitHub publishing is a separate instruction-level
-exception governed by `SYSTEM.md`; it does not run through Conductor. Outside
-an active verification/correction loop, it may prepare selected feature-branch
-commits, push with Git, and create/update PRs with `gh pr create` / `gh pr edit`.
-Never merge PRs, enable auto-merge, enqueue PRs for merging, or use equivalent
-API, script, workflow or delegated actions. Preserve protected branches and
-unrelated working/staged changes. Publishing does not authorize source edits,
-builds or tests.
+Before execute_and_review, inspect current source, select one issue, persist its
+agent-designed contract and prepare complete executor JSON using /skill:executor.
+The removed `patch` variants are unsupported. Pass exact input, task identity,
+fixed requirements and baseRef plus checks or buildCommand/testCommand arrays.
+Use meaningful tests and inspect actual output. Offer full operations on request,
+not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 
-## Preconditions
+One call performs one attempt. Pi interprets NEEDS_DESIGN, authors corrections
+against the current tree and supplies previousAttempt. Preserve five total attempts,
+criteria/findings, baseline and checks within an epoch. BLOCKED stops automatic work.
+Maximum budgets and provider errors are never review approval. Inspect real receipts;
+PASSED requires successful execution, checks and APPROVED independent review.
 
-- The native Pi extension `extensions/conductor/index.ts` must be loaded,
-  exposing the `execute_and_review` tool. If unavailable, stop; never
-  substitute direct edits or invoke Conductor manually.
-- The `conductor` executable must be on PATH (or set `CONDUCTOR_BIN`).
-- The target directory must be a Git repository.
-- Confirm both a real build command and a real test command as arrays of
-  executable and arguments. No shell syntax or invented commands.
-- The Design agent must inspect the exact source before authoring executor
-  operations and must produce **complete executor operations JSON** with an
-  `operations` array. Do not pass a plan, removed `patch` variants, or
-  pseudocode.
+Complete the exact Scaffold issue from authentic evidence, end the active verification/correction loop,
+then checkpoint_verified_task. Each parent needs its own original-criteria verification
+and commit after children, even if its commit is empty. Finish with validate_feature
+against the original baseline. Inspect actual meaningful checks and final review;
+add in-scope corrective issues and revalidate without additional permission prompts.
 
-## Approval gates
+For missing prerequisites use suspend_issue, design/checkpoint new issues and
+resume_issue with its authenticated handoff. Three attempts mean attempt four next.
+Conflicts block with saved work intact. Rebase recovery uses its separate native
+verification and handoff tools. The retained direction covers these actions without
+new confirmations; it does not authorize doing a rebase or arbitrary history changes.
 
-For every feature, Design persists the ticket/root, walks all
-required issue designs downward with user confirmation, and calls `design-finish`
-before implementation. Implement selects eligible leaves and recovers their approved
-designs; it does not repeat the entire design phase. Include the exact approved
-issue design suffix and criteria in fixed requirements. Older task-state files are unsupported. Keep separate design and execution approvals.
-
-1. Inspect the repository and discuss material design decisions iteratively,
-   using focused code/text examples with changed portions marked, including
-   new or changed data structures and how their data is created and used.
-2. Present the code-led implementation preview and fixed acceptance criteria.
-   Obtain explicit design approval before generating executor operations.
-3. Prepare complete executor JSON consistent with the approved design. If a
-   new consequential choice emerges, return to Design for renewed approval.
-4. Present a short execution confirmation: scope, affected files and build/test
-   commands. Offer full operations on request; do not display JSON by default.
-   Obtain explicit permission **to execute**, separate from design approval.
-5. Capture the full SHA from `git rev-parse HEAD` as `baseRef` once. Inspect
-   `git status --porcelain`; disclose unrelated working changes. Keep the
-   same base SHA and requirements across correction attempts.
-
-## Execution
-
-Call **only** `execute_and_review` with:
-
-- `input`: JSON string containing the exact `operations` array.
-- `requirements`: the approved design and acceptance criteria.
-- `baseRef`: original full 40-character commit SHA.
-- `buildCommand`, `testCommand`: executable-and-argument arrays.
-- `reviewModel` (optional): independent review model.
-
-The tool validates the Git baseline, forwards one
-`conductor.request/v1` to `conductor run --request -`, and returns an
-`opencode.execute_and_review.result/v1`-compatible envelope. The schema
-name is historical; Pi consumes the same result contract.
-
-- **PASSED**: report the actual checks and review; do not claim a commit was
-  made or that tests ran unless the output demonstrates it.
-- **NEEDS_DESIGN**: inspect current working tree and feedback. Prepare a
-  minimal new executor input against the *current* state, retaining the
-  original baseline and requirements. Ask before architectural changes.
-- **BLOCKED**: stop, explain the environment or protocol failure and inspect
-  working tree before retrying.
-
-Maximum five total attempts, stopping after two identical failures without
-progress. Never silently clean, reset, commit or push. Do not run direct
-`edit`/`write` operations or call `executor`/`review-cli` to bypass the
-Conductor gate. Do not commit, change branches or otherwise change HEAD during
-an active verification/correction loop. Keep the original baseline fixed;
-finish or explicitly stop the loop before a separately requested publishing
-workflow.
-
-## Limitations
-
-Conductor currently does not prove that any tests executed. For Pi task-bound
-calls the adapter captures source/index after the test command and blocks PASSED
-if that review-boundary fingerprint differs afterwards. Non-task callers retain
-the original contract; concurrent external writers remain unsupported. Inspect test output and
-report these limitations honestly. The Pi adapter has a 30-minute overall workflow deadline by default, covering
-execution, formatting, checks and independent review. `workflowTimeoutMs` can
-override that deadline per invocation (positive safe integer, maximum
-2147483647 ms, about 24.8 days); it is separate from `reviewWallClockBudgetSecs`
-and all other AI review budgets. Conductor does not yet enforce per-check
-timeouts. Expiration blocks the attempt and cannot establish successful tests
-or review. The adapter kills its direct Conductor child but does not explicitly
-terminate or await descendant processes.
-
-## Persisted task attempts
-
-Design owns decomposition and lifecycle decisions. For Scaffold tasks also pass
-`task: {featureId, taskId, designRef}` and task-scoped `requirements`: current
-criteria, applicable architectural constraints and established interfaces to
-preserve. Future feature criteria are deferred; final feature validation uses `validate_feature` after all checkpoints.
-Pass `previousAttempt` for corrections, using the actual preceding receipt.
-Initial task attempts require a clean implementation tree (excluding `.scaffold`
-bookkeeping). A new eligible task with earlier uncommitted changes returns
-`CHECKPOINT_REQUIRED`; finish the loop, record completion and use separately authorized `checkpoint_verified_task`.
-No HEAD changes during a correction loop.
-
-The adapter retains a STARTED intent before execution and a content-addressed
-receipt afterwards under Git metadata, outside the review diff. Receipts include
-task/design identity, original request, raw response, outcome, attempt number and
-before/after tree fingerprints. `evidence.reference` is a repository-local digest
-reference, not a fabricated URL. Use read-only `inspect_conductor_evidence` to read
-it across sessions and compare the current tree. Do not remove receipts while
-Scaffold refers to them. They survive Pi restarts in this checkout, but are not
-pushed/cloned with Git; preserve them separately if moving the workspace. Local
-hashes detect corruption, not malicious rewriting or independent test quality.
-
-A bound PASSED without successful execution, build/test exit codes and APPROVED
-review becomes BLOCKED. Pi must additionally inspect output for actual relevant
-checks before completing the exact Scaffold task. Retention failures return
-BLOCKED with the actual result when available; never invent completion evidence.
-For NEEDS_DESIGN preserve the task as in_progress through bounded corrections;
-record fail when stopping for defects/attempt limits, block for unresolved
-conditions, or decompose remaining oversized work after reconciliation. Receipt
-chains preserve the five-attempt ceiling; repeated identical failures without
-progress still require Pi to stop. No retries or lifecycle mutations live here.
-
-
-## Local checkpoints after completion
-
-After inspected PASSED evidence and matching Scaffold completion, end the active
-correction loop. Design may invoke `checkpoint_verified_task` with separate manual
-or session-scoped feature checkpoint authorization. This tool never invokes
-Conductor, chooses tasks, pushes or opens PRs. It checks the actual retained
-request/result, clean-start correction chain, full verified Git tree and Scaffold
-history; an Executor operation list alone does not establish commit scope.
-Old receipts without Git trees and a matching post-test review-boundary snapshot
-cannot authorize checkpoints. Preserve evidence;
-reconcile and obtain fresh verification under an explicitly approved task loop.
-
-The commit trailer binds feature/task/design, receipt, original feature baseline,
-task baseline, tree and branch. A pending ref under `refs/pi-checkpoints/` is
-created atomically with the branch update and removed after index finalization.
-On resume inspect these, actual HEAD/index/worktree, Scaffold state and receipts.
-A matching checkpoint explains a committed source snapshot even though the old
-uncommitted fingerprint differs. Only current-HEAD recovery is automatic. Never
-replay older checkpoints or discard unrelated staged changes. Existing locks need
-explicit resolution after checking process ownership. New sessions require fresh
-checkpoint authorization. See Design for the complete recovery policy.
-
-`.scaffold/` must already be ignored and untracked. The tool never edits ignore
-rules, configuration or local excludes. If needed, establish an explicitly
-approved ignore rule separately before implementation. Local receipts are under
-Git metadata and never enter implementation commits. Snapshots use private indexes;
-submodules, conflicts, sparse/skip-worktree and assume-unchanged entries fail closed.
-The adapter remains backward compatible for non-task callers and retains the
-five-attempt correction ceiling. Conductor itself is unchanged.
-
-Task-bound requests transparently wrap the original approved test command in a
-Pi-local Node runner, forwarding stdout/stderr and exit status. On test success
-it captures a Git tree/fingerprint before independent review. Final fingerprints
-must match or the adapter returns `REVIEW_SNAPSHOT_CHANGED`. Original commands
-remain in the receipt and fixed throughout corrections; non-task callers keep
-the existing protocol. No Conductor, Review or Executor changes are required.
-
-## Final feature gate
-
-Use `validate_feature` after every task and recursive parent has an authentic Git
-checkpoint. It runs full-project checks and existing independent Review against
-the original baseline and approved design; it never applies Executor operations.
-`inspect_feature_validation` authenticates retained results and current applicability.
-Scaffold Phase 5 is required. Validation lifecycle writes are internal to the gate,
-not generic `scaffold_tasks` operations; arbitrary success-shaped payloads cannot
-complete a feature through the native interface. `next: null` and all tasks completed
-are insufficient. Preserve failed/blocked history and add approved corrective tasks
-through the existing per-task workflow. See Design’s “Final feature verification”
-for authorization, output markers, bounds, stale evidence and interruption recovery.
-
-### Rebase recovery
-
-Use native `reconcile_feature_rebase` only between completed/checkpointed tasks,
-with clean Git state and fresh narrow UI authorization. It verifies the rebased
-completed prefix, preserving original feature/design/baseline and receipts. Pass
-its successful `evidenceRef` as `reconciliationRef` on subsequent checkpoints and
-final validation. Repeated rebases supply `previousReconciliationRef`; read-only
-`inspect_rebase_reconciliation` authenticates retained recovery state. It never
-rebases, edits source or changes task lifecycle. Active task loops still require
-explicit recovery. See `extensions/conductor/README.md` and Design's rebase
-recovery section for full input, evidence and interruption semantics.
-
-For a rebase that already interrupted an active/blocked/failed task with dirty
-source, use native `recover_interrupted_task_rebase` and inspect
-`inspect_task_rebase_recovery`. It verifies the completed prefix in a temporary
-worktree and returns READY plus a baseline handoff, preserving original task
-identity, criteria/findings and consumed attempts. Source/index stay intact; no
-lifecycle mutation or source correction occurs. Continue through explicit task
-lifecycle recovery and normal execution approval, with returned `resume` plus new
-exact operations, handoff `previousAttempt`, and prefix `reconciliationRef` for
-checkpoint/final validation. READY is never task PASSED. See Design's interrupted
-handoff guidance for conflicts, budget limits and interruption recovery.
-
-
-For new prerequisites or review discoveries, stop the active issue and use native
-`suspend_issue` with explicit UI authority. Design/checkpoint the new issues, then
-`resume_issue` restores saved source/staging and returns an authenticated handoff.
-Pass its resume fields plus fresh input to the next execute_and_review call.
-Criteria, findings and consumed attempts survive; three attempts mean four next.
-Routine corrections stay within the same issue. Never stash/reset from Bash or
-create replacement issues to reset the budget. Each resolved issue has a verified
-checkpoint commit, including empty parent verification, before dependent work.
+See extensions/conductor/README.md for complete protocol/verification contracts.
+Git/GitHub publishing follows SYSTEM.md and requires a user request. Never merge PRs.

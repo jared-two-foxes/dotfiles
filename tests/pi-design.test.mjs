@@ -1,48 +1,21 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(import.meta.dirname, '..');
 const read = p => readFileSync(path.join(root, p), 'utf8');
 
-test('Pi Design skill retains collaborative and separate approval gates', () => {
-  const design = read('pi/agent/skills/design/SKILL.md');
-  const openCode = read('opencode/agents/design.md');
-  for (const phrase of [
-    '## 1. Discovery',
-    '## 4. Prepare executor handoff',
-    '## 5. Own the execution and review loop',
-    'separate explicit execution confirmation',
-    'Maximum **five total application attempts**',
-    'NEEDS_DESIGN',
-    'BLOCKED',
-  ]) {
-    assert.ok(openCode.includes(phrase), `missing OpenCode reference: ${phrase}`);
-    assert.ok(design.includes(phrase), `missing Pi behavior: ${phrase}`);
+test('Pi uses one feature direction approval across its implementation phases', () => {
+  const design = read('pi/agent/skills/design/SKILL.md'), system = read('pi/agent/SYSTEM.md');
+  for (const text of [design, system]) {
+    assert.match(text, /approve_feature_direction/);
+    assert.match(text, /execute_and_review/);
+    assert.match(text, /design-finish/);
+    assert.match(text, /across sessions|session changes/);
   }
-  assert.match(design, /name: design/);
-  assert.match(design, /execute_and_review/);
-  assert.match(design, /skill:executor/);
-  assert.match(design, /Never directly modify the repository/);
-});
-
-test('Pi system prompt and Conductor skill route collaborative workflow to Design', () => {
-  const system = read('pi/agent/SYSTEM.md');
-  const conductor = read('pi/agent/skills/conductor/SKILL.md');
-  const executor = read('pi/agent/skills/executor/SKILL.md');
-  assert.match(system, /\/skill:design/);
-  assert.match(system, /separate\*\*[\s\S]*execution approval/);
-  assert.match(system, /three phases: Research, Design and Implement/);
-  assert.match(system, /Research → Design/);
-  assert.match(system, /design-finish/);
+  assert.match(design, /Do not ask for per-issue design approval/);
   assert.match(system, /Only native `execute_and_review`/);
-  assert.doesNotMatch(system, /### TDD mode|Entering TDD mode|Exiting TDD mode|\/skill:tdd/);
-  assert.equal(existsSync(path.join(root, 'pi/agent/skills/tdd/SKILL.md')), false);
-  assert.doesNotMatch(conductor, /alternative.*direct-edit/);
-  assert.match(conductor, /\/skill:design/);
-  assert.match(executor, /"operations"/);
-  assert.match(executor, /`replace_file`/);
 });
 
 const publishingPolicy = name => {
@@ -127,63 +100,27 @@ test('Pi and OpenCode executor guides use the merged exact-text edit operation',
 });
 
 
-test('bounded issue design includes collaborative code discussion and confirmation', () => {
+test('delegated issue designs remain explicit and final review remains mandatory', () => {
   const design = read('pi/agent/skills/design/SKILL.md');
-  const discussion = design.split('### One bounded design pass')[1].split('## 3.')[0].replace(/\s+/g, ' ');
-  for (const phrase of ['focused `diff` blocks', 'changed portions', 'illustrative design excerpts',
-    'producers/consumers', 'ownership/lifecycle', 'implementation preview', 'acceptance criteria',
-    'edge cases', 'approve or revise the design', 'user confirmation', 'design-record']) {
-    assert.ok(discussion.includes(phrase), phrase);
+  for (const phrase of ['agent-authored', 'design-record', 'actual reference',
+    'Never claim the user approved an individual issue', 'Final feature review is mandatory',
+    'five total application attempts', 'previousAttempt', 'completed descendants']) assert.ok(design.includes(phrase), phrase);
+  assert.match(design, /material scope changes|material commitments|material departures|material changes/);
+});
+
+test('native checkpoints, recovery and validation reuse the same durable direction authority', () => {
+  const native = read('pi/agent/extensions/conductor/index.ts');
+  assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 1);
+  assert.match(native, /approveFeatureDirection/);
+  assert.equal((native.match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 5);
+  const adapter = read('pi/agent/extensions/conductor/adapter.mjs');
+  assert.match(adapter, /options.issueWorkflowOnly\) await requireFeatureAuthorization/);
+});
+
+test('execution guides do not add a second approval after the overall direction', () => {
+  for (const file of ['pi/agent/skills/design/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/conductor/SKILL.md']) {
+    const text = read(file);
+    assert.doesNotMatch(text, /After \*\*separate explicit execution approval|Explicitly ask the user whether to \*\*execute/);
+    assert.match(text, /full operations on request/);
   }
-});
-
-test('Pi retains exact operations and separate execution approval without default JSON presentation', () => {
-  const design = read('pi/agent/skills/design/SKILL.md');
-  const executor = read('pi/agent/skills/executor/SKILL.md');
-  const conductor = read('pi/agent/skills/conductor/SKILL.md');
-  const system = read('pi/agent/SYSTEM.md');
-  for (const [name, text] of Object.entries({ design, executor, conductor, system })) {
-    assert.match(text, /full operations on request/, name);
-    assert.match(text, /not (?:display[\s\S]*by default|by default)/, name);
-  }
-  const handoff = design.split('## 4. Prepare executor handoff')[1].split('## 5. Own the execution and review loop')[0];
-  assert.match(handoff, /Prepare and retain the complete executor input/);
-  assert.match(handoff, /new consequential choice[\s\S]*return to the design conversation and obtain approval/);
-  const execution = design.split('### Before the first attempt')[1].split('### Attempt and feedback')[0];
-  assert.match(execution, /short execution confirmation[\s\S]*scope, affected files[\s\S]*build\/test commands/);
-  assert.match(execution, /Explicitly ask the user whether to \*\*execute\*\*/);
-  assert.match(execution, /Consequential differences require renewed design approval first/);
-  assert.match(executor, /separate explicit execution approval[\s\S]*pass this exact JSON/);
-  assert.match(executor, /when requested, return the complete JSON/);
-  assert.match(conductor, /explicit design approval before generating executor operations/);
-  assert.match(conductor, /permission \*\*to execute\*\*, separate from design approval/);
-  assert.doesNotMatch(design, /Present the executor input separately|Present the proposed operations and explicitly ask/);
-  assert.doesNotMatch(conductor, /Present the design, fixed acceptance criteria and proposed executor JSON/);
-  assert.doesNotMatch(executor, /## Handoff\s+Return the JSON/);
-});
-
-// These contracts complement real Scaffold/Git integration tests; they do not simulate reasoning.
-test('design walks bounded issues downward and gates implementation until all designs are approved', () => {
-  const design = read('pi/agent/skills/design/SKILL.md').replace(/\s+/g, ' ');
-  for (const phrase of ['root issue', 'recursive issue graph', 'design-next', 'design-record', 'design-finish',
-    'immediate children', 'Definitions remain immutable', 'approval states exactly what the user confirmed',
-    'No implementation may run before this entire graph design phase completes',
-    'Small changes use the root itself as the leaf']) assert.ok(design.includes(phrase), phrase);
-});
-
-test('implementation walks upward with explicit issue commits and discovery returns to design', () => {
-  const design = read('pi/agent/skills/design/SKILL.md').replace(/\s+/g, ' ');
-  for (const phrase of ['Do not redo all design approvals', 'Each resolved node gets its own commit',
-    'empty commit', 'parent remains incomplete', 'suspend_issue', 'resume_issue', 'handoffRef',
-    'Three consumed attempts mean the next is four', 'Completed', 'original ticket criteria']) {
-    assert.ok(design.toLowerCase().includes(phrase.toLowerCase()), phrase);
-  }
-  assert.match(design, /directly.*design-reopen|design-reopen.*directly/);
-});
-
-test('recovery retains designs, receipts and immutable criteria without inventing approvals', () => {
-  const design = read('pi/agent/skills/design/SKILL.md').replace(/\s+/g, ' ');
-  for (const phrase of ['Conversational memory is not authoritative', 'design_history',
-    'never fabricate a record', 'same issue', 'criteria/findings', 'attempts',
-    'original ticket criteria', 'must block rather than weaken them']) assert.ok(design.includes(phrase), phrase);
 });

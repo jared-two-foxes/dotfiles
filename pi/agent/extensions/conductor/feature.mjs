@@ -156,7 +156,7 @@ export async function inspectFeatureValidation(args, context = {}, options = {})
     const results = [];
     for (const reference of refs) {
       const record = await readFeatureEvidence(repository, reference);
-      if (record.kind === 'reconciliation' || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
+      if (['reconciliation', 'feature-authorization'].includes(record.kind) || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
       let applicable = false, reason;
       try {
         const b = record.binding;

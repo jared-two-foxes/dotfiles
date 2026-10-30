@@ -74,21 +74,15 @@ The `patch` operation has been removed, with no fallback. Never emit `patch` or 
 
 ## Handoff
 
-In Pi Design, prepare and retain the complete JSON after design approval, but do not display it by default. The user reviews the code-led implementation preview before operations are generated, then receives a short execution confirmation covering scope, affected files and verification commands. Offer the full operations on request; when requested, return the complete JSON in a separate fenced block with a short description. Illustrative excerpts are never a substitute for complete executor input.
+In Pi, prepare and retain complete JSON for the selected issue under the retained
+overall feature direction approval. Offer full operations on request; when requested,
+return the complete JSON. Do not display it by default or request a separate execution
+confirmation. Pass this exact JSON as input to execute_and_review. Only a material
+departure from approved objectives, externally visible behaviour or constraints
+requires returning to the user. Do not invoke executor apply or conductor run directly.
 
-After **separate explicit execution approval**, pass this exact JSON as the `input` field of `execute_and_review`. If authoring operations reveals a consequential departure from the approved design, return to the design conversation for renewed approval before execution. Do not run `executor apply` or `conductor run` directly from Design.
-
-Outside Pi Design, return the JSON in a separate fenced block with a short description. A caller may use `executor apply -` or wrap the operations in a Conductor workflow request. Never execute without authorization.
-
-Executor reports JSON with `success`, `operations_applied`, and, on operation failure, `failed_operation` (zero-based) and `error`. A nonzero exit code indicates failure. On failure, inspect the working tree before attempting another application because partial changes may remain.
-
-## Task boundary in Pi Design
-
-For decomposed features, author operations only after the approved task plan is
-persisted, one eligible task selected and its detailed task design explicitly
-approved. Feature architecture approval alone is insufficient. Use that task's current source, criteria,
-context and applicable design invariants. Never generate feature-wide operations
-and divide them afterwards. Corrections target the actual partially modified tree
-with the same baseline and requirements. Do not include `.scaffold` state in source
-operations. Stop oversized work for Design-led recursive decomposition and Git
-reconciliation instead of emitting another large operation set.
+Author only the selected issue's operations using actual current source and inherited
+contracts. Never generate a feature-wide operation set and split afterwards.
+Corrections use the actual partial tree, fixed baseline/requirements and previousAttempt.
+Keep .scaffold bookkeeping out of source operations. Oversized work uses Design's
+suspend/decompose/resume path, preserving prior work and attempt budgets.

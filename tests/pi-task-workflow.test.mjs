@@ -244,11 +244,11 @@ test('real Scaffold rejects the original execution-first lifecycle', {
 
 test('workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals', async () => {
   const design = await readFile(new URL('../pi/agent/skills/design/SKILL.md', import.meta.url), 'utf8');
-  for (const phrase of ['Mandatory decomposition', 'Before generating Executor', 'Confirm consequential decomposition',
+  for (const phrase of ['Mandatory decomposition', 'Before generating Executor', 'approve_feature_direction',
     'Verification:', 'ancestor dependencies', 'future feature criteria',
     'previousAttempt', 'inspect_conductor_evidence', 'Oversized task', 'completed descendants',
     'parent remains incomplete', 'five total application attempts', 'two consecutive attempts',
-    'Conversational memory is not authoritative', 'checkpoint required', 'separate explicit execution confirmation']) {
+    'Conversational memory is not authoritative', 'checkpoint required', 'single approval']) {
     assert.ok(design.includes(phrase), phrase);
   }
   assert.ok(design.indexOf('### Feature planning') < design.indexOf('## 4. Prepare executor'));
