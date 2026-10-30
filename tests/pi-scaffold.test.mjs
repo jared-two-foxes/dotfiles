@@ -12,7 +12,7 @@ const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', a
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
 const params = operation => ({ operation, feature_id: 'F1',
-  ...(['start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume'].includes(operation) ? { task_id: 'T1' } : {}),
+  ...(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume'].includes(operation) ? { task_id: 'T1' } : {}),
   ...(['block', 'fail', 'retry'].includes(operation) ? { reason: 'Explicit decision' } : {}),
   ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] },
     'design-record': { payload: { summary: 'Approved', verification: 'Tests', approval: 'User confirmed', disposition: 'leaf' } },
@@ -22,6 +22,10 @@ const params = operation => ({ operation, feature_id: 'F1',
 });
 const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 2, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
 function response(operation) {
+  if (['summary', 'issue', 'select', 'design-select'].includes(operation)) {
+    const summary = { id: 'F1', design_ref: feature.design_ref, phase: 'implement', task_revision: 1, state_digest: 'a'.repeat(64), counts: { pending: 1 }, baseline: feature.baseline, branch: feature.branch };
+    return success({ summary, ...(operation === 'summary' ? {} : { context: { schema: 'scaffold.issue-context/v1', feature: summary, issue: { ...task(), constraints: [] }, ancestors: [], prerequisites: [], children: [] } }) });
+  }
   if (['start', 'complete', 'block', 'fail', 'retry'].includes(operation)) {
     return success({ task: task('T1', { start: 'in_progress', complete: 'completed', block: 'blocked', fail: 'failed', retry: 'pending' }[operation]) });
   }

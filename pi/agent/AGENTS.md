@@ -102,3 +102,9 @@ operations. Three old attempts mean attempt four next. Never replace task identi
 reset attempts, stash/reset source or treat READY as task verification. This narrow
 UI-authorized operation grants temporary-worktree/evidence authority only; normal
 source execution, completion/checkpoint and publishing gates remain unchanged.
+
+
+Use scoped Scaffold summary/issue/select/design-select queries for the current
+issue. Native validators inspect full state internally. Prepare an issue context
+handoff before changing sessions; inspect and refresh stale handoffs on resume.
+Notes are navigation aids, never approval/evidence or permission to reset attempts.

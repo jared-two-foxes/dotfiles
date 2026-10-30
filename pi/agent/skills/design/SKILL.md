@@ -49,7 +49,7 @@ feature branch. `init` creates a root issue with the feature ID automatically.
 This approval confirms the problem and scope, not an entire system design.
 Do not require a feature-wide detailed design or author Executor operations here.
 
-Design operates read-only on application source. Use `list`, then `design-next`.
+Design operates read-only on application source. Use `summary`, then `design-select`.
 This selects an undesigned issue whose parent contract has been approved;
 implementation dependencies do not prevent designing an issue. Inspect just its
 relevant source, inherited decisions, interfaces, constraints and criteria.
@@ -106,14 +106,14 @@ add its immediate children before recording the design. The record binds their I
 and has a content digest. Before that record, interruption requires confirming
 missing approval again; never fabricate a record from conversation summaries.
 
-Continue downward until `design-next` returns null. Inspect all issues and then
+Continue downward until `design-select` returns null. Inspect summary design counts and then
 call `design-finish`; it refuses any unfinished design. No implementation may run
-before this entire graph design phase completes. `next` is the separate selection
+before this entire graph design phase completes. `select` is the separate selection
 operation for implementation and returning null never proves feature completion.
 
 ## 3. Implement upward; return discoveries to design
 
-After `design-finish`, enter Implement phase. Use `list`/`next` to select one
+After `design-finish`, enter Implement phase. Use `summary`/`select` to select one
 eligible issue, recover its approved design and inspect current source to establish
 that it still applies. Do not redo all design approvals at implementation time.
 If new consequential choices are needed, use the discovery transition below.
@@ -317,7 +317,7 @@ An unchanged verified parent may create an empty provenance checkpoint.
 
 #### Checkpoint recovery
 
-Read Scaffold `list`, the actual receipts, Git HEAD/history/index/worktree and
+Read scoped Scaffold `summary`/`issue`, relevant receipts, Git HEAD/history/index/worktree and
 `Pi-Task-Checkpoint` commit trailer before selecting work. Completion without a
 checkpoint: request authorization and call the tool with the original receipt.
 A retry before commit stages only the exact retained Git tree in a private index;
@@ -424,7 +424,7 @@ through Scaffold, returns the graph to Design and obtains normal design/executio
 and reruns the complete feature validation from the original baseline. Preserve
 original acceptance criteria and all historical failures.
 
-On resume inspect full Scaffold state and `inspect_feature_validation` (with
+On resume inspect Scaffold `summary` and `inspect_feature_validation` (with
 `featureId` to discover attempts or `reference` to inspect one). STARTED intents,
 partial checks, interrupted reviews and pre-retention results never prove success.
 Evidence lives in Git metadata under `pi-conductor-evidence/feature-<hash>.json`
@@ -515,3 +515,34 @@ silently weaken them or replay the old input. Only subsequent real PASSED eviden
 can support completion/checkpointing. Use the prefix reconciliation reference for
 checkpoint/final validation. Partial intents never prove success; matching complete
 prefix/handoff retention supports `prefixEvidenceRef`/`resumeHandoffRef` recovery.
+
+
+## Scoped context and persisted issue handoff
+
+Use `scaffold_tasks` `summary` for phase, counts and state digest; `design-select`
+for the next design issue; `select` for the next implementable issue; and `issue`
+with explicit task_id to fetch one issue. Scoped context includes its approved
+design, ancestor contracts, inherited prerequisite contracts and immediate children.
+It omits lifecycle transcripts, sibling bodies and old executor inputs. Selection
+is read-only and null never proves completion. The native Pi tool also projects
+old next/design-next calls into scoped selection and returns compact mutation
+acknowledgements. Full `list` remains an explicit diagnostic operation; native
+verification continues to inspect complete state and receipts internally.
+
+After selecting an issue, use native `prepare_issue_handoff` with featureId/taskId
+and optional notes `{next_action, source_locations, open_questions}`. Save useful
+navigation notes before ending the issue session. The returned reference identifies
+an immutable context capsule bound to graph state, approved contracts, Git source,
+index/HEAD and latest authenticated attempt. No implementation or graph transition
+occurs. Notes are agent-authored reminders, never user approval or verification.
+
+On a fresh context use `inspect_issue_handoff` with reference, or featureId/taskId
+to discover the newest saved handoff. Inspect `applicable`; stale context is omitted
+and a refresh instruction is returned. Prepare a fresh handoff after graph, source
+or attempt changes. Refresh does not carry old notes automatically: inspect actual
+state and reconcile open questions. `inspect_issue_attempt` retrieves exact retained
+requirements/checks and consumed attempts without loading raw logs or executor
+input. Retrieve full diagnostics through inspect_conductor_evidence only when needed.
+Latest finding excerpts never establish that earlier findings were resolved.
+These context tools grant no design/execution/checkpoint authority and never replace
+receipt authentication, fixed requirements or the attempt budget.

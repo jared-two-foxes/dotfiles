@@ -40,7 +40,7 @@ to shell `review-cli` or invent an executor list to obtain a review.
 
 When implementation is requested, load `/skill:design` and enter Design. Persist
 an agreed ticket as a feature through `init`; its root
-issue is created automatically. Walk the graph downward using `design-next`.
+issue is created automatically. Walk the graph downward using `design-select`.
 Each issue receives a bounded design pass and user confirmation, then an approved
 `design-record` as a leaf or a parent with immediate children. Do not design the
 whole system before creating its root. Persist all required designs, then call
@@ -49,7 +49,7 @@ commands run during this phase. Old task-state files are unsupported and are nev
 
 ### Implement phase
 
-After the complete graph design is approved, select eligible leaves with `next`.
+After the complete graph design is approved, select eligible leaves with `select`.
 Recover their persisted design, prepare exact operations with `/skill:executor`,
 then obtain **separate** execution approval. Offer full operations on request,
 not by default. Only native `execute_and_review` may
@@ -83,7 +83,7 @@ or stopped. Design approval never grants execution, checkpoint or publishing aut
 ### Scoped Scaffold state tracking (all phases)
 
 Load `/skill:scaffold` and use native `scaffold_tasks` for requested/agreed task
-tracking in Pi's current repository. `list`/`next` inspect existing work; explicit
+tracking in Pi's current repository. `summary`/`issue`/`select` inspect scoped work; explicit
 `init`, `add`, `start`, `complete`, `block`, `fail`, `retry`, `decompose` and the design/checkpoint/issue-resume lifecycle operations may
 mutate only Scaffold-owned state. Initialise new issue workflows from the agreed ticket scope; detailed design follows in the graph. This is a
 narrow exception to repository read-only rules, not permission for application
@@ -96,8 +96,8 @@ Task tracking neither supplies design approval nor execution approval. Preserve
 both gates and the existing single-task Conductor correction behavior. Complete a
 task only with actual task-bound successful Conductor evidence and a retained
 result reference. Scaffold validates structure and association, not authenticity.
-On resume inspect full feature state, persisted issue designs and retained Conductor
-receipts; `next` returning null does not imply the feature is complete. Design the
+On resume use scoped `summary`/`issue` queries and `inspect_issue_handoff`; native
+verification inspects complete graph state and retained Conductor receipts internally; `next` returning null does not imply the feature is complete. Design the
 whole issue graph downward before implementation; implement eligible leaves upward.
 Pi alone reasons about selection, decomposition and recovery. Preserve issue criteria
 and separate execution approval. Stop at the checkpoint barrier between issues.
@@ -377,3 +377,13 @@ checkpoint/final validation authenticate the bridge and completed-prefix receipt
 Old receipts/design/criteria remain unchanged. Conflicts, extra edits, missing
 receipts, staged ambiguity or exhausted attempts require explicit reconciliation,
 never a replacement task or a disguised restart. See Design/Conductor guidance.
+
+
+### Scoped working context
+
+Use Scaffold summary and scoped issue/select/design-select responses for routine
+work. Persist navigation notes with prepare_issue_handoff before changing context;
+inspect_issue_handoff reloads by reference or feature/issue and checks applicability.
+Stale context requires refresh. Fetch exact continuation requirements/checks with
+inspect_issue_attempt; use full list or raw receipt diagnostics only when needed.
+Context handoffs and agent notes grant no approval, source execution or PASSED evidence.
