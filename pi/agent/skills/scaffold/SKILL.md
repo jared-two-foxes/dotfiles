@@ -39,7 +39,7 @@ blocks recovery. Existing immutable `path@full-commit-SHA` designs remain suppor
 
 Call `summary`, then `design-select` to select an undesigned issue below an approved
 parent/prerequisite contract. Selection never claims or starts work. Design only
-this issue and its immediate responsibilities; obtain user confirmation.
+this issue and its immediate responsibilities; use delegated authority from the overall feature direction approval.
 
 If it requires smaller units, `decompose` with an atomic array of child definitions.
 Every definition needs ID, title, narrow objective, acceptance_criteria, relevant
@@ -54,13 +54,13 @@ intact. Definitions are immutable; designs are separately retained records.
 Record the confirmed design after adding its immediate children:
 
 ```json
-{"operation":"design-record","feature_id":"F1","task_id":"F1","payload":{"summary":"Approved responsibility boundaries, interfaces, decisions and constraints","verification":"Actual checks and integration criteria","approval":"What the user explicitly approved","disposition":"decomposed"}}
+{"operation":"design-record","feature_id":"F1","task_id":"F1","payload":{"summary":"Approved responsibility boundaries, interfaces, decisions and constraints","verification":"Actual checks and integration criteria","approval":"Agent-designed under overall feature authorization <actual reference>","disposition":"decomposed"}}
 ```
 
 A leaf uses `disposition: "leaf"`. Scaffold binds the immediate children into a
 content-addressed record; the adapter checks its digest. Reopening a design retains
 old designs and invalidates unfinished descendant designs so they receive fresh
-confirmation. Completed designs/evidence are preserved. Never invent approval.
+agent design. Completed designs/evidence are preserved. Record the actual overall authorization reference; label issue designs as agent-authored.
 
 Continue `design-select` until all required nodes have confirmed designs. Then
 `design-finish` transitions the graph to implementation. It refuses incomplete
@@ -72,8 +72,7 @@ Use `summary` and `select` to select an eligible issue. **`next` returning null 
 necessarily mean the feature is complete.** It also returns null during Design,
 while an issue is active, when a checkpoint is missing or when work is suspended.
 Inspect the complete state. Recover its approved design and include the exact
-Design-specified suffix in fixed Conductor requirements. Keep separate design and execution
-approvals; obtain fresh execution approval for each issue.
+Design-specified suffix in fixed Conductor requirements. The retained overall direction approval covers design and execution; do not ask per issue.
 
 | Operation | Additional fields | Meaning |
 | --- | --- | --- |
@@ -82,7 +81,7 @@ approvals; obtain fresh execution approval for each issue.
 | `list` | none | Explicit full-state diagnostics |
 | `add` | payload: issue definitions | Add top-level/dependent corrections during Design |
 | `decompose` | task_id, payload: children | Add immediate children during Design |
-| `design-record` | task_id, payload: approved design | Persist confirmation before implementation |
+| `design-record` | task_id, payload: approved design | Persist delegated design decisions before implementation |
 | `start` | task_id | Start one ready issue during Implement |
 | `complete` | task_id, payload: evidence | Complete from actual PASSED evidence |
 | `block`, `fail`, `retry` | task_id, reason | Explicit reconciled lifecycle transition |
@@ -108,7 +107,7 @@ Complete using the actual receipt:
 {"operation":"complete","feature_id":"F1","task_id":"storage","payload":{"feature_id":"F1","task_id":"storage","result":"PASSED","source":"conductor","reference":"<actual retained reference>","summary":"Actual checks and independent review passed"}}
 ```
 
-Then call UI-authorized `checkpoint_verified_task`. It authenticates the receipt,
+Then call feature-authorized `checkpoint_verified_task`. It authenticates the receipt,
 commits the exact tree with Git provenance and records the checkpoint in Scaffold.
 Do not invoke `checkpoint-record` manually as a substitute. If bookkeeping was
 interrupted after committing, retry the native checkpoint with the same reference.
@@ -120,16 +119,16 @@ or `next: null` alone do not prove the root ticket has been delivered.
 
 Review findings within the approved solution stay in the same issue's correction
 chain. New responsibilities/prerequisites return to Design. For unfinished active,
-blocked or failed attempts use native UI-authorized `suspend_issue`: it preserves
+blocked or failed attempts use native feature-authorized `suspend_issue`: it preserves
 source, staging, untracked files, all receipts and attempt counts in saved Git refs
 and a retained stash, then reopens design on a clean baseline. Never stash/reset
 from Bash or invoke `design-reopen` with a fabricated suspension reference.
 
-Decompose the remaining work, reconfirm the affected contract, design new issues,
+Decompose the remaining work, redesign the affected contract within scope, design new issues,
 finish the graph design and implement/checkpoint eligible prerequisites. Use
 `resume_issue` to restore the saved work onto authenticated checkpoints; it returns
 an explicit handoff and fixed continuation fields. Complete native bookkeeping,
-`start` the same issue, obtain ordinary execution approval and use that handoff as
+`start` the same issue, continue within the retained overall feature authority and use that handoff as
 `previousAttempt`. Three consumed attempts mean attempt four next. READY never
 means PASSED. Conflicts or exhausted budgets block with evidence retained.
 
@@ -181,3 +180,14 @@ input. Retrieve full diagnostics through inspect_conductor_evidence only when ne
 Latest finding excerpts never establish that earlier findings were resolved.
 These context tools grant no design/execution/checkpoint authority and never replace
 receipt authentication, fixed requirements or the attempt budget.
+
+
+## Single feature direction authority
+
+Use approve_feature_direction once after presenting the overall direction and local
+delivery scope. This is the sole confirmation; no separate conversational yes/no,
+per-issue design approval or implementation confirmation. All design-record approval
+strings must identify delegated authority and the actual reference, never claim the
+user individually approved an issue. Local checks, independent reviews, verified
+commits and recovery reuse that authority across sessions. Material changes outside
+the agreed objectives/constraints return to the user. Final feature review is mandatory.

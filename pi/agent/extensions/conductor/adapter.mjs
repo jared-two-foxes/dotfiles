@@ -1,3 +1,4 @@
+import { requireFeatureAuthorization } from './feature-authorization.mjs';
 // Pi-local copy of the tested OpenCode -> Conductor protocol adapter.
 // Pi extensions are deployed independently of ~/.config/opencode, so this must
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
@@ -220,6 +221,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
   let attempt = 1;
   try {
     validateBinding(args.task);
+    if (options.issueWorkflowOnly) await requireFeatureAuthorization(args, context, options);
     const checks = verificationChecks(args);
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));

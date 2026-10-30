@@ -6,28 +6,36 @@
  * The feature gate reuses bounded Review without Executor or AI retry logic.
  */
 import { Type } from "typebox";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { executeAndReview } from "./adapter.mjs";
-import { checkpointVerifiedTask, checkpointAuthorization } from "./checkpoint.mjs";
+import { checkpointVerifiedTask } from "./checkpoint.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
+import { approveFeatureDirection, featureAuthorized } from "./feature-authorization.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 
 export default function (pi: ExtensionAPI) {
-  let checkpointContext: ExtensionContext | undefined;
-  const confirmation = async (title: string, message: string) =>
-    checkpointContext?.hasUI === true && await checkpointContext.ui.confirm(title, message);
-  const authorizeCheckpoint = checkpointAuthorization(confirmation);
-  pi.on("session_start", async () => { authorizeCheckpoint.reset(); });
+  pi.registerTool({
+    name: "approve_feature_direction", label: "Approve feature direction",
+    description: "The single approval for this feature's direction and local delivery loop. Persists authority for scoped design, implementation, checks, independent review, checkpoints and recovery across sessions. No per-issue confirmations. Does not authorize publishing, merging or changing the approved objectives/constraints.",
+    parameters: Type.Object({ featureId: Type.String() }, { additionalProperties: false }),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await approveFeatureDirection(params, { directory: ctx.cwd, abort: signal }, {
+        confirm: async scope => ctx.hasUI === true && await ctx.ui.confirm("Approve overall design direction and implementation?",
+          JSON.stringify(scope, null, 2) + "\nProceed with this feature through design, implementation, checks, independent review, local checkpoints and recovery without further routine confirmations? Stop for changes outside this approved direction. Publishing and merging are separate."),
+      });
+      return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result, isError: !result.ok };
+    },
+  });
   for (const operation of ["suspend", "resume"] as const) pi.registerTool({
     name: operation === "suspend" ? "suspend_issue" : "resume_issue",
     label: operation === "suspend" ? "Suspend issue for design" : "Restore suspended issue",
     description: operation === "suspend"
-      ? "Explicitly park an unfinished recursive issue using saved Git snapshots/stash and return its graph to design. Preserves index, untracked files, receipts and consumed attempts. Without previousAttempt, requires clean source and no existing attempt receipts (zero attempts consumed). Requires UI authorization. Never marks implementation verified."
-      : "Restore saved issue work onto authenticated completed prerequisite checkpoints and retain a baseline handoff without resetting attempts. Requires UI authorization. A conflict blocks and preserves saved work. READY is not PASSED; start the same issue and obtain normal execution approval. Zero-attempt handoffs require freshly supplied verification commands.",
+      ? "Explicitly park an unfinished recursive issue using saved Git snapshots/stash and return its graph to design. Preserves index, untracked files, receipts and consumed attempts. Without previousAttempt, requires clean source and no existing attempt receipts (zero attempts consumed). Uses the retained overall feature authorization. Never marks implementation verified."
+      : "Restore saved issue work onto authenticated completed prerequisite checkpoints and retain a baseline handoff without resetting attempts. Uses the retained overall feature authorization. A conflict blocks and preserves saved work. READY is not PASSED; start the same issue and continue within the approved feature direction. Zero-attempt handoffs require freshly supplied verification commands.",
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       branch: Type.String(), featureBaseRef: Type.String(), defaultBranch: Type.String(),
@@ -38,8 +46,7 @@ export default function (pi: ExtensionAPI) {
     }, { additionalProperties: false }),
     async execute(_id, params, signal, _update, ctx) {
       const result = await (operation === "suspend" ? suspendIssue : resumeIssue)(params,
-        { directory: ctx.cwd, abort: signal }, { authorize: async scope => ctx.hasUI === true &&
-          await ctx.ui.confirm(operation === "suspend" ? "Park issue and return to design?" : "Restore suspended issue?", JSON.stringify(scope, null, 2)) });
+        { directory: ctx.cwd, abort: signal }, { authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }) });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: result.status === "BLOCKED", details: result };
     },
@@ -69,7 +76,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "recover_interrupted_task_rebase",
     label: "Recover interrupted task after rebase",
-    description: "Explicit recovery of an active/blocked/failed task after rebase. Preserve current files/index, old receipt chain, criteria/findings and consumed attempts. Verify only the completed prefix in a disposable worktree, then retain a non-PASSED handoff for execute_and_review.previousAttempt. No source writes, stash/reset, task lifecycle changes or attempt reset. Requires narrow UI authorization; next source correction needs normal execution approval.",
+    description: "Explicit recovery of an active/blocked/failed task after rebase. Preserve current files/index, old receipt chain, criteria/findings and consumed attempts. Verify only the completed prefix in a disposable worktree, then retain a non-PASSED handoff for execute_and_review.previousAttempt. No source writes, stash/reset, task lifecycle changes or attempt reset. Requires narrow UI authorization; next source correction remains within the approved feature direction.",
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       previousAttempt: Type.String({ description: "Latest retained receipt of the interrupted task; all consumed attempts must remain linked" }),
@@ -92,8 +99,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const result = await recoverInterruptedTaskRebase(params, { directory: ctx.cwd, abort: signal }, {
-        authorize: async scope => ctx.hasUI === true && await ctx.ui.confirm("Authorize interrupted task rebase recovery",
-          JSON.stringify(scope, null, 2) + "\nVerify the completed prefix in a disposable worktree and retain an explicit new-baseline handoff for this unfinished task? Preserve all source/index changes, criteria, findings and consumed attempts. This grants verification, temporary worktree and evidence/audit-ref authority only. No source correction, stash/reset, branch changes, task transitions or publishing."),
+        authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: result.status === "BLOCKED", details: result };
     },
@@ -131,8 +137,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const result = await reconcileFeature(params, { directory: ctx.cwd, abort: signal }, {
-        authorize: async scope => ctx.hasUI === true && await ctx.ui.confirm("Authorize verification after rebase",
-          JSON.stringify(scope, null, 2) + "\nRun these full-project checks and independent review of the rebased completed tasks? Verification/evidence only. No source editing, Git history changes, commits, publishing or task lifecycle changes."),
+        authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: result.status === "BLOCKED", details: result };
     },
@@ -150,7 +155,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "validate_feature",
     label: "Validate complete feature",
-    description: "Verification-only final gate: authenticate all task checkpoints, run approved full-project checks, independently review the original baseline through final HEAD, retain evidence and record Scaffold validation. Requires narrow Pi UI authorization. No implementation, commits, publishing, retries or task selection.",
+    description: "Verification-only final gate: authenticate all task checkpoints, run approved full-project checks, independently review the original baseline through final HEAD, retain evidence and record Scaffold validation. Uses the retained overall feature authorization. No implementation, commits, publishing, retries or task selection.",
     parameters: Type.Object({
       featureId: Type.String(), designRef: Type.String(), branch: Type.String(),
       featureBaseRef: Type.String(), headRef: Type.String(),
@@ -172,8 +177,7 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
       const result = await validateFeature(params, { directory: ctx.cwd, abort: signal }, {
-        authorize: async scope => ctx.hasUI === true && await ctx.ui.confirm("Authorize feature verification only",
-          JSON.stringify(scope, null, 2) + "\nRun these full project checks and bounded independent review? This permits verification commands, temporary review requests, Git evidence and Scaffold validation bookkeeping only. No source editing, commits, push or PR actions."),
+        authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: result.status === "BLOCKED", details: result };
@@ -192,7 +196,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "checkpoint_verified_task",
     label: "Checkpoint verified task",
-    description: "After Scaffold completion and user checkpoint authorization, create or recover ONE local commit of the exact verified Git tree. No push, task selection or source implementation. Requires Pi confirmation UI; grants expire on session start/switch.",
+    description: "After Scaffold completion under retained feature authority, create or recover ONE local commit of the exact verified Git tree. No push, task selection or source implementation. Uses retained feature direction authority across sessions.",
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       evidenceRef: Type.String(),
@@ -201,11 +205,9 @@ export default function (pi: ExtensionAPI) {
       branch: Type.String({ description: "Explicit authorized feature branch" }),
       defaultBranch: Type.String({ description: "Known actual repository default branch" }),
       protectedBranches: Type.Array(Type.String(), { description: "All additional known protected branches; [] if none" }),
-      authorizationMode: Type.Union([Type.Literal("manual"), Type.Literal("feature")]),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      checkpointContext = ctx;
-      const result = await checkpointVerifiedTask(params, { directory: ctx.cwd, abort: signal }, { authorize: authorizeCheckpoint });
+      const result = await checkpointVerifiedTask({ ...params, authorizationMode: "feature" }, { directory: ctx.cwd, abort: signal }, { authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }) });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: !result.ok, details: result };
     },
@@ -214,7 +216,7 @@ export default function (pi: ExtensionAPI) {
     name: "execute_and_review",
     label: "Execute and Review (Conductor)",
     description:
-      "After explicit user approval, run ONE deterministic Conductor attempt: " +
+      "Under the approved feature direction, run ONE deterministic Conductor attempt: " +
       "apply exact executor operations, run caller-selected verification and independently review. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({

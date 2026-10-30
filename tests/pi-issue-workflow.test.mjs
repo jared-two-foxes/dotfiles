@@ -1,3 +1,4 @@
+import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -339,4 +340,52 @@ test('scoped selection matches internal full selection and mutation acknowledgem
   assert.equal(compactMutation(result).data.feature, undefined);
   const scope = await f.call('issue', { task_id: 'F' });
   assert.equal(scope.context.issue.history, undefined);
+});
+
+
+test('one retained direction approval covers execution and survives contexts without new confirmations', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const context = { directory: f.dir }, options = { scaffoldOptions: f.options.scaffoldOptions };
+  const a = await f.args('F'); let invocations = 0, confirmations = 0;
+  const runtime = { ...options, issueWorkflowOnly: true, invokeConductor: async () => {
+    invocations++;
+    return { code: 2, stdout: JSON.stringify({ schema: 'conductor.result/v1', status: 'NEEDS_DESIGN', phase: 'review' }) };
+  } };
+  assert.equal((await executeAndReview(a, context, runtime)).status, 'BLOCKED');
+  assert.equal(invocations, 0);
+  const denied = await approveFeatureDirection({ featureId: 'F' }, context, { ...options, confirm: async () => false });
+  assert.equal(denied.ok, false); assert.equal(await featureAuthorized({ featureId: 'F' }, context, options), false);
+  const approved = await approveFeatureDirection({ featureId: 'F' }, context, { ...options, confirm: async () => { confirmations++; return true; } });
+  assert.equal(approved.ok, true, JSON.stringify(approved));
+  assert.equal((await executeAndReview(a, context, runtime)).status, 'NEEDS_DESIGN');
+  assert.equal(invocations, 1);
+  const fresh = await import('../pi/agent/extensions/conductor/feature-authorization.mjs?fresh-session');
+  assert.equal(await fresh.featureAuthorized(f.scope('F'), context, options), true);
+  const reused = await fresh.approveFeatureDirection({ featureId: 'F' }, context, { ...options, confirm: async () => { confirmations++; return true; } });
+  assert.equal(reused.recovered, true); assert.equal(confirmations, 1);
+  for (const patch of [{ featureId: 'other' }, { branch: 'other' }, { featureBaseRef: 'a'.repeat(40) }, { designRef: 'wrong' }, { task: { ...f.binding('F'), featureId: 'other' } }, { task: f.binding('missing') }]) {
+    assert.equal(await fresh.featureAuthorized({ featureId: 'F', ...patch }, context, options), false);
+  }
+  f.g('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/feature/issues');
+  assert.equal(await fresh.featureAuthorized({ featureId: 'F' }, context, options), false);
+  f.g('symbolic-ref', '--delete', 'refs/remotes/origin/HEAD');
+  const { inspectFeatureValidation } = await import('../pi/agent/extensions/conductor/feature.mjs');
+  const inspected = await inspectFeatureValidation({}, context, options);
+  assert.equal(inspected.ok, true); assert.equal(inspected.results.length, 0); // approval is never validation evidence
+});
+
+test('cancellation, branch changes during confirmation and corrupted evidence never grant permission', integration, async t => {
+  const f = await fixture(t), context = { directory: f.dir }, options = { scaffoldOptions: f.options.scaffoldOptions };
+  const cancelled = new AbortController();
+  const refused = await approveFeatureDirection({ featureId: 'F' }, { ...context, abort: cancelled.signal }, {
+    ...options, confirm: async () => { cancelled.abort(); return true; },
+  });
+  assert.equal(refused.ok, false); assert.equal(await featureAuthorized({ featureId: 'F' }, context, options), false);
+  const raced = await approveFeatureDirection({ featureId: 'F' }, context, { ...options, confirm: async () => { f.g('switch', '-qc', 'feature/other'); return true; } });
+  assert.equal(raced.ok, false); f.g('switch', 'feature/issues');
+  const granted = await approveFeatureDirection({ featureId: 'F' }, context, { ...options, confirm: async () => true });
+  const evidenceDirectory = path.resolve(f.dir, f.g('rev-parse', '--git-path', 'pi-conductor-evidence'));
+  const filename = path.join(evidenceDirectory, 'feature-' + granted.reference.split(':').at(-1) + '.json');
+  await writeFile(filename, '{}');
+  assert.equal(await featureAuthorized({ featureId: 'F' }, context, options), false);
 });

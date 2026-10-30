@@ -31,7 +31,7 @@ Install `conductor` on PATH (the dotfiles Windows installer already handles
 it), or set `CONDUCTOR_BIN` to its executable path. Pi loads `/skill:design` when implementation is requested, or you can
 invoke it explicitly for the full collaborative design-first persona. It
 uses `/skill:executor` to author exact operations and the native
-`execute_and_review` tool to apply them after separate execution approval.
+`execute_and_review` tool to apply them under retained overall feature authority.
 `/skill:conductor` is the lower-level execution reference. The legacy
 `/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
 implementation strategy within Design.
@@ -66,7 +66,7 @@ from the repository root through Conductor. Check objects accept only `name` and
 `command`; per-check timeout options are not supported by the Conductor protocol.
 
 Choose verification during task design and include the commands and their scope
-in execution approval. Use focused tests for task changes and broader regression
+within the approved feature direction. Use focused tests for task changes and broader regression
 checks for the final `validate_feature` gate. Inspect output to confirm relevant
 tests actually ran; an exit code of zero can also mean the filter selected no tests.
 The existing overall workflow deadline and independent review budgets still apply.
@@ -74,7 +74,7 @@ This interface is a Pi-local addition; the OpenCode adapter retains its legacy i
 
 Task receipts retain the exact caller inputs and translated request. Corrections
 must preserve the normalized ordered names and commands, including test filters;
-changing verification scope requires reconciliation and fresh approval rather than
+changing verification scope requires reconciliation within the approved direction rather than
 weakening the existing attempt. The pre-review source/index snapshot is captured
 after the **last** requested command succeeds, even if that check is not a test.
 All requested check results must appear in order, exactly once, with zero exits
@@ -140,7 +140,7 @@ it cannot enter Conductor's review diff. Inspect existing ignore rules. If state
 is visible to Git, stop and have an authorised ignore rule established; do not
 silently edit `.gitignore`, Git configuration or index. The task-bound preflight
 returns `SCAFFOLD_REVIEW_SCOPE` for visible state. A source ignore-file change,
-if needed, follows its own normal approval and checkpoint workflow.
+if needed, follows its own feature-authorized verification and checkpoint workflow.
 
 ## Feature validation
 
@@ -152,7 +152,7 @@ protocol changes are required. Task checkpoint authentication is shared with the
 checkpoint tool. Model-facing Scaffold operations cannot submit feature outcomes.
 
 See Design's final feature verification section for input fields, literal output
-markers, narrow UI authority, result/evidence contracts and recovery. The gate
+markers, retained feature authority, result/evidence contracts and recovery. The gate
 records intent, checks, cumulative Review and final result in content-addressed
 Git metadata. The CLI lifecycle pins the original baseline, validates all-task
 completion and preserves attempts. Applicability is computed against actual Git
@@ -206,8 +206,8 @@ completed tasks' retained requirements are supplied to Review.
 Retain the returned `evidenceRef` and pass it as `reconciliationRef` to **every
 subsequent** `checkpoint_verified_task` and `validate_feature` call. Capture the
 rebased HEAD as the next task's new `baseRef`; its correction-loop baseline still
-cannot change. The checkpoint authorization scope includes this reconciliation,
-so earlier session grants cannot silently authorize the new scope. Final feature
+cannot change. The checkpoint scope includes this authenticated reconciliation. The overall
+feature grant remains bound to the original direction, branch and baseline. Final feature
 validation still reviews from the immutable original feature baseline, satisfying
 Scaffold's existing lifecycle contract, and additionally authenticates the rebase
 receipt and all subsequent checkpoints. No Scaffold or Rust Conductor update is
@@ -247,7 +247,7 @@ verification plan as `reconcile_feature_rebase`, plus:
 - `oldHeadRef`: that task's original fixed `baseRef`, not a new or inferred baseline.
 - `previousReconciliationRef`: the preceding feature rebase receipt for a later rebase.
 
-The native UI confirmation covers both completed-prefix verification and the
+The retained overall feature authority covers both completed-prefix verification and the
 baseline handoff. Recovery authenticates the entire receipt chain and consumed
 attempt count, and uses Git object-only three-way merging to prove the current
 implementation tree equals the retained task tree transplanted onto rebased HEAD.
@@ -283,8 +283,7 @@ Inspect the handoff through `inspect_task_rebase_recovery` or
 `inspect_conductor_evidence`. If the task is blocked/failed, explicitly reconcile
 its Scaffold lifecycle with `retry` and `start`, recording the handoff reference
 and consumed count in the reason; recovery does not do this automatically.
-Author the actual correction from current source, obtain normal execution
-approval, then call `execute_and_review` with `resume` plus new exact `input`.
+Author the actual correction from current source, stay within the retained feature authority, then call `execute_and_review` with `resume` plus new exact `input`.
 Only a real subsequent successful Conductor attempt can complete the task. Pass
 `reconciliationRef` to its checkpoint and final feature validation as usual.
 
@@ -317,7 +316,7 @@ includes the original ticket and retained issue design contracts.
 
 `suspend_issue` explicitly parks unfinished work for newly discovered issues.
 Inputs: task binding, latest `previousAttempt`, reason, original featureBaseRef,
-branch/default/protected scope and optional reconciliationRef. UI authority covers
+branch/default/protected scope and optional reconciliationRef. Retained feature authority covers
 saved snapshots/index refs and a retained stash including untracked source; it
 never publishes, completes an issue or resets attempts. A content-addressed intent
 is retained first and returned as suspensionRef, including on failure. Retry that
@@ -330,7 +329,7 @@ requires the same scope and suspensionRef. It authenticates checkpoint lineage,
 precomputes source/index transplants to reject conflicts before source writes,
 restores saved work with `git stash apply --index`, and retains a non-PASSED
 `issue-handoff`. READY supplies consumedAttempts and resume arguments without old
-executor input. Start the original issue and obtain fresh execution approval.
+executor input. Start the original issue and continue within the approved feature direction.
 Use the returned handoff as previousAttempt; three attempts mean four next. A
 handoffRef recovers interrupted evidence/Scaffold bookkeeping. Read snapshots and
 receipts with inspect_conductor_evidence. Conflicts or unexpected changes block;
@@ -378,3 +377,27 @@ logs. None of these tools executes source, changes lifecycle state, grants appro
 resets attempts or substitutes summaries for full evidence validation. Handoffs are
 local to this checkout; they are not pushed with commits. Large individual contracts
 are retained intact rather than silently truncating criteria or decisions.
+
+
+## One overall feature direction approval
+
+Pi's native entry points now use `approve_feature_direction` as the sole user
+confirmation for local delivery. Present the direction, initialize its feature,
+then call this tool without a separate conversational yes/no. It stores a
+content-addressed feature authorization binding repository, feature/design,
+branch, original baseline, objective, criteria, constraints and local capabilities.
+An existing matching grant is reused across sessions; missing UI, declined approval,
+changed scope or corrupted evidence cannot grant permission. Existing features need
+this broader approval once; individual issue approvals do not imply it.
+
+Within scope Pi designs issues, authors input, implements, verifies, creates local
+verified checkpoints and handles discoveries without asking again. The design-record
+`approval` field identifies delegated authority and the actual reference; it must
+not invent individual user approval. Execution, checkpoint, feature verification,
+issue recovery and rebase verification native gates consult the same authority.
+Phase, receipt, Git, attempt-budget and final-review checks remain enforced.
+Approval receipts are excluded from final-validation evidence discovery and never
+prove success. Final independent feature review and meaningful checks are mandatory;
+in-scope findings return through the graph automatically. Material departures from
+approved objectives, public behaviour or constraints require revised overall direction.
+The grant does not authorize publishing, merging or arbitrary history rewriting.
