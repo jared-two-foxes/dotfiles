@@ -2,9 +2,10 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 // Pi-local copy of the tested OpenCode -> Conductor protocol adapter.
 // Pi extensions are deployed independently of ~/.config/opencode, so this must
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
-// Conductor alone owns apply/check/review.
+// The adapter authors the fixed Executor -> checks -> Review sequence; Conductor executes it.
 import { issueFeature, approvedIssue, issueDesignRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
 import { verificationChecks, sameVerification } from './verification.mjs';
+import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from './protocol.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
 import { readTaskHandoff, assertLatestAttempt, authenticateAttemptChain } from './task-chain.mjs';
@@ -26,15 +27,15 @@ try {
 } catch {}
 
 const SHA = /^[0-9a-f]{40}$/i;
-const MAX_LOG_BYTES = 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_LOG_BYTES = 16 * 1024 * 1024;
+export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
   return { schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields };
 }
 
-async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, {
       cwd, signal, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
@@ -45,15 +46,16 @@ async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_T
       child.kill();
     }, timeoutMs);
     const collect = (kind) => (chunk) => {
-      bytes += chunk.length;
+      bytes += Buffer.byteLength(chunk);
       if (bytes > MAX_LOG_BYTES) {
-        failure = new Error('Process output exceeded 1 MiB; the working tree may be partially modified');
+        failure = new Error('Process output exceeded 16 MiB; the working tree may be partially modified');
         child.kill();
         return;
       }
       if (kind === 'stdout') stdout += chunk.toString('utf8');
       else stderr += chunk.toString('utf8');
     };
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', collect('stdout'));
     child.stderr.on('data', collect('stderr'));
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -78,8 +80,8 @@ async function git(repository, args, signal) {
 }
 
 /**
- * One attempt. The only process that may modify files or invoke review is Conductor.
- * The injected invocation seam is for protocol tests; no executor/review adapters.
+ * One attempt. Only Conductor starts Executor, checks and Review. The adapter
+ * prepares their input files in Git metadata and validates the resulting protocol.
  */
 async function executeAttempt(args, context = {}, options = {}) {
   let repository;
@@ -138,45 +140,16 @@ async function executeAttempt(args, context = {}, options = {}) {
         message: 'HEAD differs from the task-start baseline; nothing was applied' });
     }
 
-    const request = {
-      schema: 'conductor.request/v1',
-      repository_path: repository,
-      execution,
-      checks: checks.map((check, index) => {
-        const command = index === checks.length - 1 && options.verificationBoundary
-          ? options.verificationBoundary : check.command;
-        return { name: check.name, program: command[0], args: command.slice(1) };
-      }),
-      // Pi-local addition: budget and limit passthrough fields forwarded to the
-      // review engine via conductor.request/v1. Diverges from the upstream
-      // OpenCode adapter, which does not expose these. All fields optional;
-      // omitted fields are absent so Conductor applies review-cli defaults.
-      // Forwarded: wall_clock_budget_secs, max_turns, max_cost_usd,
-      // max_tool_calls, max_repeated_actions, max_completion_attempts.
-      review: {
-        requirements: args.requirements,
-        base_ref: base,
-        model: args.reviewModel ?? 'opencode/gpt-6.1-sol',
-        ...(args.reviewWallClockBudgetSecs != null
-          ? { wall_clock_budget_secs: args.reviewWallClockBudgetSecs }
-          : {}),
-        ...(args.reviewMaxTurns != null
-          ? { max_turns: args.reviewMaxTurns }
-          : {}),
-        ...(args.reviewMaxCostUsd != null
-          ? { max_cost_usd: args.reviewMaxCostUsd }
-          : {}),
-        ...(args.reviewMaxToolCalls != null
-          ? { max_tool_calls: args.reviewMaxToolCalls }
-          : {}),
-        ...(args.reviewMaxRepeatedActions != null
-          ? { max_repeated_actions: args.reviewMaxRepeatedActions }
-          : {}),
-        ...(args.reviewMaxCompletionAttempts != null
-          ? { max_completion_attempts: args.reviewMaxCompletionAttempts }
-          : {}),
-      },
-    };
+    const translatedChecks = checks.map((check, index) => {
+      const command = index === checks.length - 1 && options.verificationBoundary
+        ? options.verificationBoundary : check.command;
+      return { name: check.name, program: command[0], args: command.slice(1) };
+    });
+    const root = path.resolve(repository, await git(repository, ['rev-parse', '--git-path', 'pi-conductor-runs'], context.abort));
+    const workflow = await prepareWorkflow(repository, root, args, translatedChecks);
+    options.onPrepared?.(workflow);
+    if (options.runWorkflow) return await options.runWorkflow(workflow);
+    const { request } = workflow;
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     const invokeConductor = options.invokeConductor ??
       ((requestJson, timeoutMs) => invoke(binary, ['run', '--request', '-'], {
@@ -186,20 +159,12 @@ async function executeAttempt(args, context = {}, options = {}) {
       JSON.stringify(request), args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     let conductor;
     try {
-      conductor = JSON.parse(response.stdout);
-    } catch {
-      return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'INVALID_RESPONSE',
-        message: 'Conductor returned invalid JSON', stderr: response.stderr?.slice(0, 2000) });
-    }
-    const expectedExit = { PASSED: 0, NEEDS_DESIGN: 2, BLOCKED: 3 };
-    if (conductor.schema !== 'conductor.result/v1' ||
-        !Object.hasOwn(expectedExit, conductor.status) ||
-        response.code !== expectedExit[conductor.status]) {
+      conductor = await decodeWorkflow(request, response, workflow.inputs);
+    } catch (error) {
       return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'PROTOCOL_MISMATCH',
-        message: 'Conductor status, schema, and exit code disagree', conductor });
+        message: error.message, request, response });
     }
-    return outcome(conductor.status, conductor.phase?.toUpperCase() ?? 'CONDUCTOR',
-      { repository, conductor });
+    return outcome(conductor.status, conductor.phase.toUpperCase(), { repository, conductor });
   } catch (error) {
     return outcome('BLOCKED', 'PRECHECK_OR_CONDUCTOR', {
       ...(repository ? { repository } : {}),
@@ -217,12 +182,16 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (args?.previousAttempt) return outcome('BLOCKED', 'PRECHECK', { reason: 'TASK_REQUIRED' });
     return executeAttempt(args, context, options);
   }
-  let repository, before, request, response, boundaryPath;
+  let repository, before, request, response, boundaryPath, workflow;
   let attempt = 1;
   try {
     validateBinding(args.task);
     if (options.issueWorkflowOnly) await requireFeatureAuthorization(args, context, options);
     const checks = verificationChecks(args);
+    validateWorkflowPreparation(args);
+    if (args.workflowTimeoutMs != null && (!Number.isSafeInteger(args.workflowTimeoutMs) ||
+        args.workflowTimeoutMs <= 0 || args.workflowTimeoutMs > MAX_WORKFLOW_TIMEOUT_MS))
+      throw new Error('Invalid workflowTimeoutMs');
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));
     const feature = await issueFeature(repository, args.task, options);
@@ -272,9 +241,25 @@ export async function executeAndReview(args, context = {}, options = {}) {
       ['rev-parse', '--git-path', 'pi-conductor-evidence'], context.abort), randomUUID() + '.boundary');
     const verificationBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
       JSON.stringify({ command: checks.at(-1).command, repository, output: boundaryPath })];
+    if (options.pipeline) {
+      let invoked = false;
+      const result = await executeAttempt(args, context, {
+      verificationBoundary,
+      runWorkflow: workflow => {
+        invoked = true;
+        return options.pipeline({ repository, args, before, attempt, startedReference, boundaryPath, workflow });
+      },
+      });
+      if (invoked) return result;
+      const after = await snapshot(repository);
+      const reference = await retainEvidence(repository, { repository, task: args.task, attempt, args,
+        before, after, startedReference, result });
+      return { ...result, evidence: { reference, task: args.task, attempt } };
+    }
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     let result = await executeAttempt(args, context, {
       verificationBoundary,
+      onPrepared: prepared => { workflow = prepared; },
       invokeConductor: async json => {
         request = JSON.parse(json);
         response = await (options.invokeConductor ?? ((body, timeoutMs) => invoke(binary, ['run', '--request', '-'], {
@@ -301,7 +286,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     try {
       const reference = await retainEvidence(repository, {
         repository, task: args.task, attempt, args, before, after, startedReference,
-        request: request ?? null, response: response ?? null, reviewSnapshot, result,
+        request: request ?? null, response: response ?? null, workflow: workflow ?? null, reviewSnapshot, result,
       });
       return { ...result, evidence: { reference, task: args.task, attempt } };
     } catch (error) {

@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { executeAndReview } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview } from './helpers/conductor-v2.mjs';
 import { inspectEvidence, readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 

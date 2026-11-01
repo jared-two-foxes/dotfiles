@@ -25,6 +25,30 @@ verification through validate_feature after checkpoints; corrective issues use
 targeted checks before rerunning that final gate. Keep ordered checks fixed across
 corrections. The buildCommand/testCommand pair remains an alternative input shape,
 not a requirement to run the entire suite for each issue.
+The native adapter constructs Conductor v2's ordered command list: `executor apply`
+with the exact operations file, your selected checks, then `review-cli run --request`
+with the fixed baseline and complete requirements file. Supply operations, checks
+and review settings to execute_and_review; do not construct shell strings or call
+those binaries yourself. All three binaries must be installed separately. Review
+model and budget overrides become CLI flags; defaults are 180 seconds and 20 turns.
+The final task check captures the source/index boundary before independent review.
+Supply `checkpoint: {defaultBranch, protectedBranches}` using the known repository
+default branch and all additional protected branches (or []). After a completed
+APPROVED review, the final command in the SAME Conductor list seals verification
+evidence and creates the Git checkpoint. Normal delivery uses one runner call;
+there is no second automatic commit request. Stage wrappers retain actual process
+exit results so the final command can authenticate review before the runner returns.
+It records Scaffold completion and
+commits only the exact reviewed tree, using the existing verified checkpoint logic.
+
+Conductor's generic FAILED is interpreted by the adapter. A failed application or
+check and a completed CHANGES_REQUESTED review mean NEEDS_DESIGN; unavailable,
+malformed, mismatched or INDETERMINATE review output means BLOCKED. A zero runner
+exit alone is insufficient. Complete stdout/stderr paths are retained outside the
+source tree; inspect full files or inspect_conductor_evidence when previews are
+truncated, especially for structured Review JSON. Do not parse truncated JSON or
+interpret an absent review as approval.
+
 Use meaningful tests and inspect actual output. Offer full operations on request,
 not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 
@@ -34,8 +58,13 @@ criteria/findings, baseline and checks within an epoch. BLOCKED stops automatic 
 Maximum budgets and provider errors are never review approval. Inspect real receipts;
 PASSED requires successful execution, checks and APPROVED independent review.
 
-Complete the exact Scaffold issue from authentic evidence, end the active verification/correction loop,
-then checkpoint_verified_task. Each parent needs its own original-criteria verification
+On `stage: COMMITTED`, completion and the local checkpoint are already recorded.
+Automatic finalization follows the receipt ending the active verification/correction loop.
+Use `nextBaseRef` for the next issue; do not repeat completion or commit commands.
+If `implementationStatus: PASSED` but finalization is BLOCKED, preserve its evidence
+and call checkpoint_verified_task with that receipt and matching feature/branch
+metadata. This resumes completion/commit only; never reapply operations or rerun
+review to recover a failed commit. Each parent needs its own original-criteria verification
 and commit after children, even if its commit is empty. Finish with validate_feature
 against the original baseline. Inspect actual meaningful checks and final review;
 add in-scope corrective issues and revalidate without additional permission prompts.

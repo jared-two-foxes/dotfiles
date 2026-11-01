@@ -20,7 +20,11 @@ Stop for material departures from approved objectives, public behaviour or const
 ordinary implementation decisions and in-scope findings are delegated to Pi.
 
 Scaffold validates structure and association, not evidence authenticity. Complete
-issues only from authentic task-bound PASSED evidence and checkpoint each one,
+issues only from authentic task-bound PASSED evidence. Native execute_and_review
+automatically records completion and a verified local commit after successful review;
+provide known checkpoint branch protection metadata. Recover commit-only failures
+with checkpoint_verified_task and the same successful receipt, never by reapplying
+operations. Each issue receives its own checkpoint,
 including verification-only parents. Finish with mandatory full feature checks and
 independent review, then present results for user review. Findings within scope go
 through the same graph without new permission requests. Never weaken criteria or

@@ -27,7 +27,7 @@ try {
     & $installer -Force
     Assert-True ($global:ConductorMockCalls.Count -eq 1) 'Forced install did not invoke Cargo exactly once'
     $actual = $global:ConductorMockCalls[0] -join ' '
-    Assert-True ($actual -eq 'install --git https://github.com/jared-two-foxes/conductor.git --force') "Unexpected Cargo arguments: $actual"
+    Assert-True ($actual -eq 'install --git https://github.com/jared-two-foxes/conductor.git --locked --force') "Unexpected Cargo arguments: $actual"
 
     $global:ConductorMockExitCode = 42
     & $installer -Force

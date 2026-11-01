@@ -1,9 +1,10 @@
-// Thin OpenCode -> Conductor protocol adapter. Conductor alone owns apply/check/review.
+// OpenCode -> Conductor v2 transport; the caller owns the Executor/check/Review policy.
+import { prepareWorkflow, decodeWorkflow } from './conductor-protocol.mjs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 const SHA = /^[0-9a-f]{40}$/i;
-const MAX_LOG_BYTES = 1024 * 1024;
+const MAX_LOG_BYTES = 16 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 
 function outcome(status, stage, fields = {}) {
@@ -29,15 +30,16 @@ async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_T
       child.kill();
     }, timeoutMs);
     const collect = (kind) => (chunk) => {
-      bytes += chunk.length;
+      bytes += Buffer.byteLength(chunk);
       if (bytes > MAX_LOG_BYTES) {
-        failure = new Error('Process output exceeded 1 MiB; the working tree may be partially modified');
+        failure = new Error('Process output exceeded 16 MiB; the working tree may be partially modified');
         child.kill();
         return;
       }
       if (kind === 'stdout') stdout += chunk.toString('utf8');
       else stderr += chunk.toString('utf8');
     };
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', collect('stdout'));
     child.stderr.on('data', collect('stderr'));
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -89,20 +91,12 @@ export async function executeAndReview(args, context = {}, options = {}) {
         message: 'HEAD differs from the task-start baseline; nothing was applied' });
     }
 
-    const request = {
-      schema: 'conductor.request/v1',
-      repository_path: repository,
-      execution,
-      checks: [
-        { name: 'build', program: build[0], args: build.slice(1) },
-        { name: 'test', program: test[0], args: test.slice(1) },
-      ],
-      review: {
-        requirements: args.requirements,
-        base_ref: base,
-        model: args.reviewModel ?? 'opencode/gpt-6.1-sol',
-      },
-    };
+    const root = path.resolve(repository, await git(repository, ['rev-parse', '--git-path', 'opencode-conductor-runs'], context.abort));
+    const workflow = await prepareWorkflow(repository, root, args, [
+      { name: 'build', program: build[0], args: build.slice(1) },
+      { name: 'test', program: test[0], args: test.slice(1) },
+    ]);
+    const { request } = workflow;
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     const invokeConductor = options.invokeConductor ??
       ((requestJson) => invoke(binary, ['run', '--request', '-'], {
@@ -110,21 +104,12 @@ export async function executeAndReview(args, context = {}, options = {}) {
       }));
     const response = await invokeConductor(JSON.stringify(request));
     let conductor;
-    try {
-      conductor = JSON.parse(response.stdout);
-    } catch {
-      return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'INVALID_RESPONSE',
-        message: 'Conductor returned invalid JSON', stderr: response.stderr?.slice(0, 2000) });
-    }
-    const expectedExit = { PASSED: 0, NEEDS_DESIGN: 2, BLOCKED: 3 };
-    if (conductor.schema !== 'conductor.result/v1' ||
-        !Object.hasOwn(expectedExit, conductor.status) ||
-        response.code !== expectedExit[conductor.status]) {
+    try { conductor = await decodeWorkflow(request, response, workflow.inputs); }
+    catch (error) {
       return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'PROTOCOL_MISMATCH',
-        message: 'Conductor status, schema, and exit code disagree', conductor });
+        message: error.message, request, response });
     }
-    return outcome(conductor.status, conductor.phase?.toUpperCase() ?? 'CONDUCTOR',
-      { repository, conductor });
+    return outcome(conductor.status, conductor.phase.toUpperCase(), { repository, conductor });
   } catch (error) {
     return outcome('BLOCKED', 'PRECHECK_OR_CONDUCTOR', {
       ...(repository ? { repository } : {}),

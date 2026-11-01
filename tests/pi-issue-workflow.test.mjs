@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from '../pi/agent/extensions/conductor/git-tree.mjs';
 import { snapshot, readEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
-import { executeAndReview } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview } from './helpers/conductor-v2.mjs';
 import { checkpointVerifiedTask } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { issueDesignRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';

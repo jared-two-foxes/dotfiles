@@ -77,7 +77,9 @@ The `patch` operation has been removed, with no fallback. Never emit `patch` or 
 In Pi, prepare and retain complete JSON for the selected issue under the retained
 overall feature direction approval. Offer full operations on request; when requested,
 return the complete JSON. Do not display it by default or request a separate execution
-confirmation. Pass this exact JSON as input to execute_and_review. Only a material
+confirmation. Pass this exact JSON as input to execute_and_review. The adapter writes it to a
+retained file and constructs `executor apply <file>` as the first Conductor v2
+command; Executor is a separately installed CLI, not embedded in Conductor. Only a material
 departure from approved objectives, externally visible behaviour or constraints
 requires returning to the user. Do not invoke executor apply or conductor run directly.
 

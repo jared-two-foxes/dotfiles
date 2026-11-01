@@ -1,5 +1,6 @@
 // Local, content-addressed receipts. No task selection, lifecycle writes or retries.
 import { verificationChecks } from './verification.mjs';
+import { authenticNormalized } from './protocol.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { lstat, mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
@@ -83,7 +84,8 @@ export function verifiedResult(result, args) {
   try { checks = args ? verificationChecks(args) : [{ name: 'build' }, { name: 'test' }]; }
   catch { return false; }
   const c = result?.conductor;
-  return result?.status === 'PASSED' && c?.schema === 'conductor.result/v1' &&
+  return result?.status === 'PASSED' && (c?.schema === 'conductor.result/v1' ||
+    (c?.schema === 'pi.conductor-result/v1' && authenticNormalized(c))) &&
     c.status === 'PASSED' && c.phase === 'review' && !c.error &&
     c.execution?.success === true && Array.isArray(c.checks) && c.checks.length === checks.length &&
     checks.every((check, index) => c.checks[index]?.name === check.name && c.checks[index].exit_code === 0) &&
