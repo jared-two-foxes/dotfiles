@@ -108,6 +108,7 @@ test('successful review automatically completes the task and runs a verified com
   for (const change of [r => { r.producer = 'unverified'; },
     r => { r.deliveryRequest.commands.pop(); },
     r => { r.result.conductor.runner.receipts[0].exit_code = 7; },
+    r => { r.result.conductor.runner.conditionReceipts.at(-1).exit_code = 7; },
     r => {
       r.result.conductor.expectedOperations = 2;
       r.result.conductor.execution.operations_applied = 2;
@@ -132,6 +133,30 @@ test('invalid workflow preparation does not consume the first task attempt', int
   });
   assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered));
   assert.equal(delivered.evidence.attempt, 1);
+});
+
+test('a retained check condition can accept a nonzero command and authorize the same in-list commit', integration, async t => {
+  const f = await fixture(t);
+  f.args.checks = [{ name: 'semantic check', command: [process.execPath, '-e', 'console.log("validated");process.exit(7)'],
+    successCondition: [process.execPath, '-e',
+      'const fs=require("fs");process.exit(process.env.CONDUCTOR_COMMAND_EXIT_CODE==="7" && fs.readFileSync(process.env.CONDUCTOR_COMMAND_STDOUT_PATH,"utf8").includes("validated")?0:1)'] }];
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => f.finalCommand(body) });
+  assert.equal(result.status, 'PASSED', JSON.stringify(result));
+  assert.equal(result.stage, 'COMMITTED');
+  const record = await readEvidence(f.directory, result.evidence.reference);
+  assert.equal(record.result.conductor.checks[0].exit_code, 7);
+  assert.equal(record.result.conductor.checks[0].condition.status, 'PASSED');
+});
+
+test('a retained check condition rejects a zero-exit command before Review and commit', integration, async t => {
+  const f = await fixture(t);
+  f.args.checks = [{ name: 'semantic check', command: [process.execPath, '-e', 'console.log("tests failed")'],
+    successCondition: [process.execPath, '-e',
+      'const fs=require("fs");process.exit(fs.readFileSync(process.env.CONDUCTOR_COMMAND_STDOUT_PATH,"utf8").includes("failed")?1:0)'] }];
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => f.finalCommand(body) });
+  assert.notEqual(result.stage, 'COMMITTED');
+  assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+  assert.equal(await readFile(path.join(f.directory, '.git/trace'), 'utf8'), 'executor\n');
 });
 
 test('preparation failure after STARTED retains terminal evidence for a correction', integration, async t => {

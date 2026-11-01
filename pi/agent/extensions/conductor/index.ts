@@ -243,6 +243,8 @@ export default function (pi: ExtensionAPI) {
       checks: Type.Optional(Type.Array(Type.Object({
         name: Type.String({ minLength: 1, maxLength: 256 }),
         command: Type.Array(Type.String(), { minItems: 1, maxItems: 64 }),
+        successCondition: Type.Optional(Type.Array(Type.String(), { minItems: 1, maxItems: 64,
+          description: "Optional evaluator executable and arguments; Conductor supplies the original exit code and complete output paths via environment variables. Exit 0 permits the next command." })),
       }, { additionalProperties: false }), {
         minItems: 1, maxItems: 64,
         description: "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. Supply checks OR both legacy buildCommand/testCommand fields. The plan stays fixed across corrections.",

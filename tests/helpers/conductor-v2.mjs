@@ -41,6 +41,9 @@ export async function domainResponse(request, response) {
     const stderr_path = path.join(directory, String(index).padStart(6, '0') + '.stderr');
     await writeFile(stdout_path, stdout ?? ''); await writeFile(stderr_path, '');
     records.push({ ...spec, name, index, exit_code: code, status: code === 0 ? 'PASSED' : 'FAILED',
+      ...(spec.success_condition ? { condition: { ...spec.success_condition,
+        status: code === 0 ? 'PASSED' : 'FAILED', exit_code: code === 0 ? 0 : 1,
+        stdout: '', stderr: '', stdout_truncated: false, stderr_truncated: false } } : {}),
       stdout: (stdout ?? '').slice(0, 16384), stderr: '', stdout_truncated: (stdout?.length ?? 0) > 16384,
       stderr_truncated: false, stdout_path, stderr_path });
   }
@@ -72,6 +75,10 @@ export async function domainResponse(request, response) {
   if (status !== 'PASSED' && records.length) {
     records.at(-1).status = status;
     if (status === 'FAILED' && records.at(-1).exit_code === 0) records.at(-1).exit_code = 1;
+    if (records.at(-1).condition) {
+      records.at(-1).condition.status = status;
+      records.at(-1).condition.exit_code = status === 'BLOCKED' ? null : 1;
+    }
   }
   const runner = { schema: 'conductor.result/v2', status,
     phase: status === 'PASSED' ? 'completed' : 'commands', commands: records, output_directory: directory,

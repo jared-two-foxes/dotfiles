@@ -154,6 +154,11 @@ filters as supported. For example, a Rust crate change may use
 `["cargo", "test", "-p", "affected-crate", "regression_name"]`; a Node test change
 may use `["node", "--test", "tests/affected.test.mjs"]`. Include a scoped build,
 type check or lint check when it establishes relevant correctness.
+If a tool's exit code does not establish success, set that named check's optional
+`successCondition` to an explicit executable/argv array that examines the full
+output path or other state. Its exit 0 advances Conductor. Do not add generic
+text matching to Cargo build/test when their exit status already expresses
+failure; use a tool-specific condition for cases such as a zero-test run.
 
 Leaf issues run targeted regressions; intermediate parents run scoped integration
 checks for their immediate children and interfaces. Exclude the full repository or

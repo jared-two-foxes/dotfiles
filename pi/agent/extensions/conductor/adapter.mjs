@@ -143,7 +143,9 @@ async function executeAttempt(args, context = {}, options = {}) {
     const translatedChecks = checks.map((check, index) => {
       const command = index === checks.length - 1 && options.verificationBoundary
         ? options.verificationBoundary : check.command;
-      return { name: check.name, program: command[0], args: command.slice(1) };
+      return { name: check.name, program: command[0], args: command.slice(1),
+        ...(check.successCondition ? { success_condition: { program: check.successCondition[0],
+          args: check.successCondition.slice(1) } } : {}) };
     });
     const root = path.resolve(repository, await git(repository, ['rev-parse', '--git-path', 'pi-conductor-runs'], context.abort));
     const workflow = await prepareWorkflow(repository, root, args, translatedChecks);
