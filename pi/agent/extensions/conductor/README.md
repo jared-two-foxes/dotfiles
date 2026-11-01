@@ -468,8 +468,16 @@ Scaffold release). There is no opt-in field or alternate lifecycle. The stored
 workflow kind is `recursive-issues/v1`; the state schema is version 2. The root is created from the agreed
 ticket. Pi uses `design-next`, `decompose` and `design-record` to approve designs
 downward; `design-finish` gates all implementation. The API retains task IDs.
-`execute_and_review` requires an explicit started issue and its exact approved
-design suffix (see Design skill) in fixed requirements. Unbound execution cannot
+`execute_and_review` requires an explicit started issue. For a first attempt (or a
+zero-attempt recovery handoff), the adapter adds the persisted acceptance criteria,
+constraints and exact approved design to caller-supplied additional `requirements`
+(which may be empty). Existing callers supplying the complete canonical text remain
+supported. The assembled scope goes to Review and the retained receipt. Corrections
+must supply the exact retained requirements via `inspect_issue_attempt` or authenticated
+resume fields; no formatting normalization or advisory checks weaken that boundary.
+Branch mismatches report current/expected branches, while malformed or stale
+`task.designRef` values report the expected feature reference. These precheck errors
+do not consume an execution attempt and do not require reapproval. Unbound execution cannot
 bypass an unfinished recursive feature. Older task-state files are rejected without modification.
 
 `checkpoint_verified_task` records its verified commit back into Scaffold. Retry

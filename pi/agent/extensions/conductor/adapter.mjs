@@ -3,7 +3,7 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 // Pi extensions are deployed independently of ~/.config/opencode, so this must
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // The adapter authors the fixed Executor -> checks -> Review sequence; Conductor executes it.
-import { issueFeature, approvedIssue, issueDesignRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
+import { issueFeature, approvedIssue, issueDesignRequirements, issueRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
 import { verificationChecks, sameVerification } from './verification.mjs';
 import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from './protocol.mjs';
 import { spawn } from 'node:child_process';
@@ -200,6 +200,12 @@ export async function executeAndReview(args, context = {}, options = {}) {
     if (options.issueWorkflowOnly && !feature) throw new Error('Recursive issue graph required; migrate this feature through Design');
     if (feature) {
       const issue = approvedIssue(feature, args.task);
+      if (issue.status !== 'in_progress') throw new Error('Start the explicit issue with scaffold_tasks before execution');
+      // Only assemble new scopes. Corrections must reproduce the authenticated
+      // receipt exactly, including any findings carried by a recovery handoff.
+      const previous = args.previousAttempt ? await readEvidence(repository, args.previousAttempt) : null;
+      if (!previous || previous.kind === 'issue-zero-handoff')
+        args = { ...args, requirements: issueRequirements(issue, args.requirements) };
       await issueExecutionScope(repository, feature, args);
       if (issue.status !== 'in_progress' || !args.requirements.includes(issueDesignRequirements(issue)))
         throw new Error('Start the explicit issue and include its complete approved design in fixed requirements');

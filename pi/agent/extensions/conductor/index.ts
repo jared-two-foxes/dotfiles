@@ -235,7 +235,7 @@ export default function (pi: ExtensionAPI) {
         description: "Exact executor JSON with an operations array; authored by the agent",
       }),
       requirements: Type.String({
-        description: "Current task criteria, applicable approved constraints and earlier interfaces to preserve",
+        description: "Additional task scope and earlier interfaces to preserve (empty string allowed). On the first attempt the adapter adds persisted issue criteria, constraints and approved design verbatim. For corrections copy exact fixed requirements from inspect_issue_attempt or the authenticated resume fields.",
       }),
       baseRef: Type.String({
         description: "Original task-start full 40-character Git SHA, unchanged across attempts",

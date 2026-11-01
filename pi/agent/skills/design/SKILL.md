@@ -91,18 +91,14 @@ Scaffold validates structure and association, not authority or verification trut
 ## 3. Implement upward and process discoveries
 
 Use `select` for one eligible issue. Recover its current design and inspect source.
-Do not redo design approvals or request execution confirmation. Include the exact
-stored design suffix, own acceptance criteria, inherited constraints and established
-interfaces in fixed requirements; future feature criteria remain context.
-
-```text
-
-
-Approved issue design <designs[0].reference>
-<designs[0].summary>
-Verification: <designs[0].verification>
-Approval record: <designs[0].approval>
-```
+Do not redo design approvals or request execution confirmation. On the first attempt,
+the adapter assembles persisted issue acceptance criteria, constraints and the complete
+approved design into fixed review requirements. Supply only additional applicable
+constraints and established interfaces in `requirements` (or an empty string); do not
+manually reconstruct the design suffix or retype its formatting; future feature criteria
+remain context. Copy `task.designRef` exactly from the scoped issue/select
+response; it is the feature's `design_ref`, not the issue design reference. A branch
+or reference mismatch requires inspecting current state, not another approval.
 
 ### Discovery exit hatch
 

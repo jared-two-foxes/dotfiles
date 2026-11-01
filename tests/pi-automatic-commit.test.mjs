@@ -9,7 +9,7 @@ import { invoke } from '../pi/agent/extensions/conductor/adapter.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
-import { issueDesignRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
+import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
 import { readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
@@ -74,6 +74,10 @@ async function fixture(t) {
 
 test('successful review automatically completes the task and runs a verified commit command', integration, async t => {
   const f = await fixture(t);
+  const issue = (await f.call('list')).feature.tasks.F;
+  const expected = issueRequirements(issue, '');
+  process.env.EXPECTED_REVIEW_REQUIREMENTS = expected;
+  f.args.requirements = '';
   let calls = 0;
   const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => { calls++; return f.finalCommand(body); } });
   assert.equal(calls, 1, 'all stages including Git commit must use ONE Conductor call');
@@ -86,6 +90,7 @@ test('successful review automatically completes the task and runs a verified com
   const task = (await f.call('list')).feature.tasks.F;
   assert.equal(task.status, 'completed'); assert.equal(task.checkpoint.commit, result.nextBaseRef);
   const record = await readEvidence(f.directory, result.evidence.reference);
+  assert.equal(record.args.requirements, expected);
   assert.equal(record.after.head, f.base); assert.equal(record.result.status, 'PASSED');
   assert.equal(f.git('rev-parse', 'HEAD^{tree}'), record.after.tree);
   const request = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'request.json'), 'utf8'));
