@@ -26,11 +26,13 @@ export function contract(label, executeAndReview, pi = false) {
       assert.equal(request.working_directory, f.dir);
       assert.deepEqual(Object.keys(request).sort(), ['commands', 'output_directory', 'schema', 'working_directory']);
       assert.deepEqual(request.commands.map(c => c.name), ['executor', 'build', 'test', 'review']);
-      assert.equal(request.commands[0].program, 'executor');
-      assert.equal(request.commands[0].args[0], 'apply');
-      assert.deepEqual(JSON.parse(await readFile(request.commands[0].args[1], 'utf8')), JSON.parse(f.args.input));
+      assert.equal(request.commands[0].program, process.execPath);
+      const executor = JSON.parse(request.commands[0].args[1]);
+      assert.equal(executor.program, 'executor');
+      assert.equal(executor.args[0], 'apply');
+      assert.deepEqual(JSON.parse(await readFile(executor.args[1], 'utf8')), JSON.parse(f.args.input));
       assert.deepEqual(request.commands[2], { name: 'test', program: 'cargo', args: ['test', '--lib', 'invoices::'] });
-      const review = request.commands.at(-1);
+      const review = JSON.parse(request.commands.at(-1).args[1]);
       assert.equal(review.program, 'review-cli');
       const reviewInput = JSON.parse(await readFile(review.args[2], 'utf8'));
       assert.deepEqual({ ...reviewInput, requirements: await readFile(reviewInput.requirements, 'utf8') }, {
@@ -79,6 +81,39 @@ export function contract(label, executeAndReview, pi = false) {
     assert.equal(result.conductor.review.findings[0].message, message);
     assert.equal(result.conductor.runner.commands.at(-1).stdout_truncated, true);
     assert.equal(JSON.parse(await readFile(result.conductor.runner.commands.at(-1).stdout_path, 'utf8')).findings[0].message, message);
+  });
+
+  test(label + ': contradictory successful Executor operation counts cannot pass', async t => {
+    const f = await fixture(t);
+    const result = await executeAndReview(f.args, { directory: f.dir }, {
+      invokeConductor: async json => successResponse(JSON.parse(json), {
+        execution: { success: true, operations_applied: 2 },
+      }),
+    });
+    assert.equal(result.status, 'BLOCKED');
+    assert.equal(result.reason, 'PROTOCOL_MISMATCH');
+  });
+
+  test(label + ': guarded Review rejects changed criteria and baseline before invocation', async t => {
+    const f = await fixture(t);
+    for (const changed of ['requirements', 'review']) {
+      const result = await executeAndReview(f.args, { directory: f.dir }, { invokeConductor: async json => {
+        const request = JSON.parse(json);
+        const guard = request.commands.at(-1);
+        const { args } = JSON.parse(guard.args[1]);
+        const reviewPath = args[args.indexOf('--request') + 1];
+        const review = JSON.parse(await readFile(reviewPath, 'utf8'));
+        if (changed === 'requirements') await writeFile(review.requirements, 'weakened');
+        else await writeFile(reviewPath, JSON.stringify({ ...review, base_ref: 'wrong baseline' }));
+        const { spawnSync } = await import('node:child_process');
+        const attempt = spawnSync(guard.program, guard.args, { cwd: f.dir, encoding: 'utf8' });
+        assert.equal(attempt.status, 125);
+        assert.match(attempt.stderr, /Retained tool input changed/);
+        return { code: 2, stdout: JSON.stringify({ schema: 'conductor.result/v2', status: 'BLOCKED',
+          phase: 'input', commands: [] }), stderr: '' };
+      } });
+      assert.equal(result.status, 'BLOCKED');
+    }
   });
 
   test(label + ': fails closed on incomplete/altered generic responses and legacy runner output', async t => {
@@ -153,7 +188,7 @@ export function contract(label, executeAndReview, pi = false) {
       assert.equal(timeout, 5400000);
       const request = JSON.parse(json);
       assert.deepEqual(request.commands[1], { name: 'scoped tests', program: 'tool', args: ['a b', '$(literal)', ';'] });
-      const review = request.commands.at(-1).args;
+      const review = JSON.parse(request.commands.at(-1).args[1]).args;
       for (const [flag, value] of [['--model', 'provider/model'], ['--wall-clock-budget-secs', '240'], ['--max-turns', '22'],
         ['--max-cost-usd', '2.5'], ['--max-tool-calls', '45'], ['--max-repeated-actions', '4'], ['--max-completion-attempts', '2']]) {
         assert.equal(review[review.indexOf(flag) + 1], value);

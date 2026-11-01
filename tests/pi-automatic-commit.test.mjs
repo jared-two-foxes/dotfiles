@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, chmod, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, chmod, rm, readdir, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeAndCheckpoint, finalizeVerifiedTask } from '../pi/agent/extensions/conductor/delivery.mjs';
@@ -107,11 +107,67 @@ test('successful review automatically completes the task and runs a verified com
   assert.equal(f.git('rev-list', '--count', f.base + '..HEAD'), '1');
   for (const change of [r => { r.producer = 'unverified'; },
     r => { r.deliveryRequest.commands.pop(); },
-    r => { r.result.conductor.runner.receipts[0].exit_code = 7; }]) {
+    r => { r.result.conductor.runner.receipts[0].exit_code = 7; },
+    r => {
+      r.result.conductor.expectedOperations = 2;
+      r.result.conductor.execution.operations_applied = 2;
+      r.result.conductor.toolOutputs.execution = JSON.stringify({
+        ...JSON.parse(r.result.conductor.toolOutputs.execution), operations_applied: 2,
+      });
+    }]) {
     const tampered = structuredClone(record); change(tampered);
     const reference = await retainEvidence(f.directory, tampered);
     await assert.rejects(authenticateTaskEvidence(f.directory, reference, f.args.task));
   }
+});
+
+test('invalid workflow preparation does not consume the first task attempt', integration, async t => {
+  const f = await fixture(t);
+  const invalid = await executeAndCheckpoint({ ...f.args, workflowTimeoutMs: 0 }, f.context, {
+    invokeConductor: () => assert.fail('invalid preparation must not invoke Conductor'),
+  });
+  assert.equal(invalid.status, 'BLOCKED');
+  const delivered = await executeAndCheckpoint(f.args, f.context, {
+    invokeConductor: body => f.finalCommand(body),
+  });
+  assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered));
+  assert.equal(delivered.evidence.attempt, 1);
+});
+
+test('preparation failure after STARTED retains terminal evidence for a correction', integration, async t => {
+  const f = await fixture(t);
+  const runs = path.join(f.directory, '.git', 'pi-conductor-runs');
+  await symlink(path.join(f.directory, '.git'), runs);
+  const blocked = await executeAndCheckpoint(f.args, f.context, {
+    invokeConductor: () => assert.fail('unsafe output directory must stop preparation'),
+  });
+  assert.equal(blocked.status, 'BLOCKED');
+  assert.equal(blocked.evidence?.attempt, 1);
+  const record = await readEvidence(f.directory, blocked.evidence.reference);
+  assert.equal(record.startedReference != null, true);
+  await rm(runs);
+  const corrected = await executeAndCheckpoint({ ...f.args, previousAttempt: blocked.evidence.reference }, f.context,
+    { invokeConductor: body => f.finalCommand(body) });
+  assert.equal(corrected.status, 'PASSED', JSON.stringify(corrected));
+  assert.equal(corrected.evidence.attempt, 2);
+});
+
+test('a check that changes retained review criteria or baseline prevents commit', integration, async t => {
+  for (const kind of ['requirements', 'review']) await t.test(kind, async t => {
+    const f = await fixture(t);
+    const mutation = kind === 'requirements'
+      ? 'fs.writeFileSync(path.join(root, "requirements.md"), "weakened")'
+      : 'fs.writeFileSync(path.join(root, "review.json"), JSON.stringify({...JSON.parse(fs.readFileSync(path.join(root, "review.json"))), base_ref:"wrong"}))';
+    f.args.checks = [{ name: 'tampering check', command: [process.execPath, '-e',
+      'const fs=require("fs"),path=require("path");' +
+      'const root=path.join(".git", "pi-conductor-runs", fs.readdirSync(path.join(".git", "pi-conductor-runs")).find(x=>x.startsWith("attempt-")));' +
+      mutation] }];
+    const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => f.finalCommand(body) });
+    assert.notEqual(result.stage, 'COMMITTED');
+    assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+    assert.equal((await f.call('list')).feature.tasks.F.status, 'in_progress');
+    assert.equal(await readFile(path.join(f.directory, '.git/trace'), 'utf8'), 'executor\n');
+  });
 });
 
 test('failed checks, rejected review and indeterminate review never run the commit stage', integration, async t => {

@@ -97,7 +97,7 @@ Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs test
 
 Pi supplies `input` (exact Executor JSON), `requirements`, `baseRef`, caller-selected
 `checks`, and optional review budgets to the **native tool**, not a handwritten
-Conductor request. The adapter prepares these underlying stage specifications (not a separate runner invocation):
+Conductor request. Conceptually the adapter prepares these stage specifications (not a separate runner invocation):
 
 ```json
 [
@@ -106,6 +106,13 @@ Conductor request. The adapter prepares these underlying stage specifications (n
   {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.git/pi-conductor-runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.git/pi-conductor-runs/attempt-unique/review-ledger.jsonl"]}
 ]
 ```
+
+The actual Executor and Review entries run through `input-guard.mjs` using Node.
+Their arguments bind SHA-256 identities of `executor.json`, `review.json`, and
+`requirements.md`. The guard checks the files immediately before and after the
+external tool runs and fails the command if any input changed. The stage receipt
+retains that exact guarded invocation, and authenticated task evidence verifies
+its input identities against the originally retained values.
 
 The paths illustrate a normal repository; linked worktrees use `git rev-parse
 --git-path` to resolve their metadata. `executor.json` contains the exact operations

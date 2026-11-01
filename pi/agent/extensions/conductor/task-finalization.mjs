@@ -8,12 +8,13 @@ import { assertLatestAttempt } from './task-chain.mjs';
 import { issueMutation, issueExecutionScope, issueDesignRequirements } from './issue-state.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
 import { git, assertNoGitOperation } from './git-tree.mjs';
+import path from 'node:path';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 
 export async function commitVerifiedTask(args, context = {}, options = {}) {
   try {
     await requireFeatureAuthorization(args, context, options);
-    const repository = git(context.directory, ['rev-parse', '--show-toplevel']);
+    const repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
     await assertNoGitOperation(repository);
     requireValue(typeof args.defaultBranch === 'string' && args.defaultBranch.trim() &&
       Array.isArray(args.protectedBranches) && args.protectedBranches.every(x => typeof x === 'string'), 'Known branch protection metadata required');

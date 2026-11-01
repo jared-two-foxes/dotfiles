@@ -5,7 +5,7 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 // The adapter authors the fixed Executor -> checks -> Review sequence; Conductor executes it.
 import { issueFeature, approvedIssue, issueDesignRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
 import { verificationChecks, sameVerification } from './verification.mjs';
-import { prepareWorkflow, decodeWorkflow } from './protocol.mjs';
+import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from './protocol.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
 import { readTaskHandoff, assertLatestAttempt, authenticateAttemptChain } from './task-chain.mjs';
@@ -159,7 +159,7 @@ async function executeAttempt(args, context = {}, options = {}) {
       JSON.stringify(request), args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     let conductor;
     try {
-      conductor = await decodeWorkflow(request, response);
+      conductor = await decodeWorkflow(request, response, workflow.inputs);
     } catch (error) {
       return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'PROTOCOL_MISMATCH',
         message: error.message, request, response });
@@ -188,6 +188,10 @@ export async function executeAndReview(args, context = {}, options = {}) {
     validateBinding(args.task);
     if (options.issueWorkflowOnly) await requireFeatureAuthorization(args, context, options);
     const checks = verificationChecks(args);
+    validateWorkflowPreparation(args);
+    if (args.workflowTimeoutMs != null && (!Number.isSafeInteger(args.workflowTimeoutMs) ||
+        args.workflowTimeoutMs <= 0 || args.workflowTimeoutMs > MAX_WORKFLOW_TIMEOUT_MS))
+      throw new Error('Invalid workflowTimeoutMs');
     repository = path.resolve(await git(path.resolve(context.worktree ?? context.directory ?? '.'),
       ['rev-parse', '--show-toplevel'], context.abort));
     const feature = await issueFeature(repository, args.task, options);
@@ -237,11 +241,21 @@ export async function executeAndReview(args, context = {}, options = {}) {
       ['rev-parse', '--git-path', 'pi-conductor-evidence'], context.abort), randomUUID() + '.boundary');
     const verificationBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
       JSON.stringify({ command: checks.at(-1).command, repository, output: boundaryPath })];
-    if (options.pipeline) return await executeAttempt(args, context, {
+    if (options.pipeline) {
+      let invoked = false;
+      const result = await executeAttempt(args, context, {
       verificationBoundary,
-      runWorkflow: workflow => options.pipeline({ repository, args, before, attempt, startedReference,
-        boundaryPath, workflow }),
-    });
+      runWorkflow: workflow => {
+        invoked = true;
+        return options.pipeline({ repository, args, before, attempt, startedReference, boundaryPath, workflow });
+      },
+      });
+      if (invoked) return result;
+      const after = await snapshot(repository);
+      const reference = await retainEvidence(repository, { repository, task: args.task, attempt, args,
+        before, after, startedReference, result });
+      return { ...result, evidence: { reference, task: args.task, attempt } };
+    }
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     let result = await executeAttempt(args, context, {
       verificationBoundary,

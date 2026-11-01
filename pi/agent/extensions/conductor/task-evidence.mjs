@@ -38,6 +38,7 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   requireValue(verifiedResult(record.result, record.args) && record.before?.head === record.args?.baseRef &&
     record.after?.head === record.before.head && sha(record.after?.tree) &&
     (modern ? record.workflow.inputs.review.base_ref === record.before.head &&
+      record.result.conductor?.expectedOperations === record.workflow.inputs.execution.operations.length &&
       equal(record.request, record.result.conductor?.request) &&
       equal(JSON.parse(record.response.stdout), record.result.conductor?.runner)
       : record.request?.review?.base_ref === record.before.head && record.request?.review?.requirements === record.args.requirements) &&

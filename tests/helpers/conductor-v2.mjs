@@ -9,7 +9,8 @@ import path from 'node:path';
 
 export async function requestView(request) {
   if (request.schema !== 'conductor.request/v2') return request;
-  const reviewCommand = request.commands.at(-1);
+  const underlying = command => command.args[0].endsWith('input-guard.mjs') ? JSON.parse(command.args[1]) : command;
+  const reviewCommand = underlying(request.commands.at(-1));
   const review = JSON.parse(await readFile(reviewCommand.args[reviewCommand.args.indexOf('--request') + 1], 'utf8'));
   const requirements = await readFile(review.requirements, 'utf8');
   const flag = name => reviewCommand.args[reviewCommand.args.indexOf(name) + 1];
@@ -20,7 +21,7 @@ export async function requestView(request) {
     if (reviewCommand.args.includes(option)) settings[name] = Number(flag(option));
   }
   return { schema: 'conductor.request/v1', repository_path: request.working_directory,
-    execution: JSON.parse(await readFile(request.commands[0].args[1], 'utf8')),
+    execution: JSON.parse(await readFile(underlying(request.commands[0]).args[1], 'utf8')),
     checks: request.commands.slice(1, -1), review: { requirements, base_ref: review.base_ref,
       model: flag('--model'), ...settings } };
 }

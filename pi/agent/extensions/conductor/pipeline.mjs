@@ -75,7 +75,8 @@ export async function commandResults(plan, rawRunner) {
     const review = await toolOutput(plan.workflow.request, observed, commands.at(-1));
     if (review !== undefined) toolOutputs.review = review;
   }
-  return normalizeWorkflow(plan.workflow.request, observed, toolOutputs, exit(status), 'pi.command-results/v1');
+  return normalizeWorkflow(plan.workflow.request, observed, toolOutputs, exit(status),
+    'pi.command-results/v1', plan.workflow.inputs.execution.operations.length);
 }
 
 async function existingProof(plan) {

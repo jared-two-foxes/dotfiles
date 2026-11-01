@@ -3,10 +3,25 @@
 // are independently installable and must not import each other's deployment.
 import { mkdir, mkdtemp, writeFile, readFile, lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual as equal } from 'node:util';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const exits = { PASSED: 0, FAILED: 1, BLOCKED: 2 };
+const digest = value => createHash('sha256').update(value).digest('hex');
+const guard = fileURLToPath(new URL('./input-guard.mjs', import.meta.url));
+function guarded(name, program, args, files) {
+  return { name, program: process.execPath, args: [guard, JSON.stringify({ program, args,
+    inputs: files.map(([file, contents]) => ({ file, sha256: digest(contents) })) })] };
+}
+
+export function validateWorkflowPreparation(args) {
+  reviewArguments(args, 'review.json', '.');
+  for (const program of [process.env.EXECUTOR_BIN ?? 'executor', process.env.REVIEW_CLI_BIN ?? 'review-cli'])
+    requireValue(typeof program === 'string' && program.trim() && !program.includes('\0'), 'Invalid tool executable');
+  requireValue(Array.isArray(JSON.parse(args.input).operations), 'Invalid Executor operations');
+}
 
 function reviewArguments(args, requestPath, directory) {
   const model = args.reviewModel ?? 'opencode/gpt-6.1-sol';
@@ -30,9 +45,7 @@ function reviewArguments(args, requestPath, directory) {
 }
 
 export async function prepareWorkflow(repository, root, args, checks) {
-  reviewArguments(args, 'review.json', root); // Validate before retaining inputs or executing anything.
-  for (const program of [process.env.EXECUTOR_BIN ?? 'executor', process.env.REVIEW_CLI_BIN ?? 'review-cli'])
-    requireValue(typeof program === 'string' && program.trim() && !program.includes('\0'), 'Invalid tool executable');
+  validateWorkflowPreparation(args);
   await mkdir(root, { recursive: true, mode: 0o700 });
   const stat = await lstat(root);
   requireValue(stat.isDirectory() && !stat.isSymbolicLink(), 'Unsafe Conductor runs directory');
@@ -48,10 +61,12 @@ export async function prepareWorkflow(repository, root, args, checks) {
   const request = {
     schema: 'conductor.request/v2', working_directory: repository, output_directory: directory,
     commands: [
-      { name: 'executor', program: process.env.EXECUTOR_BIN ?? 'executor', args: ['apply', path.join(directory, 'executor.json')] },
+      guarded('executor', process.env.EXECUTOR_BIN ?? 'executor', ['apply', path.join(directory, 'executor.json')],
+        [[path.join(directory, 'executor.json'), JSON.stringify(inputs.execution)]]),
       ...checks,
-      { name: 'review', program: process.env.REVIEW_CLI_BIN ?? 'review-cli',
-        args: reviewArguments(args, path.join(directory, 'review.json'), directory) },
+      guarded('review', process.env.REVIEW_CLI_BIN ?? 'review-cli',
+        reviewArguments(args, path.join(directory, 'review.json'), directory),
+        [[path.join(directory, 'review.json'), JSON.stringify(inputs.review)], [inputs.review.requirements, inputs.requirements]]),
     ],
   };
   return { request, inputs };
@@ -67,8 +82,16 @@ export function authenticateWorkflow(workflow, request, args, repository) {
     equal(workflow.inputs.review, { schema: 'review.request/v1', repository_path: repository,
       base_ref: args.baseRef, head_ref: ':working', requirements: path.join(directory, 'requirements.md') }), 'Retained tool input mismatch');
   const first = request.commands[0], last = request.commands.at(-1);
-  requireValue(first.name === 'executor' && equal(first.args, ['apply', path.join(directory, 'executor.json')]) &&
-    last.name === 'review' && equal(last.args, reviewArguments(args, path.join(directory, 'review.json'), directory)),
+  const executorProgram = JSON.parse(first.args[1]).program;
+  const reviewProgram = JSON.parse(last.args[1]).program;
+  requireValue([executorProgram, reviewProgram].every(program =>
+    typeof program === 'string' && program.trim() && !program.includes('\0')) &&
+    equal(first, guarded('executor', executorProgram, ['apply', path.join(directory, 'executor.json')],
+    [[path.join(directory, 'executor.json'), JSON.stringify(workflow.inputs.execution)]])) &&
+    equal(last, guarded('review', reviewProgram,
+      reviewArguments(args, path.join(directory, 'review.json'), directory),
+      [[path.join(directory, 'review.json'), JSON.stringify(workflow.inputs.review)], [workflow.inputs.review.requirements, workflow.inputs.requirements]])) &&
+    first.args[0] === guard && last.args[0] === guard,
   'Retained Executor/Review invocation mismatch');
   return request.commands.slice(1, -1);
 }
@@ -125,8 +148,9 @@ function reviewResult(value, code) {
 }
 
 // Pure reconstruction also authenticates the immutable normalized receipt later.
-export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSchema = 'conductor.result/v2') {
+export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSchema = 'conductor.result/v2', expectedOperations) {
   validateRunner(request, runner, code, expectedSchema);
+  requireValue(Number.isSafeInteger(expectedOperations) && expectedOperations >= 0, 'Missing retained operation count');
   if (expectedSchema === 'pi.command-results/v1') {
     requireValue(Array.isArray(runner.receipts) && runner.receipts.length === runner.commands.length, 'Missing command receipts');
     for (const [index, record] of runner.commands.entries()) {
@@ -144,7 +168,8 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
   if (results[0]?.exit_code != null) {
     execution = JSON.parse(toolOutputs.execution);
     requireValue(typeof execution?.success === 'boolean' && Number.isInteger(execution.operations_applied) &&
-      execution.operations_applied >= 0 && results[0].exit_code === (execution.success ? 0 : 1), 'Executor outcome/exit code mismatch');
+      execution.operations_applied >= 0 && results[0].exit_code === (execution.success ? 0 : 1) &&
+      (!execution.success || execution.operations_applied === expectedOperations), 'Executor outcome/exit code/count mismatch');
   }
   const checks = results.slice(1, request.commands.length - 1);
   if (results.length > 1) phase = 'verification';
@@ -160,7 +185,7 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
     else if (runner.status === 'FAILED') status = results.at(-1)?.exit_code == null ? 'BLOCKED' : 'NEEDS_DESIGN';
   }
   return { schema: 'pi.conductor-result/v1', status, phase, execution, checks, review,
-    request, runner, toolOutputs, ...(runner.error ? { error: runner.error } : {}) };
+    request, runner, toolOutputs, expectedOperations, ...(runner.error ? { error: runner.error } : {}) };
 }
 
 export async function toolOutput(request, runner, record) {
@@ -183,7 +208,7 @@ export async function toolOutput(request, runner, record) {
   return new TextDecoder('utf-8', { fatal: true }).decode(await readFile(file));
 }
 
-export async function decodeWorkflow(request, response) {
+export async function decodeWorkflow(request, response, inputs) {
   const runner = JSON.parse(response.stdout);
   validateRunner(request, runner, response.code);
   const toolOutputs = {};
@@ -193,14 +218,15 @@ export async function decodeWorkflow(request, response) {
     const review = await toolOutput(request, runner, runner.commands.at(-1));
     if (review !== undefined) toolOutputs.review = review;
   }
-  return normalizeWorkflow(request, runner, toolOutputs, response.code);
+  return normalizeWorkflow(request, runner, toolOutputs, response.code, 'conductor.result/v2', inputs.execution.operations.length);
 }
 
 export function authenticNormalized(conductor) {
   try {
     const schema = conductor.runner.schema;
     if (!['conductor.result/v2', 'pi.command-results/v1'].includes(schema)) return false;
-    return equal(conductor, normalizeWorkflow(conductor.request, conductor.runner, conductor.toolOutputs, exits[conductor.runner.status], schema));
+    return equal(conductor, normalizeWorkflow(conductor.request, conductor.runner, conductor.toolOutputs,
+      exits[conductor.runner.status], schema, conductor.expectedOperations));
   }
   catch { return false; }
 }

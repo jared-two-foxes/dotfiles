@@ -104,7 +104,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       }));
     const response = await invokeConductor(JSON.stringify(request));
     let conductor;
-    try { conductor = await decodeWorkflow(request, response); }
+    try { conductor = await decodeWorkflow(request, response, workflow.inputs); }
     catch (error) {
       return outcome('BLOCKED', 'CONDUCTOR', { repository, reason: 'PROTOCOL_MISMATCH',
         message: error.message, request, response });

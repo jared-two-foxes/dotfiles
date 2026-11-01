@@ -69,6 +69,8 @@ test('real command sequence preserves full output, review boundary and immutable
 test('independently installed Pi and OpenCode protocol helpers remain identical', async () => {
   assert.equal(await readFile(new URL('../pi/agent/extensions/conductor/protocol.mjs', import.meta.url), 'utf8'),
     await readFile(new URL('../opencode/scripts/conductor-protocol.mjs', import.meta.url), 'utf8'));
+  assert.equal(await readFile(new URL('../pi/agent/extensions/conductor/input-guard.mjs', import.meta.url), 'utf8'),
+    await readFile(new URL('../opencode/scripts/input-guard.mjs', import.meta.url), 'utf8'));
 });
 
 test('historical complete v1 receipts remain authentic after the adapter upgrade', async t => {

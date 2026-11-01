@@ -104,8 +104,9 @@ OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocati
 
 1. Verifies the original 40-character baseline SHA still matches HEAD.
 2. Passes the exact Design-authored JSON to `conductor run --request -` over stdin.
-   The v2 request names `executor apply <file>`, the selected checks, and
-   `review-cli run --request <file>`. Exact operations, original requirements and
+   The v2 request runs guarded `executor apply <file>`, the selected checks, and
+   guarded `review-cli run --request <file>`. The guards verify SHA-256 identities
+   of the exact input files before and after each tool invocation. Exact operations, original requirements and
    Review input files are retained under Git metadata outside the review diff.
 3. Runs the explicit build command, then the explicit test command, using
    executable/argument arrays (not shell command strings).
