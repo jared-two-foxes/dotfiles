@@ -114,7 +114,7 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   assert.match(native, /approveFeatureDirection/);
   assert.equal((native.match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
   assert.match(read('pi/agent/extensions/conductor/delivery.mjs'), /requireFeatureAuthorization/);
-  assert.match(read('pi/agent/extensions/conductor/commit-task.mjs'), /featureAuthorized/);
+  assert.match(read('pi/agent/extensions/conductor/task-finalization.mjs'), /featureAuthorized/);
   const adapter = read('pi/agent/extensions/conductor/adapter.mjs');
   assert.match(adapter, /options.issueWorkflowOnly\) await requireFeatureAuthorization/);
 });

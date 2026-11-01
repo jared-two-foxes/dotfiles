@@ -148,6 +148,7 @@ async function executeAttempt(args, context = {}, options = {}) {
     const root = path.resolve(repository, await git(repository, ['rev-parse', '--git-path', 'pi-conductor-runs'], context.abort));
     const workflow = await prepareWorkflow(repository, root, args, translatedChecks);
     options.onPrepared?.(workflow);
+    if (options.runWorkflow) return await options.runWorkflow(workflow);
     const { request } = workflow;
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     const invokeConductor = options.invokeConductor ??
@@ -236,6 +237,11 @@ export async function executeAndReview(args, context = {}, options = {}) {
       ['rev-parse', '--git-path', 'pi-conductor-evidence'], context.abort), randomUUID() + '.boundary');
     const verificationBoundary = [process.execPath, fileURLToPath(new URL('./test-boundary.mjs', import.meta.url)),
       JSON.stringify({ command: checks.at(-1).command, repository, output: boundaryPath })];
+    if (options.pipeline) return await executeAttempt(args, context, {
+      verificationBoundary,
+      runWorkflow: workflow => options.pipeline({ repository, args, before, attempt, startedReference,
+        boundaryPath, workflow }),
+    });
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';
     let result = await executeAttempt(args, context, {
       verificationBoundary,

@@ -73,8 +73,8 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   return request.commands.slice(1, -1);
 }
 
-export function validateRunner(request, runner, code) {
-  requireValue(runner?.schema === 'conductor.result/v2' && Object.hasOwn(exits, runner.status) &&
+export function validateRunner(request, runner, code, expectedSchema = 'conductor.result/v2') {
+  requireValue(runner?.schema === expectedSchema && Object.hasOwn(exits, runner.status) &&
     exits[runner.status] === code && Array.isArray(runner.commands), 'Conductor schema/status/exit code mismatch');
   const commands = runner.commands;
   requireValue(commands.length <= request.commands.length, 'Unexpected Conductor commands');
@@ -125,8 +125,20 @@ function reviewResult(value, code) {
 }
 
 // Pure reconstruction also authenticates the immutable normalized receipt later.
-export function normalizeWorkflow(request, runner, toolOutputs, code) {
-  validateRunner(request, runner, code);
+export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSchema = 'conductor.result/v2') {
+  validateRunner(request, runner, code, expectedSchema);
+  if (expectedSchema === 'pi.command-results/v1') {
+    requireValue(Array.isArray(runner.receipts) && runner.receipts.length === runner.commands.length, 'Missing command receipts');
+    for (const [index, record] of runner.commands.entries()) {
+      const receipt = runner.receipts[index];
+      if (!receipt) { requireValue(record.status === 'BLOCKED', 'Missing successful command receipt'); continue; }
+      requireValue(receipt.schema === 'pi.command-receipt/v1' && receipt.index === index &&
+        receipt.name === record.name && receipt.program === record.program && equal(receipt.args, record.args) &&
+        receipt.exit_code === record.exit_code &&
+        receipt.status === (receipt.error || receipt.signal || receipt.exit_code === null ? 'BLOCKED' : receipt.exit_code === 0 ? 'PASSED' : 'FAILED') &&
+        (record.status === 'BLOCKED' || receipt.status === record.status), 'Command receipt mismatch');
+    }
+  }
   const results = runner.commands;
   let execution = null, review = null, status = 'BLOCKED', phase = 'execution';
   if (results[0]?.exit_code != null) {
@@ -185,7 +197,11 @@ export async function decodeWorkflow(request, response) {
 }
 
 export function authenticNormalized(conductor) {
-  try { return equal(conductor, normalizeWorkflow(conductor.request, conductor.runner, conductor.toolOutputs, exits[conductor.runner.status])); }
+  try {
+    const schema = conductor.runner.schema;
+    if (!['conductor.result/v2', 'pi.command-results/v1'].includes(schema)) return false;
+    return equal(conductor, normalizeWorkflow(conductor.request, conductor.runner, conductor.toolOutputs, exits[conductor.runner.status], schema));
+  }
   catch { return false; }
 }
 

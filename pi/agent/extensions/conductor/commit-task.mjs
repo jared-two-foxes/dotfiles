@@ -1,55 +1,18 @@
-// Conductor's post-review Git commit command. It consumes an immutable successful
-// receipt; never applies source changes or reruns implementation/review.
+// Last command in the same Conductor request as Executor, checks and Review.
+// Seal their actual command receipts before completing/checkpointing the task.
 import { readFile } from 'node:fs/promises';
-import { authenticateTaskEvidence } from './task-evidence.mjs';
-import { requireFeatureAuthorization, featureAuthorized } from './feature-authorization.mjs';
-import { checkpointVerifiedTask } from './checkpoint.mjs';
-import { snapshot } from './evidence.mjs';
-import { assertLatestAttempt } from './task-chain.mjs';
-import { issueMutation, issueExecutionScope, issueDesignRequirements } from './issue-state.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
-import { git, assertNoGitOperation } from './git-tree.mjs';
-const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
-
-async function commitVerifiedTask(args, context = {}, options = {}) {
-  try {
-    await requireFeatureAuthorization(args, context, options);
-    const repository = git(context.directory, ['rev-parse', '--show-toplevel']);
-    await assertNoGitOperation(repository);
-    requireValue(typeof args.defaultBranch === 'string' && args.defaultBranch.trim() &&
-      Array.isArray(args.protectedBranches) && args.protectedBranches.every(x => typeof x === 'string'), 'Known branch protection metadata required');
-    requireValue(!['main', 'master', args.defaultBranch, ...args.protectedBranches].includes(args.branch), 'Protected branch checkpoint prohibited');
-    const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
-    await assertLatestAttempt(repository, args.evidenceRef, args.task, record.attempt);
-    const response = await scaffoldTasks({ operation: 'list', feature_id: args.task.featureId }, context, options.scaffoldOptions);
-    const feature = response.data?.feature, task = feature?.tasks?.[args.task.taskId];
-    requireValue(response.ok && feature.design_ref === args.task.designRef && feature.branch === args.branch &&
-      feature.original_baseline === args.featureBaseRef, 'Checkpoint feature scope changed');
-    requireValue(['in_progress', 'completed'].includes(task?.status), 'Task must be active or already completed with matching evidence');
-    requireValue(task.designs?.length === 1 && record.args.requirements.includes(issueDesignRequirements(task)),
-      'Issue design changed after review; previous evidence cannot finalize this design');
-    if (task.status === 'in_progress') {
-      const current = await snapshot(repository);
-      requireValue(current.head === record.args.baseRef && current.digest === record.after.digest &&
-        current.tree === record.after.tree && !current.bookkeepingVisible, 'Source changed after review; task not completed');
-      await issueExecutionScope(repository, feature, record.args);
-      await issueMutation(repository, args.task, 'complete', { feature_id: args.task.featureId,
-        task_id: args.task.taskId, result: 'PASSED', source: 'conductor', reference: args.evidenceRef,
-        summary: 'Requested checks and independent review passed; automatic verified checkpoint follows' }, options);
-    }
-    const checkpoint = await checkpointVerifiedTask({ ...args, authorizationMode: 'feature' }, context,
-      { ...options, authorize: () => featureAuthorized(args, context, options) });
-    requireValue(checkpoint.ok, checkpoint.message ?? 'Verified Git checkpoint failed');
-    return { schema: 'pi.task-finalization/v1', ok: true, checkpoint };
-  } catch (error) {
-    return { schema: 'pi.task-finalization/v1', ok: false, message: error.message,
-      recovery: 'Retry finalization with the same successful evidence; never reapply operations.' };
-  }
-}
-
+import { sealVerification } from './pipeline.mjs';
+import { commitVerifiedTask } from './task-finalization.mjs';
 let result;
 try {
-  const args = JSON.parse(await readFile(process.argv[2], 'utf8'));
+  const input = JSON.parse(await readFile(process.argv[2], 'utf8'));
+  let args = input;
+  if (input.schema === 'pi.delivery-plan/v1') {
+    const sealed = await sealVerification(input);
+    args = { ...input.args.checkpoint, task: input.args.task, evidenceRef: sealed.reference,
+      branch: input.feature.branch, featureBaseRef: input.feature.original_baseline,
+      reconciliationRef: input.args.reconciliationRef };
+  }
   result = await commitVerifiedTask(args, { directory: process.cwd() });
 } catch (error) { result = { schema: 'pi.task-finalization/v1', ok: false, message: error.message }; }
 console.log(JSON.stringify(result));

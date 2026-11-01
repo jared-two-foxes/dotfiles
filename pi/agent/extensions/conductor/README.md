@@ -97,19 +97,14 @@ Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs test
 
 Pi supplies `input` (exact Executor JSON), `requirements`, `baseRef`, caller-selected
 `checks`, and optional review budgets to the **native tool**, not a handwritten
-Conductor request. The adapter deterministically constructs:
+Conductor request. The adapter prepares these underlying stage specifications (not a separate runner invocation):
 
 ```json
-{
-  "schema": "conductor.request/v2",
-  "working_directory": "/repo",
-  "output_directory": "/repo/.git/pi-conductor-runs/attempt-unique",
-  "commands": [
-    {"name": "executor", "program": "executor", "args": ["apply", "/repo/.git/pi-conductor-runs/attempt-unique/executor.json"]},
-    {"name": "invoice tests", "program": "cargo", "args": ["test", "--lib", "invoices::"]},
-    {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.git/pi-conductor-runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.git/pi-conductor-runs/attempt-unique/review-ledger.jsonl"]}
-  ]
-}
+[
+  {"name": "executor", "program": "executor", "args": ["apply", "/repo/.git/pi-conductor-runs/attempt-unique/executor.json"]},
+  {"name": "invoice tests", "program": "cargo", "args": ["test", "--lib", "invoices::"]},
+  {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.git/pi-conductor-runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.git/pi-conductor-runs/attempt-unique/review-ledger.jsonl"]}
+]
 ```
 
 The paths illustrate a normal repository; linked worktrees use `git rev-parse
@@ -123,10 +118,9 @@ extra limits. These defaults are caller policy, not Conductor's old scaled budge
 
 For task-bound attempts the last selected check runs through `test-boundary.mjs`,
 which preserves that command's stdout/stderr and exit status and records the
-source/index snapshot immediately before Review. After successful verification,
-the adapter retains its completed immutable receipt and automatically runs a final
-Conductor request containing a verified Git commit command. The implementation
-request itself never changes HEAD, preserving the original reviewed baseline.
+source/index snapshot immediately before Review. The adapter wraps each stage to
+retain its actual exit status, then appends the verified Git commit command to
+**the same Conductor command list**. Normal delivery uses exactly one runner invocation.
 
 ### Automatic post-review commit
 
@@ -140,26 +134,47 @@ Use the actual default and all additional known protected branches. The feature'
 approved branch and original baseline come from Scaffold, not newly guessed values.
 Missing metadata or a protected target blocks before source application.
 
-The completed review receipt must exist before commit authentication. Therefore
-the adapter ends implementation verification first, then invokes Conductor once
-more with this final command (paths are illustrative):
+The final commit is part of the **original** `conductor.request/v2`, not a
+post-success callback or a second automatic request. An actual wire request looks
+like this (paths are illustrative):
 
 ```json
 {
-  "name": "git commit verified task",
-  "program": "/path/to/node",
-  "args": ["/path/to/extension/commit-task.mjs", "/repo/.git/pi-conductor-finalization/attempt-unique/checkpoint.json"]
+  "schema": "conductor.request/v2",
+  "working_directory": "/repo",
+  "output_directory": "/repo/.git/pi-conductor-runs/attempt-unique",
+  "commands": [
+    {"name": "executor", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/0.stage.json"]},
+    {"name": "invoice tests", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/1.stage.json"]},
+    {"name": "review", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/2.stage.json"]},
+    {"name": "git commit verified task", "program": "/path/to/node", "args": ["/extension/commit-task.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/delivery.json"]}
+  ]
 }
 ```
 
-That command reauthenticates the retained feature authority, exact task evidence,
-latest attempt, current source/index and branch lineage. It records matching
-Scaffold completion if needed, then invokes the existing checkpoint implementation
-to create a Git commit of the **exact reviewed tree** with its evidence trailer.
-It uses Git's private-index/commit-tree/update-ref mechanism rather than indiscriminate
-staging, hooks or source rewriting. Both the implementation and commit stages are
-deterministic; Pi makes no additional decision or confirmation between them. The
-overall workflow deadline covers both stages.
+Each stage descriptor contains the exact underlying executable/argv above.
+`command-stage.mjs` runs that program with inherited stdout/stderr and retains its
+actual process status before returning the same success/failure to Conductor.
+Conductor alone advances through the list, so an earlier failure skips commit.
+The final command additionally parses complete Executor/Review JSON and checks the
+pre-review source/index boundary before any task completion or Git commit.
+
+The enclosing runner has not returned when commit starts. Therefore the final
+command seals a caller-owned `pi.command-results/v1` verification prefix from the
+actual `pi.command-receipt/v1` records; it never fabricates a completed Conductor
+response. The content-addressed task receipt marks its producer as
+`pi.command-receipts/v1`, retains exact stage/input identities and the full delivery
+request, and authenticates the reviewed source/baseline. The actual complete v2
+runner response is retained separately in the attempt's `response.json` after the
+one invocation finishes. Historical direct v2/v1 task receipts remain readable.
+
+The final command reauthenticates retained feature authority, latest task evidence,
+current issue design and checkpoint lineage, records matching Scaffold completion,
+then uses the existing private-index/commit-tree/update-ref checkpoint logic to
+commit the exact reviewed tree. No model decision, extra confirmation, indiscriminate
+staging or hooks occur between review and commit. The workflow deadline applies
+to the single list. A commit-only Conductor request is used **only for explicit
+recovery** with `checkpoint_verified_task`, never for normal automatic delivery.
 
 On success the native result has `stage: COMMITTED`, checkpoint provenance and
 `nextBaseRef` for the next issue. Completion/checkpoint state is already recorded;
@@ -170,6 +185,12 @@ Do not replay source operations. Recover using `checkpoint_verified_task` and th
 same receipt/scope; it resumes completion or commits as needed, including recovery
 of a commit whose response was lost. Successful implementation receipts remain
 immutable and continue to describe the pre-commit reviewed baseline.
+
+Sealing and terminal failure recording share an exclusive per-attempt claim. If
+an interrupted command still owns that claim, the result is BLOCKED with
+`TERMINAL_RECEIPT_PENDING`; no competing success/failure receipt is invented.
+Inspect the latest evidence and Git state before recovery. A STARTED receipt
+never authorizes a commit or replaying the list.
 
 The lower-level `executeAndReview` library still performs verification only for
 existing integrations/tests. Automatic completion/commit is the native Pi delivery
@@ -194,9 +215,11 @@ native tool result; this is a caller-owned domain view, not a Conductor wire sch
 | Review completes CHANGES_REQUESTED/exit 1 with blocking findings | NEEDS_DESIGN |
 | Review INDETERMINATE/exit 3, setup/provider errors, signals, runner/protocol errors | BLOCKED |
 
-The normalized view retains the raw v2 request/result and complete parsed tool
-output. Content-addressed task receipts retain that view plus the exact request
-file contents, original args, raw process response and source boundary. Checkpoint
+The normalized verification view retains effective Executor/check/Review specifications,
+complete parsed tool output and authenticated process receipts. Content-addressed
+task receipts retain that prefix plus exact request-file contents, original args,
+source boundary and the full single-list delivery request. The enclosing raw
+Conductor request/response stays available in the attempt directory. Checkpoint
 authentication reconstructs and cross-checks it without depending on mutable log
 files still being present. Historical successful v1 receipts remain readable;
 active calls never accept a v1 runner as a successful new attempt.

@@ -4,6 +4,7 @@ import { authenticateAttemptChain } from './task-chain.mjs';
 import { readEvidence, verifiedResult } from './evidence.mjs';
 import { authenticateWorkflow } from './protocol.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
+import path from 'node:path';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -14,6 +15,16 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   // Authenticate the retained request against the caller's full plan. The final
   // command is transparently wrapped to capture the source/index review boundary.
   const modern = record.request?.schema === 'conductor.request/v2';
+  if (record.result.conductor?.runner?.schema === 'pi.command-results/v1') {
+    const delivery = record.deliveryRequest, prefix = record.request;
+    requireValue(record.producer === 'pi.command-receipts/v1' && delivery?.schema === 'conductor.request/v2' &&
+      delivery.working_directory === repository && delivery.output_directory === prefix.output_directory &&
+      delivery.commands.length === prefix.commands.length + 1 &&
+      delivery.commands.slice(0, -1).every((c, i) => c.name === prefix.commands[i].name &&
+        path.basename(c.args[0]) === 'command-stage.mjs' && c.args[1] === path.join(prefix.output_directory, `${i}.stage.json`)) &&
+      path.basename(delivery.commands.at(-1).args[0]) === 'commit-task.mjs' &&
+      delivery.commands.at(-1).args[1] === path.join(prefix.output_directory, 'delivery.json'), 'Missing authenticated single-list delivery context');
+  }
   const requestChecks = modern
     ? authenticateWorkflow(record.workflow, record.request, record.args, repository)
     : record.request?.checks;

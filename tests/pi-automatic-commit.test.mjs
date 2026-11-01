@@ -10,7 +10,8 @@ import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
 import { issueDesignRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
-import { readEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
+import { readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
+import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
 
@@ -36,7 +37,7 @@ async function fixture(t) {
     'sys.path.insert(0, ' +
     JSON.stringify(path.join(process.env.SCAFFOLD_SOURCE, 'src')) + ')\nfrom scaffold_cli.cli import main\nmain()\n');
   await chmod(path.join(bin, 'scaffold'), 0o755);
-  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'EXPECTED_REVIEW_REQUIREMENTS'].map(k => [k, process.env[k]]));
+  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'EXPECTED_REVIEW_REQUIREMENTS', 'REVIEW_FIXTURE_LOCK', 'REVIEW_FIXTURE_DRIFT', 'REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER', 'REVIEW_FIXTURE_TERMINAL_LOCK'].map(k => [k, process.env[k]]));
   Object.assign(process.env, { PATH: bin + path.delimiter + process.env.PATH,
     CONDUCTOR_BIN: process.env.CONDUCTOR_TEST_BIN ?? path.join(bin, 'conductor'),
     EXECUTOR_BIN: path.join(bin, 'executor'), REVIEW_CLI_BIN: path.join(bin, 'review-cli'), REVIEW_FIXTURE_STATUS: 'APPROVED' });
@@ -73,7 +74,9 @@ async function fixture(t) {
 
 test('successful review automatically completes the task and runs a verified commit command', integration, async t => {
   const f = await fixture(t);
-  const result = await executeAndCheckpoint(f.args, f.context);
+  let calls = 0;
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => { calls++; return f.finalCommand(body); } });
+  assert.equal(calls, 1, 'all stages including Git commit must use ONE Conductor call');
   assert.equal(result.status, 'PASSED', JSON.stringify(result));
   assert.equal(result.stage, 'COMMITTED');
   assert.equal(result.implementationStatus, 'PASSED');
@@ -86,8 +89,11 @@ test('successful review automatically completes the task and runs a verified com
   assert.equal(record.after.head, f.base); assert.equal(record.result.status, 'PASSED');
   assert.equal(f.git('rev-parse', 'HEAD^{tree}'), record.after.tree);
   const request = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'request.json'), 'utf8'));
-  assert.equal(request.commands[0].name, 'git commit verified task');
-  assert.match(request.commands[0].args[0], /commit-task\.mjs$/);
+  assert.deepEqual(request.commands.map(c => c.name), ['executor', 'targeted regression', 'review', 'git commit verified task']);
+  assert.match(request.commands.at(-1).args[0], /commit-task\.mjs$/);
+  const full = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'response.json'), 'utf8'));
+  assert.equal(JSON.parse(full.stdout).commands.at(-1).name, 'git commit verified task');
+  assert.equal(record.response && JSON.parse(record.response.stdout).schema, 'pi.command-results/v1');
   assert.match(f.git('show', '-s', '--format=%B'), /Pi-Task-Checkpoint:/);
   assert.equal(f.confirmations(), 1);
   // Automatic task commits still feed the mandatory cumulative feature gate.
@@ -99,6 +105,13 @@ test('successful review automatically completes the task and runs a verified com
   const validation = await validateFeature(featureArgs, f.context, { authorize: () => featureAuthorized(featureArgs, f.context) });
   assert.equal(validation.status, 'PASSED', JSON.stringify(validation));
   assert.equal(f.git('rev-list', '--count', f.base + '..HEAD'), '1');
+  for (const change of [r => { r.producer = 'unverified'; },
+    r => { r.deliveryRequest.commands.pop(); },
+    r => { r.result.conductor.runner.receipts[0].exit_code = 7; }]) {
+    const tampered = structuredClone(record); change(tampered);
+    const reference = await retainEvidence(f.directory, tampered);
+    await assert.rejects(authenticateTaskEvidence(f.directory, reference, f.args.task));
+  }
 });
 
 test('failed checks, rejected review and indeterminate review never run the commit stage', integration, async t => {
@@ -110,21 +123,25 @@ test('failed checks, rejected review and indeterminate review never run the comm
     assert.equal(result.status, mode === 'INDETERMINATE' ? 'BLOCKED' : 'NEEDS_DESIGN', JSON.stringify(result));
     assert.equal(f.git('rev-parse', 'HEAD'), f.base);
     assert.equal((await f.call('list')).feature.tasks.F.status, 'in_progress');
-    await assert.rejects(readdir(path.join(f.directory, '.git/pi-conductor-finalization')), { code: 'ENOENT' });
+    const record = await readEvidence(f.directory, result.evidence.reference);
+    const actualRunner = JSON.parse(record.response.stdout);
+    assert.equal(actualRunner.commands.some(c => c.name === 'git commit verified task'), false);
+    assert.equal(record.deliveryRequest.commands.at(-1).name, 'git commit verified task');
   });
 });
 
 test('commit failure keeps successful evidence and retries without reapplying or reviewing', integration, async t => {
   const f = await fixture(t);
   const lock = path.join(f.directory, '.git/index.lock');
-  const result = await executeAndCheckpoint(f.args, f.context, { invokeFinalization: async body => {
-    await writeFile(lock, 'existing lock'); return f.finalCommand(body);
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: async body => {
+    process.env.REVIEW_FIXTURE_LOCK = '1'; return f.finalCommand(body);
   } });
   assert.equal(result.status, 'BLOCKED', JSON.stringify(result));
   assert.equal(result.implementationStatus, 'PASSED');
   assert.equal(f.git('rev-parse', 'HEAD'), f.base);
   assert.equal((await f.call('list')).feature.tasks.F.status, 'completed');
   await rm(lock);
+  delete process.env.REVIEW_FIXTURE_LOCK;
   const recovered = await finalizeVerifiedTask(f.finalizeArgs(result), f.context);
   assert.equal(recovered.ok, true, JSON.stringify(recovered));
   assert.equal(f.git('rev-list', '--count', f.base + '..HEAD'), '1');
@@ -133,7 +150,7 @@ test('commit failure keeps successful evidence and retries without reapplying or
 
 test('lost commit response recovers the same commit without duplicates', integration, async t => {
   const f = await fixture(t);
-  const result = await executeAndCheckpoint(f.args, f.context, { invokeFinalization: async body => {
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: async body => {
     await f.finalCommand(body); throw new Error('Lost commit response');
   } });
   assert.equal(result.status, 'BLOCKED'); assert.equal(result.implementationStatus, 'PASSED');
@@ -148,7 +165,7 @@ test('failed completion recording can resume finalization without reapplying', i
   const f = await fixture(t);
   const previous = process.env.FAIL_SCAFFOLD_COMPLETE;
   t.after(() => { if (previous === undefined) delete process.env.FAIL_SCAFFOLD_COMPLETE; else process.env.FAIL_SCAFFOLD_COMPLETE = previous; });
-  const result = await executeAndCheckpoint(f.args, f.context, { invokeFinalization: async body => {
+  const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: async body => {
     process.env.FAIL_SCAFFOLD_COMPLETE = '1'; return f.finalCommand(body);
   } });
   assert.equal(result.status, 'BLOCKED'); assert.equal(result.implementationStatus, 'PASSED');
@@ -168,10 +185,36 @@ test('source drift before commit and missing/protected checkpoint context fail c
     assert.equal(result.status, 'BLOCKED');
     await assert.rejects(readFile(path.join(f.directory, '.git/trace')), { code: 'ENOENT' });
   }
-  const drift = await executeAndCheckpoint(f.args, f.context, { invokeFinalization: async body => {
-    await writeFile(path.join(f.directory, 'source.txt'), 'unreviewed drift'); return f.finalCommand(body);
+  const drift = await executeAndCheckpoint(f.args, f.context, { invokeConductor: async body => {
+    process.env.REVIEW_FIXTURE_DRIFT = '1'; return f.finalCommand(body);
   } });
   assert.equal(drift.status, 'BLOCKED', JSON.stringify(drift));
   assert.equal(f.git('rev-parse', 'HEAD'), f.base);
   assert.equal((await f.call('list')).feature.tasks.F.status, 'in_progress');
+});
+
+// The final command may be reached after an exit-0 Review, but must still reject
+// malformed JSON or tampered command receipts before any Git commit/state change.
+test('single-list commit gate rejects malformed Review output and tampered process receipts', integration, async t => {
+  for (const mode of ['REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER']) await t.test(mode, async t => {
+    const f = await fixture(t); process.env[mode] = '1';
+    const result = await executeAndCheckpoint(f.args, f.context);
+    assert.equal(result.status, 'BLOCKED', JSON.stringify(result));
+    assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+    assert.equal((await f.call('list')).feature.tasks.F.status, 'in_progress');
+  });
+});
+
+test('an existing terminal receipt claim blocks commit without competing success/failure records', integration, async t => {
+  const f = await fixture(t); process.env.REVIEW_FIXTURE_TERMINAL_LOCK = '1';
+  const result = await executeAndCheckpoint(f.args, f.context);
+  assert.equal(result.status, 'BLOCKED', JSON.stringify(result));
+  assert.equal(result.reason, 'TERMINAL_RECEIPT_PENDING');
+  assert.equal(result.implementationStatus, undefined);
+  assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+  assert.equal((await f.call('list')).feature.tasks.F.status, 'in_progress');
+  const record = await readEvidence(f.directory, result.evidence.reference);
+  assert.equal(record.result.stage, 'STARTED');
+  const records = (await readdir(path.join(f.directory, '.git/pi-conductor-evidence'))).filter(x => /^[a-f0-9]{64}\.json$/.test(x));
+  assert.equal(records.length, 1);
 });

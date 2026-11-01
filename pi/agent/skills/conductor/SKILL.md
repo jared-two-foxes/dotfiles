@@ -34,8 +34,11 @@ model and budget overrides become CLI flags; defaults are 180 seconds and 20 tur
 The final task check captures the source/index boundary before independent review.
 Supply `checkpoint: {defaultBranch, protectedBranches}` using the known repository
 default branch and all additional protected branches (or []). After a completed
-APPROVED review, the native adapter retains successful evidence and automatically
-runs a final Conductor Git commit command. It records Scaffold completion and
+APPROVED review, the final command in the SAME Conductor list seals verification
+evidence and creates the Git checkpoint. Normal delivery uses one runner call;
+there is no second automatic commit request. Stage wrappers retain actual process
+exit results so the final command can authenticate review before the runner returns.
+It records Scaffold completion and
 commits only the exact reviewed tree, using the existing verified checkpoint logic.
 
 Conductor's generic FAILED is interpreted by the adapter. A failed application or

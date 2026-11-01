@@ -1,5 +1,5 @@
-// Native Pi delivery: persist verification first, then run the verified Git
-// checkpoint command through Conductor. No additional model decision or approval.
+// Native Pi delivery: Executor, checks, Review and verified Git commit in ONE
+// Conductor command list. Recovery may invoke a commit-only list.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
@@ -10,6 +10,7 @@ import { scaffoldTasks } from '../scaffold/adapter.mjs';
 import { validateRunner, toolOutput } from './protocol.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { snapshot } from './evidence.mjs';
+import { runPipeline } from './pipeline.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = value => /^[a-f0-9]{40}$/.test(value ?? '');
 
@@ -70,7 +71,6 @@ export async function finalizeVerifiedTask(args, context = {}, options = {}) {
 }
 
 export async function executeAndCheckpoint(args, context = {}, options = {}) {
-  const started = performance.now();
   try {
     validateCheckpoint(args?.checkpoint);
     requireValue(Object.keys(args.checkpoint).every(k => ['defaultBranch', 'protectedBranches'].includes(k)), 'Unexpected checkpoint metadata');
@@ -80,19 +80,9 @@ export async function executeAndCheckpoint(args, context = {}, options = {}) {
     const feature = response.data.feature;
     requireValue(!['main', 'master', args.checkpoint.defaultBranch, ...args.checkpoint.protectedBranches].includes(feature.branch),
       'Automatic commit on a protected branch prohibited');
-    const implementation = await executeAndReview(args, context, { ...options, issueWorkflowOnly: true });
-    if (implementation.status !== 'PASSED') return implementation;
-    const remaining = (args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS) - (performance.now() - started);
-    const checkpoint = remaining > 0
-      ? await finalizeVerifiedTask({ ...args.checkpoint, task: args.task, evidenceRef: implementation.evidence.reference,
-        branch: feature.branch, featureBaseRef: feature.original_baseline,
-        reconciliationRef: args.reconciliationRef }, context,
-      { ...options, timeoutMs: Math.max(1, Math.floor(remaining)) })
-      : { ok: false, reason: 'FINALIZATION_BLOCKED', message: 'Workflow deadline reached before commit',
-        recovery: 'Retry checkpoint_verified_task using the successful implementation receipt; do not reapply operations.' };
-    return { ...implementation, status: checkpoint.ok ? 'PASSED' : 'BLOCKED', stage: checkpoint.ok ? 'COMMITTED' : 'CHECKPOINT',
-      implementationStatus: 'PASSED', checkpoint,
-      ...(checkpoint.ok ? { nextBaseRef: checkpoint.nextBaseRef } : { reason: checkpoint.reason, message: checkpoint.message }) };
+    return await executeAndReview(args, context, { ...options, issueWorkflowOnly: true,
+      pipeline: meta => runPipeline(meta, feature, context, options),
+    });
   } catch (error) {
     return { schema: 'opencode.execute_and_review.result/v1', status: 'BLOCKED', stage: 'PRECHECK', reason: 'AUTOMATIC_CHECKPOINT_CONTEXT', message: error.message };
   }

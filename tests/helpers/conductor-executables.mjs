@@ -45,7 +45,15 @@ if (request.schema !== 'review.request/v1' || (request.head_ref !== ':working' &
   (process.env.EXPECTED_REVIEW_REQUIREMENTS !== '*' && fs.readFileSync(request.requirements, 'utf8') !==
     (process.env.EXPECTED_REVIEW_REQUIREMENTS ?? 'Complete immutable review requirements'))) throw Error('review contract');
 fs.appendFileSync('.git/trace', 'review\\n');
+if (process.env.REVIEW_FIXTURE_TERMINAL_LOCK) fs.writeFileSync(value('--request').slice(0, -'review.json'.length) + 'terminal.lock', 'owned claim');
+if (process.env.REVIEW_FIXTURE_LOCK) fs.writeFileSync('.git/index.lock', 'existing lock');
+if (process.env.REVIEW_FIXTURE_DRIFT) fs.writeFileSync('source.txt', 'unreviewed drift');
 const status = process.env.REVIEW_FIXTURE_STATUS;
+if (process.env.REVIEW_FIXTURE_MALFORMED) { console.log('{invalid JSON'); process.exit(0); }
+if (process.env.REVIEW_FIXTURE_TAMPER) {
+  const file = value('--request').slice(0, -'review.json'.length) + '0.receipt.json';
+  const receipt = JSON.parse(fs.readFileSync(file, 'utf8')); receipt.program = 'unverified-command'; fs.writeFileSync(file, JSON.stringify(receipt));
+}
 console.log(JSON.stringify({ schema: 'review.result/v1', status, review_id: 'external-review',
   reason: status === 'INDETERMINATE' ? 'BUDGET_EXHAUSTED' : 'REVIEW_COMPLETED', completed_at: '2026-11-01T00:00:00Z',
   findings: status === 'CHANGES_REQUESTED' ? [{ severity: 'high', blocking: true, message: 'Correct the edge case' }] : [],
