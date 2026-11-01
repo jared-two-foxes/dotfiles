@@ -18,13 +18,15 @@ export function verificationChecks(args) {
     const names = new Set();
     return args.checks.map(check => {
       if (!check || typeof check !== 'object' || Array.isArray(check) ||
-          Object.keys(check).some(key => !['name', 'command'].includes(key)) ||
+          Object.keys(check).some(key => !['name', 'command', 'successCondition'].includes(key)) ||
           typeof check.name !== 'string' || !check.name.trim() || check.name.length > 256 ||
           check.name.includes('\0') || check.name !== check.name.trim() || names.has(check.name)) {
         throw new Error('Each check requires a unique nonblank name and a command (no other fields)');
       }
       names.add(check.name);
-      return { name: check.name, command: command(check.command, 'checks.' + check.name + '.command') };
+      return { name: check.name, command: command(check.command, 'checks.' + check.name + '.command'),
+        ...(check.successCondition === undefined ? {} : { successCondition: command(check.successCondition,
+          'checks.' + check.name + '.successCondition') }) };
     });
   }
   return [

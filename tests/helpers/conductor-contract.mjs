@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { successResponse, domainResponse } from './conductor-v2.mjs';
 
@@ -34,6 +35,7 @@ export function contract(label, executeAndReview, pi = false) {
       assert.deepEqual(request.commands[2], { name: 'test', program: 'cargo', args: ['test', '--lib', 'invoices::'] });
       const review = JSON.parse(request.commands.at(-1).args[1]);
       assert.equal(review.program, 'review-cli');
+      assert.match(request.commands.at(-1).success_condition.args[0], /review-condition\.mjs$/);
       const reviewInput = JSON.parse(await readFile(review.args[2], 'utf8'));
       assert.deepEqual({ ...reviewInput, requirements: await readFile(reviewInput.requirements, 'utf8') }, {
         schema: 'review.request/v1', repository_path: f.dir, base_ref: f.args.baseRef,
@@ -47,6 +49,34 @@ export function contract(label, executeAndReview, pi = false) {
     assert.equal(result.status, 'PASSED', JSON.stringify(result));
     assert.equal(result.conductor.schema, 'pi.conductor-result/v1');
     assert.equal(result.conductor.runner.schema, 'conductor.result/v2');
+  });
+
+  if (!pi) test('OpenCode: build and test can carry caller-owned success conditions', async t => {
+    const f = await fixture(t);
+    const args = { ...f.args, buildSuccessCondition: ['rg', '-q', 'build finished'],
+      testSuccessCondition: ['rg', '-q', 'test result: ok'] };
+    const result = await executeAndReview(args, { directory: f.dir }, { invokeConductor: async json => {
+      const request = JSON.parse(json);
+      assert.deepEqual(request.commands[1].success_condition, { program: 'rg', args: ['-q', 'build finished'] });
+      assert.deepEqual(request.commands[2].success_condition, { program: 'rg', args: ['-q', 'test result: ok'] });
+      return successResponse(request);
+    } });
+    assert.equal(result.status, 'PASSED', JSON.stringify(result));
+  });
+
+  if (!pi) test('OpenCode: structured Review condition runs from its independent installation', async t => {
+    const f = await fixture(t);
+    const file = path.join(f.dir, '.git', 'review-output.json');
+    const script = new URL('../../opencode/scripts/review-condition.mjs', import.meta.url);
+    const { spawnSync } = await import('node:child_process');
+    for (const [status, code] of [['APPROVED', 0], ['CHANGES_REQUESTED', 1]]) {
+      await writeFile(file, JSON.stringify({ schema: 'review.result/v1', status, reason: 'REVIEW_COMPLETED',
+        review_id: 'test', completed_at: '2026-11-01T00:00:00Z', findings: status === 'APPROVED' ? [] :
+          [{ severity: 'high', blocking: true, message: 'fix' }] }));
+      const result = spawnSync(process.execPath, [fileURLToPath(script)], { cwd: f.dir,
+        env: { ...process.env, CONDUCTOR_COMMAND_EXIT_CODE: String(code), CONDUCTOR_COMMAND_STDOUT_PATH: file }, encoding: 'utf8' });
+      assert.equal(result.status, status === 'APPROVED' ? 0 : 1, result.stderr);
+    }
   });
 
   test(label + ': translates execution/check/review failures and indeterminate reviews without retry', async t => {

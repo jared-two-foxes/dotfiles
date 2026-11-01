@@ -25,6 +25,10 @@ verification through validate_feature after checkpoints; corrective issues use
 targeted checks before rerunning that final gate. Keep ordered checks fixed across
 corrections. The buildCommand/testCommand pair remains an alternative input shape,
 not a requirement to run the entire suite for each issue.
+Named checks may include `successCondition: [program, ...args]` for a known
+tool-specific output contract. Conductor passes the original exit code and
+complete stdout/stderr paths through `CONDUCTOR_COMMAND_*` environment variables.
+Use the default exit-code rule for ordinary Cargo compile/test commands.
 The native adapter constructs Conductor v2's ordered command list: `executor apply`
 with the exact operations file, your selected checks, then `review-cli run --request`
 with the fixed baseline and complete requirements file. Supply operations, checks
@@ -32,6 +36,8 @@ and review settings to execute_and_review; do not construct shell strings or cal
 those binaries yourself. All three binaries must be installed separately. Review
 model and budget overrides become CLI flags; defaults are 180 seconds and 20 turns.
 The final task check captures the source/index boundary before independent review.
+Review has a built-in structured condition requiring complete APPROVED output;
+its verdict is checked before the in-list commit can run.
 Supply `checkpoint: {defaultBranch, protectedBranches}` using the known repository
 default branch and all additional protected branches (or []). After a completed
 APPROVED review, the final command in the SAME Conductor list seals verification

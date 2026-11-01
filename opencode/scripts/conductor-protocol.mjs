@@ -11,6 +11,7 @@ const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const exits = { PASSED: 0, FAILED: 1, BLOCKED: 2 };
 const digest = value => createHash('sha256').update(value).digest('hex');
 const guard = fileURLToPath(new URL('./input-guard.mjs', import.meta.url));
+const reviewCondition = { program: process.execPath, args: [fileURLToPath(new URL('./review-condition.mjs', import.meta.url))] };
 function guarded(name, program, args, files) {
   return { name, program: process.execPath, args: [guard, JSON.stringify({ program, args,
     inputs: files.map(([file, contents]) => ({ file, sha256: digest(contents) })) })] };
@@ -64,9 +65,10 @@ export async function prepareWorkflow(repository, root, args, checks) {
       guarded('executor', process.env.EXECUTOR_BIN ?? 'executor', ['apply', path.join(directory, 'executor.json')],
         [[path.join(directory, 'executor.json'), JSON.stringify(inputs.execution)]]),
       ...checks,
-      guarded('review', process.env.REVIEW_CLI_BIN ?? 'review-cli',
+      { ...guarded('review', process.env.REVIEW_CLI_BIN ?? 'review-cli',
         reviewArguments(args, path.join(directory, 'review.json'), directory),
         [[path.join(directory, 'review.json'), JSON.stringify(inputs.review)], [inputs.review.requirements, inputs.requirements]]),
+        success_condition: reviewCondition },
     ],
   };
   return { request, inputs };
@@ -84,13 +86,15 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   const first = request.commands[0], last = request.commands.at(-1);
   const executorProgram = JSON.parse(first.args[1]).program;
   const reviewProgram = JSON.parse(last.args[1]).program;
+  const reviewInvocation = guarded('review', reviewProgram,
+    reviewArguments(args, path.join(directory, 'review.json'), directory),
+    [[path.join(directory, 'review.json'), JSON.stringify(workflow.inputs.review)], [workflow.inputs.review.requirements, workflow.inputs.requirements]]);
   requireValue([executorProgram, reviewProgram].every(program =>
     typeof program === 'string' && program.trim() && !program.includes('\0')) &&
     equal(first, guarded('executor', executorProgram, ['apply', path.join(directory, 'executor.json')],
     [[path.join(directory, 'executor.json'), JSON.stringify(workflow.inputs.execution)]])) &&
-    equal(last, guarded('review', reviewProgram,
-      reviewArguments(args, path.join(directory, 'review.json'), directory),
-      [[path.join(directory, 'review.json'), JSON.stringify(workflow.inputs.review)], [workflow.inputs.review.requirements, workflow.inputs.requirements]])) &&
+    (equal(last, { ...reviewInvocation, success_condition: reviewCondition }) ||
+      equal(last, reviewInvocation)) && // Historical complete v2 receipts predate semantic Review conditions.
     first.args[0] === guard && last.args[0] === guard,
   'Retained Executor/Review invocation mismatch');
   return request.commands.slice(1, -1);
@@ -108,8 +112,17 @@ export function validateRunner(request, runner, code, expectedSchema = 'conducto
       typeof result.stdout === 'string' && typeof result.stderr === 'string' &&
       typeof result.stdout_truncated === 'boolean' && typeof result.stderr_truncated === 'boolean',
     'Conductor command identity/output mismatch');
+    if (expected.success_condition) {
+      const c = result.condition;
+      requireValue((result.exit_code === null && c === undefined && result.status !== 'PASSED') ||
+        (c?.program === expected.success_condition.program && equal(c.args, expected.success_condition.args) &&
+        c.status === result.status && typeof c.stdout === 'string' && typeof c.stderr === 'string' &&
+        typeof c.stdout_truncated === 'boolean' && typeof c.stderr_truncated === 'boolean' &&
+        (c.status === 'PASSED' ? c.exit_code === 0 : c.status === 'FAILED' ? c.exit_code !== 0 : true)),
+      'Conductor condition result mismatch');
+    } else requireValue(result.condition === undefined, 'Unexpected condition result');
     if (index < commands.length - 1 || runner.status === 'PASSED') {
-      requireValue(result.status === 'PASSED' && result.exit_code === 0 && !result.error,
+      requireValue(result.status === 'PASSED' && (expected.success_condition || result.exit_code === 0) && !result.error,
         'Conductor continued after a failed command');
     }
   }
@@ -119,7 +132,7 @@ export function validateRunner(request, runner, code, expectedSchema = 'conducto
   } else if (commands.length) {
     const failed = commands.at(-1);
     requireValue(runner.phase === 'commands' && runner.failed_command_index === commands.length - 1 &&
-      failed.status === runner.status && (runner.status !== 'FAILED' ||
+      failed.status === runner.status && (request.commands.at(commands.length - 1).success_condition || runner.status !== 'FAILED' ||
         failed.exit_code === null || (Number.isInteger(failed.exit_code) && failed.exit_code !== 0)),
     'Conductor failure location/status mismatch');
   } else {
@@ -128,7 +141,7 @@ export function validateRunner(request, runner, code, expectedSchema = 'conducto
   }
 }
 
-function reviewResult(value, code) {
+export function reviewResult(value, code) {
   const expected = { APPROVED: 0, CHANGES_REQUESTED: 1, INDETERMINATE: 3 };
   requireValue(value?.schema === 'review.result/v1' && Object.hasOwn(expected, value.status) &&
     expected[value.status] === code && Array.isArray(value.findings) &&
@@ -152,7 +165,10 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
   validateRunner(request, runner, code, expectedSchema);
   requireValue(Number.isSafeInteger(expectedOperations) && expectedOperations >= 0, 'Missing retained operation count');
   if (expectedSchema === 'pi.command-results/v1') {
-    requireValue(Array.isArray(runner.receipts) && runner.receipts.length === runner.commands.length, 'Missing command receipts');
+    const conditionReceipts = runner.conditionReceipts ??
+      (request.commands.every(command => !command.success_condition) ? runner.commands.map(() => null) : null);
+    requireValue(Array.isArray(runner.receipts) && runner.receipts.length === runner.commands.length &&
+      Array.isArray(conditionReceipts) && conditionReceipts.length === runner.commands.length, 'Missing command receipts');
     for (const [index, record] of runner.commands.entries()) {
       const receipt = runner.receipts[index];
       if (!receipt) { requireValue(record.status === 'BLOCKED', 'Missing successful command receipt'); continue; }
@@ -160,7 +176,14 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
         receipt.name === record.name && receipt.program === record.program && equal(receipt.args, record.args) &&
         receipt.exit_code === record.exit_code &&
         receipt.status === (receipt.error || receipt.signal || receipt.exit_code === null ? 'BLOCKED' : receipt.exit_code === 0 ? 'PASSED' : 'FAILED') &&
-        (record.status === 'BLOCKED' || receipt.status === record.status), 'Command receipt mismatch');
+        (record.status === 'BLOCKED' || record.condition || receipt.status === record.status), 'Command receipt mismatch');
+      const conditionReceipt = conditionReceipts[index];
+      if (record.status === 'PASSED' && request.commands[index].success_condition)
+        requireValue(conditionReceipt?.schema === 'pi.condition-receipt/v1' && conditionReceipt.index === index &&
+          conditionReceipt.program === record.condition.program && equal(conditionReceipt.args, record.condition.args) &&
+          conditionReceipt.status === record.condition.status && conditionReceipt.exit_code === record.condition.exit_code &&
+          conditionReceipt.commandReceiptSha256 === digest(JSON.stringify(receipt)), 'Missing authenticated condition decision');
+      else if (!request.commands[index].success_condition) requireValue(conditionReceipt === null, 'Unexpected condition receipt');
     }
   }
   const results = runner.commands;

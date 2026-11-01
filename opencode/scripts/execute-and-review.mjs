@@ -77,6 +77,8 @@ export async function executeAndReview(args, context = {}, options = {}) {
     }
     const build = command(args.buildCommand, 'buildCommand');
     const test = command(args.testCommand, 'testCommand');
+    const buildCondition = args.buildSuccessCondition == null ? null : command(args.buildSuccessCondition, 'buildSuccessCondition');
+    const testCondition = args.testSuccessCondition == null ? null : command(args.testSuccessCondition, 'testSuccessCondition');
     if (typeof args.input !== 'string') throw new Error('input must be executor JSON');
     const execution = JSON.parse(args.input);
     if (!execution || !Array.isArray(execution.operations)) {
@@ -93,8 +95,10 @@ export async function executeAndReview(args, context = {}, options = {}) {
 
     const root = path.resolve(repository, await git(repository, ['rev-parse', '--git-path', 'opencode-conductor-runs'], context.abort));
     const workflow = await prepareWorkflow(repository, root, args, [
-      { name: 'build', program: build[0], args: build.slice(1) },
-      { name: 'test', program: test[0], args: test.slice(1) },
+      { name: 'build', program: build[0], args: build.slice(1),
+        ...(buildCondition ? { success_condition: { program: buildCondition[0], args: buildCondition.slice(1) } } : {}) },
+      { name: 'test', program: test[0], args: test.slice(1),
+        ...(testCondition ? { success_condition: { program: testCondition[0], args: testCondition.slice(1) } } : {}) },
     ]);
     const { request } = workflow;
     const binary = process.env.CONDUCTOR_BIN ?? 'conductor';

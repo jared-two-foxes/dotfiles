@@ -90,6 +90,7 @@ and an APPROVED independent review before task evidence can justify a checkpoint
 
 After updating, copy the entire extension directory (including `verification.mjs`)
 and restart Pi. Upgrade the installed Conductor binary for the v2 command API.
+This version requires Conductor with `success_condition` support (PR #8 or later).
 
 Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs`.
 
@@ -98,6 +99,17 @@ Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs test
 Pi supplies `input` (exact Executor JSON), `requirements`, `baseRef`, caller-selected
 `checks`, and optional review budgets to the **native tool**, not a handwritten
 Conductor request. Conceptually the adapter prepares these stage specifications (not a separate runner invocation):
+
+Each named check may also supply `successCondition: [program, ...args]`. Conductor
+runs it after the check, with the original exit code and complete output paths in
+`CONDUCTOR_COMMAND_EXIT_CODE`, `CONDUCTOR_COMMAND_STDOUT_PATH`, and
+`CONDUCTOR_COMMAND_STDERR_PATH`. Its exit 0 permits the next command, including
+when the original exit was nonzero. Use this only for a known tool-specific
+contract; Cargo build/test exit status is normally sufficient. The last check's
+source/index boundary is captured before its condition is evaluated. Pi retains
+the condition decision in its command-prefix evidence before an automatic commit.
+Review always has a condition that validates complete `review.result/v1` output
+and requires `APPROVED` with no blocking findings before the commit entry runs.
 
 ```json
 [

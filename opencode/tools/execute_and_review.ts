@@ -10,6 +10,8 @@ export default tool({
     baseRef: tool.schema.string().describe('Original task-start 40-character Git commit SHA, unchanged across corrections'),
     buildCommand: tool.schema.array(tool.schema.string()).min(1).describe('Build executable and arguments; e.g. ["cargo","build"]'),
     testCommand: tool.schema.array(tool.schema.string()).min(1).describe('Test executable and arguments; e.g. ["cargo","test"]'),
+    buildSuccessCondition: tool.schema.array(tool.schema.string()).min(1).optional().describe('Optional evaluator executable and arguments for the build result; receives full output paths and original exit code from Conductor'),
+    testSuccessCondition: tool.schema.array(tool.schema.string()).min(1).optional().describe('Optional evaluator executable and arguments for the test result; receives full output paths and original exit code from Conductor'),
     reviewModel: tool.schema.string().optional().describe('Independent review model; default opencode/gpt-6.1-sol'),
   },
   async execute(args, context) {

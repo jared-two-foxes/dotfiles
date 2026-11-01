@@ -11,6 +11,7 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { assertLatestAttempt } from './task-chain.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { git } from './git-tree.mjs';
+import { createHash } from 'node:crypto';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, stage, fields = {}) => ({ schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields });
 const exit = status => ({ PASSED: 0, FAILED: 1, BLOCKED: 2 })[status];
@@ -42,30 +43,48 @@ async function logsFor(plan) {
 }
 
 export async function commandResults(plan, rawRunner) {
-  const commands = [], receipts = [], directory = await logsFor(plan);
+  const commands = [], receipts = [], conditionReceipts = [], directory = await logsFor(plan);
   const specs = plan.workflow.request.commands;
   const attempted = rawRunner ? Math.min(rawRunner.commands.length, specs.length) : specs.length;
   for (let index = 0; index < attempted; index++) {
     const spec = specs[index];
-    let receipt = null;
-    try { receipt = JSON.parse(await readFile(plan.stages[index].receipt, 'utf8')); } catch {}
+    let receipt = null, receiptBytes;
+    try { receiptBytes = await readFile(plan.stages[index].receipt); receipt = JSON.parse(receiptBytes); } catch {}
     if (receipt) requireValue(receipt.schema === 'pi.command-receipt/v1' && receipt.index === index &&
       receipt.name === spec.name && receipt.program === spec.program && equal(receipt.args, spec.args), 'Stage receipt identity mismatch');
     const stdout_path = path.join(directory, String(index).padStart(6, '0') + '.stdout');
     const stderr_path = path.join(directory, String(index).padStart(6, '0') + '.stderr');
     const [stdout, stdout_truncated] = await preview(stdout_path);
     const [stderr, stderr_truncated] = await preview(stderr_path);
-    let status = receipt?.status ?? 'BLOCKED';
-    if (rawRunner && rawRunner.commands[index].status !== 'PASSED' && status === 'PASSED') status = 'BLOCKED';
+    let status = receipt?.status ?? 'BLOCKED', condition, proof = null;
+    if (spec.success_condition) {
+      try { proof = JSON.parse(await readFile(plan.stages[index].conditionReceipt, 'utf8')); } catch {}
+      if (proof) requireValue(receiptBytes && proof.schema === 'pi.condition-receipt/v1' && proof.index === index &&
+        proof.program === spec.success_condition.program && equal(proof.args, spec.success_condition.args) &&
+        proof.commandReceiptSha256 === createHash('sha256').update(receiptBytes).digest('hex') &&
+        proof.status === (proof.error || proof.signal || proof.exit_code === null ? 'BLOCKED' :
+          proof.exit_code === 0 ? 'PASSED' : 'FAILED'), 'Condition receipt mismatch');
+      status = proof?.status ?? 'BLOCKED';
+      const out = path.join(directory, String(index).padStart(6, '0') + '.condition.stdout');
+      const err = path.join(directory, String(index).padStart(6, '0') + '.condition.stderr');
+      const [cstdout, ctruncated] = proof ? await preview(out) : ['', false];
+      const [cstderr, cetruncated] = proof ? await preview(err) : ['', false];
+      condition = { ...spec.success_condition, status, exit_code: proof?.exit_code ?? null,
+        stdout: cstdout, stderr: cstderr, stdout_truncated: ctruncated, stderr_truncated: cetruncated,
+        ...(proof ? { stdout_path: out, stderr_path: err } : {}), ...(proof?.error ? { error: proof.error } : {}) };
+    }
+    if (rawRunner) requireValue(rawRunner.commands[index].status === status, 'Conductor and retained stage decision disagree');
     commands.push({ ...spec, index, status, exit_code: receipt?.exit_code ?? null,
       stdout, stderr, stdout_truncated, stderr_truncated, stdout_path, stderr_path,
+      ...(condition ? { condition } : {}),
       ...(receipt?.error ? { error: receipt.error } : {}) });
     receipts.push(receipt);
+    conditionReceipts.push(proof);
     if (status !== 'PASSED') break;
   }
   const status = commands.length === specs.length && commands.every(c => c.status === 'PASSED')
     ? 'PASSED' : commands.at(-1)?.status ?? 'BLOCKED';
-  const observed = { schema: 'pi.command-results/v1', status, commands, receipts, output_directory: directory,
+  const observed = { schema: 'pi.command-results/v1', status, commands, receipts, conditionReceipts, output_directory: directory,
     phase: status === 'PASSED' ? 'completed' : commands.length ? 'commands' : 'output',
     ...(status !== 'PASSED' && commands.length ? { failed_command_index: commands.length - 1, error: 'Verification command did not complete successfully' } : {}) };
   const toolOutputs = {};
@@ -128,11 +147,14 @@ export async function runPipeline(meta, feature, context, options = {}) {
   const commands = [];
   for (const [index, command] of meta.workflow.request.commands.entries()) {
     const file = path.join(root, `${index}.stage.json`);
-    const stage = { index, repository: meta.repository, command, receipt: path.join(root, `${index}.receipt.json`) };
+    const stage = { index, repository: meta.repository, command, receipt: path.join(root, `${index}.receipt.json`),
+      ...(command.success_condition ? { conditionReceipt: path.join(root, `${index}.condition.json`) } : {}) };
     plan.stages.push(stage);
     await writeFile(file, JSON.stringify(stage), { mode: 0o600, flag: 'wx' });
     commands.push({ name: command.name, program: process.execPath,
-      args: [fileURLToPath(new URL('./command-stage.mjs', import.meta.url)), file] });
+      args: [fileURLToPath(new URL('./command-stage.mjs', import.meta.url)), file],
+      ...(command.success_condition ? { success_condition: { program: process.execPath,
+        args: [fileURLToPath(new URL('./condition-stage.mjs', import.meta.url)), file] } } : {}) });
   }
   const planPath = path.join(root, 'delivery.json');
   commands.push({ name: 'git commit verified task', program: process.execPath,

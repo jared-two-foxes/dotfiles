@@ -108,6 +108,12 @@ OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocati
    guarded `review-cli run --request <file>`. The guards verify SHA-256 identities
    of the exact input files before and after each tool invocation. Exact operations, original requirements and
    Review input files are retained under Git metadata outside the review diff.
+   Optional `buildSuccessCondition` and `testSuccessCondition` executable/argv
+   arrays let a caller evaluate complete build/test output through Conductor's
+   environment-provided log paths. By default build/test still use exit status.
+   Review always uses a structured success condition requiring a complete
+   `APPROVED` result before any later command can run.
+   Install a Conductor build with `success_condition` support (PR #8 or later).
 3. Runs the explicit build command, then the explicit test command, using
    executable/argument arrays (not shell command strings).
 4. Relies on Conductor's check exit codes. The current Conductor version does **not**

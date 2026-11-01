@@ -88,7 +88,9 @@ export function verifiedResult(result, args) {
     (c?.schema === 'pi.conductor-result/v1' && authenticNormalized(c))) &&
     c.status === 'PASSED' && c.phase === 'review' && !c.error &&
     c.execution?.success === true && Array.isArray(c.checks) && c.checks.length === checks.length &&
-    checks.every((check, index) => c.checks[index]?.name === check.name && c.checks[index].exit_code === 0) &&
+    checks.every((check, index) => c.checks[index]?.name === check.name &&
+      (c.schema === 'conductor.result/v1' ? c.checks[index].exit_code === 0 :
+        c.checks[index].status === 'PASSED' && (check.successCondition || c.checks[index].exit_code === 0))) &&
     c.review?.status === 'APPROVED';
 }
 

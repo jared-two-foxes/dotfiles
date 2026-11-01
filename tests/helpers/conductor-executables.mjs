@@ -14,7 +14,24 @@ for (const [index, command] of request.commands.entries()) {
   fs.closeSync(out); fs.closeSync(err);
   status = result.error ? 'BLOCKED' : result.status === 0 ? 'PASSED' : 'FAILED';
   const stdout = fs.readFileSync(stdout_path, 'utf8'), stderr = fs.readFileSync(stderr_path, 'utf8');
-  commands.push({ ...command, index, status, exit_code: result.status,
+  let condition;
+  if (command.success_condition && result.status !== null) {
+    const spec = command.success_condition;
+    const cstdout_path = path.join(directory, String(index).padStart(6, '0') + '.condition.stdout');
+    const cstderr_path = path.join(directory, String(index).padStart(6, '0') + '.condition.stderr');
+    const co = fs.openSync(cstdout_path, 'wx'), ce = fs.openSync(cstderr_path, 'wx');
+    const evaluated = spawnSync(spec.program, spec.args, { cwd: request.working_directory,
+      stdio: ['ignore', co, ce], env: { ...process.env, CONDUCTOR_COMMAND_EXIT_CODE: String(result.status),
+        CONDUCTOR_COMMAND_STDOUT_PATH: stdout_path, CONDUCTOR_COMMAND_STDERR_PATH: stderr_path,
+        CONDUCTOR_COMMAND_INDEX: String(index), CONDUCTOR_COMMAND_NAME: command.name } });
+    fs.closeSync(co); fs.closeSync(ce);
+    status = evaluated.error ? 'BLOCKED' : evaluated.status === 0 ? 'PASSED' : 'FAILED';
+    const cs = fs.readFileSync(cstdout_path, 'utf8'), es = fs.readFileSync(cstderr_path, 'utf8');
+    condition = { ...spec, status, exit_code: evaluated.status, stdout: cs.slice(0, 16384), stderr: es.slice(0, 16384),
+      stdout_truncated: cs.length > 16384, stderr_truncated: es.length > 16384,
+      stdout_path: cstdout_path, stderr_path: cstderr_path };
+  }
+  commands.push({ ...command, index, status, exit_code: result.status, ...(condition ? { condition } : {}),
     stdout: stdout.slice(0, 16384), stderr: stderr.slice(0, 16384),
     stdout_truncated: stdout.length > 16384, stderr_truncated: stderr.length > 16384, stdout_path, stderr_path });
   if (status !== 'PASSED') { error = 'command failed'; break; }

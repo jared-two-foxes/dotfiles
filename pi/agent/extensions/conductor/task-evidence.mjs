@@ -21,7 +21,10 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
       delivery.working_directory === repository && delivery.output_directory === prefix.output_directory &&
       delivery.commands.length === prefix.commands.length + 1 &&
       delivery.commands.slice(0, -1).every((c, i) => c.name === prefix.commands[i].name &&
-        path.basename(c.args[0]) === 'command-stage.mjs' && c.args[1] === path.join(prefix.output_directory, `${i}.stage.json`)) &&
+        path.basename(c.args[0]) === 'command-stage.mjs' && c.args[1] === path.join(prefix.output_directory, `${i}.stage.json`) &&
+        (prefix.commands[i].success_condition ? c.success_condition?.program === c.program &&
+          path.basename(c.success_condition.args[0]) === 'condition-stage.mjs' &&
+          c.success_condition.args[1] === c.args[1] : !c.success_condition)) &&
       path.basename(delivery.commands.at(-1).args[0]) === 'commit-task.mjs' &&
       delivery.commands.at(-1).args[1] === path.join(prefix.output_directory, 'delivery.json'), 'Missing authenticated single-list delivery context');
   }
@@ -33,6 +36,7 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
     name: check.name,
     command: index === requestChecks.length - 1
       ? JSON.parse(check.args[1]).command : [check.program, ...check.args],
+    ...(check.success_condition ? { successCondition: [check.success_condition.program, ...check.success_condition.args] } : {}),
   }));
   requireValue(sameVerification(record.args, { checks: requestedPlan }), 'Retained request verification plan mismatch');
   requireValue(verifiedResult(record.result, record.args) && record.before?.head === record.args?.baseRef &&

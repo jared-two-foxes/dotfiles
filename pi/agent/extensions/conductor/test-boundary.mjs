@@ -12,8 +12,8 @@ try {
     child.on('error', reject);
     child.on('exit', code => resolve(code ?? 1));
   });
+  await writeFile(output, JSON.stringify(await snapshot(repository)), { flag: 'wx', mode: 0o600 });
   if (code !== 0) process.exitCode = code;
-  else await writeFile(output, JSON.stringify(await snapshot(repository)), { flag: 'wx', mode: 0o600 });
 } catch (error) {
   process.stderr.write('Pi verification boundary failed: ' + error.message + '\n');
   process.exitCode = 1;
