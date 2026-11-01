@@ -1,8 +1,10 @@
 # Pi Conductor integration
 
 The native Pi extension in `extensions/conductor/` registers
-`execute_and_review` and sends a `conductor.request/v1` to the standalone
-Rust `conductor` binary. It does not invoke executor or review-cli directly.
+`execute_and_review` and sends a `conductor.request/v2` command list to the standalone
+Rust `conductor` binary. The adapter constructs the Executor → selected checks →
+Review sequence; Conductor runs those external programs and stops at the first
+failure. The agent never invokes executor or review-cli directly.
 
 ## Native Pi installation
 
@@ -28,7 +30,11 @@ If Pi already uses this dotfiles directory as its agent home, no copy is
 necessary. Restart Pi after changing extensions.
 
 Install `conductor` on PATH (the dotfiles Windows installer already handles
-it), or set `CONDUCTOR_BIN` to its executable path. Pi loads `/skill:design` when implementation is requested, or you can
+it), or set `CONDUCTOR_BIN` to its executable path. Install `executor` and
+`review-cli` separately on PATH, or set `EXECUTOR_BIN` and `REVIEW_CLI_BIN`.
+The Windows installers provision all three; use `-Force` to upgrade existing binaries.
+Conductor must support v2 with retained-output/output_directory support;
+v1 runner responses are rejected without fallback. Pi loads `/skill:design` when implementation is requested, or you can
 invoke it explicitly for the full collaborative design-first persona. It
 uses `/skill:executor` to author exact operations and the native
 `execute_and_review` tool to apply them under retained overall feature authority.
@@ -82,18 +88,85 @@ and an APPROVED independent review before task evidence can justify a checkpoint
 `validate_feature` keeps its existing full-project verification interface.
 
 After updating, copy the entire extension directory (including `verification.mjs`)
-and restart Pi. No Conductor binary change is required for named checks.
+and restart Pi. Upgrade the installed Conductor binary for the v2 command API.
 
 Run `node --test tests/pi-verification.test.mjs tests/pi-conductor.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs`.
+
+## Conductor v2 command and result translation
+
+Pi supplies `input` (exact Executor JSON), `requirements`, `baseRef`, caller-selected
+`checks`, and optional review budgets to the **native tool**, not a handwritten
+Conductor request. The adapter deterministically constructs:
+
+```json
+{
+  "schema": "conductor.request/v2",
+  "working_directory": "/repo",
+  "output_directory": "/repo/.git/pi-conductor-runs/attempt-unique",
+  "commands": [
+    {"name": "executor", "program": "executor", "args": ["apply", "/repo/.git/pi-conductor-runs/attempt-unique/executor.json"]},
+    {"name": "invoice tests", "program": "cargo", "args": ["test", "--lib", "invoices::"]},
+    {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.git/pi-conductor-runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.git/pi-conductor-runs/attempt-unique/review-ledger.jsonl"]}
+  ]
+}
+```
+
+The paths illustrate a normal repository; linked worktrees use `git rev-parse
+--git-path` to resolve their metadata. `executor.json` contains the exact operations
+array. `review.json` uses `review.request/v1`, the same repository and fixed full
+base SHA, `head_ref: ":working"`, and `requirements` pointing to a UTF-8 file of
+**complete original requirements**. Provider/model/budget settings are CLI flags,
+not fields in that Review request. Defaults are 180 review seconds and 20 turns;
+explicit `review*` overrides are forwarded. Review's own defaults govern omitted
+extra limits. These defaults are caller policy, not Conductor's old scaled budgets.
+
+For task-bound attempts the last selected check runs through `test-boundary.mjs`,
+which preserves that command's stdout/stderr and exit status and records the
+source/index snapshot immediately before Review. Checkpoint creation stays a
+separate authenticated native operation after task completion; the implementation
+command list never stages, commits or changes HEAD.
+
+Conductor returns generic `conductor.result/v2`: exits 0/1/2 mean
+PASSED/FAILED/BLOCKED. The adapter validates every returned command's index,
+program, literal arguments and order, the stop location and the runner exit code.
+It reads **complete** Executor and Review stdout from retained files, not truncated
+previews. Inline output is accepted only when explicitly untruncated; this does
+not make binaries lacking the request output_directory field compatible. Missing, unsafe, malformed or contradictory tool output blocks the
+attempt. Structured tool JSON has a 16 MiB parser limit; complete logs remain on
+disk for inspection if it is exceeded. Check diagnostics stay in their files.
+
+The adapter projects results to `pi.conductor-result/v1` inside the existing
+native tool result; this is a caller-owned domain view, not a Conductor wire schema:
+
+| Tool outcome | Pi outcome |
+| --- | --- |
+| Executor succeeds, all requested checks exit 0, Review completes APPROVED/exit 0 | PASSED |
+| Executor reports unsuccessful application, or a check exits nonzero | NEEDS_DESIGN |
+| Review completes CHANGES_REQUESTED/exit 1 with blocking findings | NEEDS_DESIGN |
+| Review INDETERMINATE/exit 3, setup/provider errors, signals, runner/protocol errors | BLOCKED |
+
+The normalized view retains the raw v2 request/result and complete parsed tool
+output. Content-addressed task receipts retain that view plus the exact request
+file contents, original args, raw process response and source boundary. Checkpoint
+authentication reconstructs and cross-checks it without depending on mutable log
+files still being present. Historical successful v1 receipts remain readable;
+active calls never accept a v1 runner as a successful new attempt.
+
+Requests, full logs and Review ledgers remain in Git metadata alongside receipts,
+outside review diffs. Keep them while referenced by active tasks; do not delete an
+attempt directory just because its preview was returned. The model-facing native
+response omits raw request/output dumps and excerpts long findings; use
+`inspect_conductor_evidence` and returned stdout/stderr paths for complete detail.
+The runs and receipts are local data and are not transferred by Git push/clone.
 
 ## Current limits
 
 - Pi's Docker launcher currently mounts only selected extensions and the
   images do not ship Conductor. Native Pi is supported here; Docker needs
   a separate binary provisioning decision.
-- The Pi adapter is a local copy of the tested OpenCode protocol adapter,
-  because the two agent homes can be installed independently. Keep their
-  protocol behavior aligned.
+- Pi and OpenCode carry identical `protocol.mjs` / `conductor-protocol.mjs`
+  helpers because their agent homes are independently installed. Tests keep
+  the wire protocol and domain interpretation aligned.
 - Conductor does not yet prove tests executed or detect unexpected source
   modifications during verification. The adapter imposes a 30-minute overall
   workflow deadline by default, covering execution, formatting, checks and
@@ -145,10 +218,9 @@ if needed, follows its own feature-authorized verification and checkpoint workfl
 ## Feature validation
 
 `validate_feature` is a native verification-only gate requiring Phase 5 Scaffold.
-Conductor's Rust request still always applies Executor operations and formatting,
-so validation uses a bounded native command runner plus the existing Review
-adapter instead of fabricating an implementation task. No Conductor/Review CLI
-protocol changes are required. Task checkpoint authentication is shared with the
+The final gate continues to use its bounded native command runner plus the
+existing Review adapter. It does not fabricate an implementation task or change
+its meaningful-test checks, cumulative scope, or evidence protocol. Task checkpoint authentication is shared with the
 checkpoint tool. Model-facing Scaffold operations cannot submit feature outcomes.
 
 See Design's final feature verification section for input fields, literal output

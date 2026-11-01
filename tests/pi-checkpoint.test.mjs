@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from '../pi/agent/extensions/conductor/git-tree.mjs';
-import { executeAndReview as executeTaskAttempt } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview as executeTaskAttempt } from './helpers/conductor-v2.mjs';
 import { readEvidence, retainEvidence, snapshot } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { approveGraph, requirementsFor } from './helpers/issue-plan.mjs';
 import { checkpointVerifiedTask, checkpointAuthorization } from '../pi/agent/extensions/conductor/checkpoint.mjs';
@@ -77,7 +77,7 @@ test('two dependent tasks have separate verification baselines, commits, content
     await writeFile(path.join(f.dir, 'consumer.txt'), 'consumes one\n');
   });
   const receipt = await readEvidence(f.dir, two.evidenceRef);
-  assert.equal(receipt.request.review.base_ref, first.commit);
+  assert.equal(receipt.workflow.inputs.review.base_ref, first.commit);
   assert.equal(f.g('diff', '--name-only', first.commit), ''); // new consumer is untracked
   assert.equal(f.g('diff', '--name-only', first.commit, receipt.after.tree), 'consumer.txt');
   const second = await f.checkpoint(two);
@@ -333,7 +333,7 @@ test('real Scaffold handoff: complete/checkpoint two dependent tasks and isolate
     const checkpoint = await f.checkpoint(args);
     assert.equal(checkpoint.ok, true, JSON.stringify(checkpoint));
     assert.equal(f.g('diff', '--name-only', last, checkpoint.commit), id + '.txt');
-    assert.equal((await readEvidence(f.dir, args.evidenceRef)).request.review.base_ref, last);
+    assert.equal((await readEvidence(f.dir, args.evidenceRef)).workflow.inputs.review.base_ref, last);
     last = checkpoint.commit;
   }
   assert.equal((await call('next')).task.id, 'F4');

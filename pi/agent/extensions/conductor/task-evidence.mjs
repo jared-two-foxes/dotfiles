@@ -2,6 +2,8 @@
 import { sameVerification } from './verification.mjs';
 import { authenticateAttemptChain } from './task-chain.mjs';
 import { readEvidence, verifiedResult } from './evidence.mjs';
+import { authenticateWorkflow } from './protocol.mjs';
+import { isDeepStrictEqual as equal } from 'node:util';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -11,7 +13,10 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === binding[k]), 'Task/design identity mismatch');
   // Authenticate the retained request against the caller's full plan. The final
   // command is transparently wrapped to capture the source/index review boundary.
-  const requestChecks = record.request?.checks;
+  const modern = record.request?.schema === 'conductor.request/v2';
+  const requestChecks = modern
+    ? authenticateWorkflow(record.workflow, record.request, record.args, repository)
+    : record.request?.checks;
   requireValue(Array.isArray(requestChecks) && requestChecks.length > 0, 'Missing requested verification plan');
   const requestedPlan = requestChecks.map((check, index) => ({
     name: check.name,
@@ -20,12 +25,15 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   }));
   requireValue(sameVerification(record.args, { checks: requestedPlan }), 'Retained request verification plan mismatch');
   requireValue(verifiedResult(record.result, record.args) && record.before?.head === record.args?.baseRef &&
-    record.after?.head === record.before.head && sha(record.after?.tree) && record.request?.review?.base_ref === record.before.head &&
-    record.request?.review?.requirements === record.args.requirements &&
+    record.after?.head === record.before.head && sha(record.after?.tree) &&
+    (modern ? record.workflow.inputs.review.base_ref === record.before.head &&
+      equal(record.request, record.result.conductor?.request) &&
+      equal(JSON.parse(record.response.stdout), record.result.conductor?.runner)
+      : record.request?.review?.base_ref === record.before.head && record.request?.review?.requirements === record.args.requirements) &&
     record.reviewSnapshot?.head === record.after.head && record.reviewSnapshot?.tree === record.after.tree &&
     record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
     record.response?.code === 0 &&
-    verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
+    (modern || verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args)), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
   await authenticateAttemptChain(repository, reference, binding);
   return record;
 }

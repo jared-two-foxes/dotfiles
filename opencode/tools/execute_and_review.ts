@@ -1,5 +1,6 @@
 import { tool } from '@opencode-ai/plugin';
 import { executeAndReview } from '../scripts/execute-and-review.mjs';
+import { executionSummary } from '../scripts/conductor-protocol.mjs';
 
 export default tool({
   description: 'Run one deterministic Conductor attempt: apply exact Design-authored executor operations, build, test, and review through the shared Rust CLI. Never retries or generates fixes.',
@@ -12,6 +13,6 @@ export default tool({
     reviewModel: tool.schema.string().optional().describe('Independent review model; default opencode/gpt-6.1-sol'),
   },
   async execute(args, context) {
-    return JSON.stringify(await executeAndReview(args, context));
+    return JSON.stringify(executionSummary(await executeAndReview(args, context)));
   },
 });

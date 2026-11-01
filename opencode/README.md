@@ -3,7 +3,7 @@
 The global setup keeps two primary agents: `design` for collaborative architecture and
 executor-authored changes, and `build` for direct manual coding tasks. The old
 multi-agent TDD pipeline and review orchestration agents have been retired.
-Independent semantic review is provided by the `review-app` library through Conductor (and `review-cli` for standalone reviews).
+Independent semantic review is provided by the external `review-cli`, invoked through a Conductor v2 command list or the standalone review adapter.
 
 ## Install
 
@@ -53,10 +53,11 @@ conductor --help
 
 `conductor` must be on OpenCode's PATH, or set `CONDUCTOR_BIN` to its executable
 path before starting OpenCode. The Design agent's `execute_and_review` tool now
-invokes Conductor directly; `executor` and `review-cli` are no longer spawned
-for that workflow. They remain available as standalone tools. Conductor does not
-yet include a checked-in `Cargo.lock`, so its installer intentionally does not
-pass `--locked`.
+invokes Conductor v2 with an explicit Executor → build → test → Review command
+list. Install `executor` and `review-cli` separately on PATH, or set `EXECUTOR_BIN`
+and `REVIEW_CLI_BIN`. Both Windows installers provision all three binaries using
+locked dependencies. Upgrade existing installations with `-Force`. Old v1
+Conductor binaries are rejected; there is no silent legacy fallback.
 
 ## Dependencies and optional helpers
 
@@ -103,14 +104,19 @@ OpenCode tool. This is **deterministic code, not an AI subagent**. Each invocati
 
 1. Verifies the original 40-character baseline SHA still matches HEAD.
 2. Passes the exact Design-authored JSON to `conductor run --request -` over stdin.
-   Conductor applies it through the executor Rust library (no shell or repository-local scratch file).
+   The v2 request names `executor apply <file>`, the selected checks, and
+   `review-cli run --request <file>`. Exact operations, original requirements and
+   Review input files are retained under Git metadata outside the review diff.
 3. Runs the explicit build command, then the explicit test command, using
    executable/argument arrays (not shell command strings).
 4. Relies on Conductor's check exit codes. The current Conductor version does **not**
    verify that tests actually executed or that build/tests left source unchanged;
    inspect outputs and avoid treating a zero exit code as proof of test coverage.
-5. Only on successful checks, Conductor invokes the review-app Rust library
-   using the same original baseline and approved requirements.
+5. Only on successful checks, Conductor invokes the external Review CLI using
+   the same original baseline and complete approved requirements. The adapter
+   parses the complete retained Review stdout, validates its exit/verdict/findings,
+   and maps generic runner outcomes back to domain results. Truncated previews
+   cannot justify approval; full stdout/stderr paths remain available.
 
 The tool returns `PASSED`, `NEEDS_DESIGN` (executor conflict, build/test
 failure or blocking review finding), or `BLOCKED` (invalid input, missing
@@ -144,12 +150,15 @@ syntax, provide an explicit script executable. `toolchain-detection` may help
 identify commands but does not automatically parse arbitrary shell strings.
 The current Conductor request has no `testEvidencePattern` or per-command timeout.
 The OpenCode adapter retains a fixed task-start Git HEAD preflight, but does not
-reimplement Conductor's execution/check/review stages.
+run subprocess stages itself. The adapter owns stage policy and validates
+the generic v2 process results; Conductor only executes the ordered list.
 
 The default review model is GPT-6.1 Sol, independent from Claude Sonnet Design;
-Conductor's review-app integration performs the only additional model call. Install
-`conductor` and make it available on OpenCode's PATH (or set `CONDUCTOR_BIN`).
-Standalone `review_changes` still requires `review-cli`. Restart OpenCode after updating
+the external Review command performs the only additional model call. Install
+`conductor`, `executor` and `review-cli` on OpenCode's PATH (or use the overrides
+above). Native result previews are bounded; full logs and request inputs remain
+under `.git/opencode-conductor-runs/` (resolved for linked worktrees). The
+normalized `pi.conductor-result/v1` view is adapter policy; the raw transport is v2. Restart OpenCode after updating
 configuration or environment variables.
 
 The legacy `linear-orchestrator`, `pipeline-runner`, `tester` and

@@ -22,8 +22,7 @@ if (-not $PSCmdlet.ShouldProcess('conductor', 'Install Rust CLI from jared-two-f
     return
 }
 
-# Conductor does not currently commit a Cargo.lock. Do not use --locked until it does.
-$argsForCargo = @('install', '--git', 'https://github.com/jared-two-foxes/conductor.git')
+$argsForCargo = @('install', '--git', 'https://github.com/jared-two-foxes/conductor.git', '--locked')
 if ($Force) { $argsForCargo += '--force' }
 
 & cargo @argsForCargo

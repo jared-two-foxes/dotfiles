@@ -337,6 +337,10 @@ Write-Host "`n[executor CLI]" -ForegroundColor White
 
 & (Join-Path $PSScriptRoot 'executor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
 
+# --- review CLI (external Conductor command and standalone reviews) ---
+Write-Host "[review CLI]" -ForegroundColor White
+& (Join-Path $PSScriptRoot 'review.ps1') -Force:$Force -WhatIf:$WhatIfPreference
+
 # --- conductor CLI ---
 Write-Host "[conductor CLI]" -ForegroundColor White
 & (Join-Path $PSScriptRoot 'conductor.ps1') -Force:$Force -WhatIf:$WhatIfPreference

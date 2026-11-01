@@ -2,12 +2,13 @@
  * Pi's native execute_and_review tool.
  *
  * Pi and OpenCode have different extension APIs; both send the same
- * conductor.request/v1 protocol to the deterministic Rust Conductor CLI.
+ * conductor.request/v2 command-list protocol to the deterministic Rust Conductor CLI.
  * The feature gate reuses bounded Review without Executor or AI retry logic.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { executeAndReview } from "./adapter.mjs";
+import { executionSummary } from "./protocol.mjs";
 import { checkpointVerifiedTask } from "./checkpoint.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
@@ -216,8 +217,8 @@ export default function (pi: ExtensionAPI) {
     name: "execute_and_review",
     label: "Execute and Review (Conductor)",
     description:
-      "Under the approved feature direction, run ONE deterministic Conductor attempt: " +
-      "apply exact executor operations, run caller-selected verification and independently review. " +
+      "Under the approved feature direction, construct and run ONE Conductor v2 command list: " +
+      "external Executor, caller-selected verification, then external Review. The adapter prepares exact input files and validates complete tool output. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({
       reconciliationRef: Type.Optional(Type.String({ description: "Verified rebase anchor for recursive issue execution" })),
@@ -258,12 +259,12 @@ export default function (pi: ExtensionAPI) {
       reviewWallClockBudgetSecs: Type.Optional(Type.Integer({
         description:
           "Optional review wall-clock budget in seconds " +
-          "(forwards to review-cli --wall-clock-budget-secs). Omit to use the review engine default.",
+          "(forwards to review-cli --wall-clock-budget-secs). Defaults to 180 seconds.",
       })),
       reviewMaxTurns: Type.Optional(Type.Integer({
         description:
           "Optional maximum model turns for review " +
-          "(forwards to review-cli --max-turns). Omit to use the review engine default.",
+          "(forwards to review-cli --max-turns). Defaults to 20 turns.",
       })),
       reviewMaxCostUsd: Type.Optional(Type.Number({
         description:
@@ -292,7 +293,7 @@ export default function (pi: ExtensionAPI) {
         abort: signal,
       }, { issueWorkflowOnly: true });
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        content: [{ type: "text" as const, text: JSON.stringify(executionSummary(result), null, 2) }],
         isError: result.status === "BLOCKED",
         details: result,
       };

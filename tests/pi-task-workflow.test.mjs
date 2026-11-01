@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, mkdir, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { executeAndReview as executeTaskAttempt } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview as executeTaskAttempt } from './helpers/conductor-v2.mjs';
 import { inspectEvidence, digest, snapshot } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { scaffoldTasks, buildCommand, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
@@ -81,9 +81,9 @@ test('one task retains real request/raw response and exposes read-only recovery 
   assert.equal(recovered.structurallyVerified, true);
   assert.equal(recovered.matchesWorkingTree, true);
   assert.deepEqual(recovered.record.task, task);
-  assert.deepEqual(recovered.record.response, actual);
+  assert.equal(JSON.parse(recovered.record.response.stdout).schema, 'conductor.result/v2');
   assert.equal(recovered.record.args.baseRef, f.args.baseRef);
-  assert.equal(recovered.record.request.review.requirements, requirements);
+  assert.equal(recovered.record.workflow.inputs.requirements, requirements);
   const intent = await inspectEvidence(recovered.record.startedReference, { directory: f.dir });
   assert.equal(intent.record.result.stage, 'STARTED');
   assert.equal(intent.structurallyVerified, false);
@@ -166,7 +166,7 @@ test('missing, tampered and incomplete verification cannot provide successful ev
     { review: { status: 'INDETERMINATE' } }, { checks: [{ name: 'build', exit_code: 0 }, { name: 'test', exit_code: 1 }] }]) {
     const result = await executeAndReview(f.args, { directory: f.dir }, { invokeConductor: async () => response('PASSED', patch) });
     assert.equal(result.status, 'BLOCKED');
-    assert.equal(result.reason, 'INCOMPLETE_VERIFICATION');
+    assert.ok(['INCOMPLETE_VERIFICATION', 'PROTOCOL_MISMATCH'].includes(result.reason));
     assert.equal((await inspectEvidence(result.evidence.reference, { directory: f.dir })).structurallyVerified, false);
   }
   assert.equal((await inspectEvidence('invented', { directory: f.dir })).ok, false);
@@ -279,7 +279,7 @@ test('existing attempt evidence retains approved local design independently of i
   assert.equal(result.status, 'PASSED');
   const fresh = await import('../pi/agent/extensions/conductor/evidence.mjs?local-design-recovery');
   const recovered = await fresh.inspectEvidence(result.evidence.reference, { directory: f.dir });
-  assert.equal(recovered.record.request.review.requirements, approvedTaskDesign);
+  assert.equal(recovered.record.workflow.inputs.requirements, approvedTaskDesign);
   const intent = await fresh.inspectEvidence(recovered.record.startedReference, { directory: f.dir });
   assert.equal(intent.record.args.requirements, approvedTaskDesign);
   assert.equal(intent.structurallyVerified, false); // approval text is not successful execution
