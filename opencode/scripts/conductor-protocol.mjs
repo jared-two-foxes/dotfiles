@@ -45,6 +45,15 @@ function reviewArguments(args, requestPath, directory) {
   return result;
 }
 
+function reviewRequirements(args) {
+  if (!args.verificationRepairReason) return args.requirements;
+  return args.requirements + '\n\nVerification command repair (does not change the criteria above):\n' +
+    args.verificationRepairReason + '\nPrior attempt: ' + args.previousAttempt +
+    '\nCurrent verification plan: ' + JSON.stringify(args.checks ?? {
+      buildCommand: args.buildCommand, testCommand: args.testCommand }) +
+    '\nReview that the repaired commands still exercise the approved coverage; a successful no-op is not verification.';
+}
+
 export async function prepareWorkflow(repository, root, args, checks) {
   validateWorkflowPreparation(args);
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -52,7 +61,7 @@ export async function prepareWorkflow(repository, root, args, checks) {
   requireValue(stat.isDirectory() && !stat.isSymbolicLink(), 'Unsafe Conductor runs directory');
   const directory = await realpath(await mkdtemp(path.join(root, 'attempt-')));
   const inputs = {
-    execution: JSON.parse(args.input), requirements: args.requirements,
+    execution: JSON.parse(args.input), requirements: reviewRequirements(args),
     review: { schema: 'review.request/v1', repository_path: repository,
       base_ref: args.baseRef, head_ref: ':working', requirements: path.join(directory, 'requirements.md') },
   };
@@ -80,7 +89,7 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   requireValue(equal(workflow?.request, request) && request.schema === 'conductor.request/v2' &&
     request.working_directory === repository && path.isAbsolute(request.output_directory), 'Retained workflow mismatch');
   const directory = request.output_directory;
-  requireValue(equal(workflow.inputs.execution, JSON.parse(args.input)) && workflow.inputs.requirements === args.requirements &&
+  requireValue(equal(workflow.inputs.execution, JSON.parse(args.input)) && workflow.inputs.requirements === reviewRequirements(args) &&
     equal(workflow.inputs.review, { schema: 'review.request/v1', repository_path: repository,
       base_ref: args.baseRef, head_ref: ':working', requirements: path.join(directory, 'requirements.md') }), 'Retained tool input mismatch');
   const first = request.commands[0], last = request.commands.at(-1);

@@ -1,0 +1,24 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { correctionVerification } from '../pi/agent/extensions/conductor/verification.mjs';
+
+test('explicit invocation repair retains names/order and semantic conditions for every check', () => {
+  const checks = [{ name: 'compile', command: ['cargo', 'check'] },
+    { name: 'regression', command: ['sh', '-c', 'cargo test --test regression'], successCondition: ['validate-results'] }];
+  const previous = { args: { checks }, result: { status: 'BLOCKED' } };
+  const changed = structuredClone(checks);
+  changed[1].command = ['cargo', 'test', '--test', 'regression'];
+  const repair = { checks: changed, verificationRepairReason: 'Invoke Cargo directly because sh is not installed; same regression target' };
+  assert.equal(correctionVerification(previous, { checks }), true);
+  assert.equal(correctionVerification(previous, { checks: changed }), false);
+  assert.equal(correctionVerification(previous, repair), true);
+  for (const reason of ['', ' ', 3, 'bad\0reason', 'x'.repeat(4001)])
+    assert.equal(correctionVerification(previous, { ...repair, verificationRepairReason: reason }), false);
+  for (const alter of [c => c.pop(), c => c.reverse(), c => { c[1].name = 'other'; },
+    c => { delete c[1].successCondition; }, c => { c[1].successCondition = ['true']; }]) {
+    const checks = structuredClone(changed); alter(checks);
+    assert.equal(correctionVerification(previous, { ...repair, checks }), false);
+  }
+  assert.equal(correctionVerification({ ...previous, result: { status: 'PASSED' } }, repair), false);
+  assert.equal(correctionVerification({ ...previous, result: { status: 'NEEDS_DESIGN' } }, repair), true);
+});

@@ -172,14 +172,16 @@ build/test commands and independently reviews the complete result. Avoid duplica
 that expensive suite across each issue or parent. If final review creates corrective
 issues, use targeted checks for those issues, then rerun the full final gate.
 
-The selected ordered plan stays fixed within a correction epoch. Do not silently
-replace checks in an existing receipt chain to adopt this policy; reconcile a
-required plan change explicitly while retaining criteria, history and attempt count.
+The selected ordered plan stays fixed within a correction epoch. For an invocation
+error, use `verificationRepairReason` with equivalent commands, preserving names,
+order, success conditions and coverage. Never silently weaken a plan; changed
+verification contracts require Design recovery retaining criteria, history and count.
 
 ## 5. Own the execution and review loop
 
 Capture the current checkpoint HEAD once as the issue's baseRef and keep requirements,
-ordered checks and baseline fixed within its correction epoch. Start the explicit
+baseline fixed within its correction epoch. Preserve the check contract; explicit
+invocation repairs follow /skill:conductor. Start the explicit
 Scaffold issue before execution. Supply task identity and the previousAttempt for
 corrections. Recover exact fields using `inspect_issue_attempt`; inspect full logs
 through `inspect_conductor_evidence` only when needed. Do not hide Scaffold state in
@@ -195,9 +197,13 @@ the review diff: bookkeeping must be ignored and untracked.
   commit, including an empty commit for parent verification. A parent remains incomplete
   after children finish until its original integrated criteria pass independently.
 - NEEDS_DESIGN: inspect actual source/diff and findings, author a minimal correction
-  against the current tree or use the discovery exit hatch for additional issues.
-- BLOCKED: stop automatic attempts, retain evidence and partial work, record the
-  real reason and reconcile explicitly. An environment failure is not a code defect.
+  against the current tree with the latest `previousAttempt`, or use the discovery
+  exit hatch for additional issues. Never replay the original operations.
+- BLOCKED: stop the current command list, retain evidence and partial work, inspect
+  the actual cause and continue an in-scope recoverable correction under the existing
+  approval. Follow /skill:conductor's recovery procedure. An environment failure is
+  not a code defect. Keep the prior after-tree; a checks-only retry uses an empty
+  operations array. Stop only for a concrete unresolved blocker or loop limit.
 - Oversized task: suspend and decompose only the remaining unverified responsibilities.
 
 Maximum **five total application attempts** per issue, preserving consumed counts

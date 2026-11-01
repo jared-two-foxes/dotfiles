@@ -279,6 +279,39 @@ Legacy unbound calls retain their protocol behavior. Task-bound corrections use
 baseline and tree. No task selection, lifecycle mutation or automatic retry is
 implemented here. Pi retains approval and repeated-failure decisions.
 
+Failed/blocked runs retain their actual post-execution source/index fingerprint.
+Use `inspect_issue_attempt` and pass its `continuation` fields with newly authored
+current-state operations. Already-applied edits need no identity operations;
+`{"operations":[]}` reruns verification/Review without replaying source edits.
+The original baseRef stays fixed so Review sees the complete cumulative diff.
+Never reset source, remove receipts/private refs, or checkpoint unverified work to
+recover. `retry`/`start` lifecycle transitions do not reset consumed attempts.
+
+For an incorrect command invocation, supply `verificationRepairReason` (nonblank,
+at most 4000 characters) with `previousAttempt` and the repaired commands. Preserve
+the check names/order, all success conditions and the approved coverage contract.
+Preflight and correction-chain authentication enforce the same rule. The reason,
+prior receipt reference and current plan are appended to independent Review's
+requirements without changing the fixed task requirements. Old and new commands
+remain in linked receipts; all checks and Review run again. This allows a missing
+`sh` command to be replaced with an equivalent native invocation, not a failing
+test to be bypassed. Semantic coverage remains a Pi/Review responsibility; a reason
+alone is not proof of equivalence. Contract or validator changes require Design
+recovery. Ordinary corrections still require identical commands.
+
+BLOCKED stops that command list. Pi diagnoses the result and continues recoverable,
+in-scope corrections under the existing feature authorization, subject to the same
+five-attempt and repeated-failure limits. Unavailable credentials/prerequisites or
+unrelated source/index drift remain concrete blockers. Prefer executable/argv
+commands; inspect the platform before using shell syntax. Native Windows does not
+imply `sh` is installed. Use an available native shell only when necessary.
+
+An execution `resume_issue.handoffRef` remains valid through `scaffold_tasks start`.
+It is separate from the read-only `prepare_issue_handoff` capsule, whose graph digest
+and task_revision intentionally become stale after lifecycle mutations. Refresh
+that capsule and continue with the same execution receipt. Never weaken context
+staleness checks or use context references as execution evidence.
+
 `inspect_conductor_evidence` reads a receipt by its returned
 `pi-evidence:sha256:<digest>` reference and reports whether the current tree
 matches. Records are under Git metadata, outside review diffs. STARTED intent is

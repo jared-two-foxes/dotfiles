@@ -65,6 +65,10 @@ The `patch` operation has been removed, with no fallback. Never emit `patch` or 
 1. Inspect the exact current source contents before preparing operations. Never guess `oldText` or file contents.
 2. Use `edit_file` for in-place text changes. Each non-empty `oldText` must be a unique literal in the file at the start of that operation; use a larger anchor if needed. Batch only non-overlapping edits that can all be resolved against the same original contents.
 3. Use `replace_file` for hash-guarded whole-file replacement, calculating `expected_sha256` from actual bytes. Use create, delete, move, and directory operations for structural changes. The `patch` operation has been removed; do not emit unified diffs or patch-source files.
+   Never reconstruct a long existing file from memory for a small change. Prefer
+   a unique `edit_file` anchor to append tests or repair assertions, preserving
+   existing imports, signatures and tests. A matching hash only guards the input;
+   it does not prove replacement content preserves existing behavior.
 4. Represent multi-file changes as explicit operations, one target file per operation. Include the complete JSON; never emit pseudocode, ellipses, or placeholders.
 5. Order operations by dependency (create parent directories first; move files before deleting their old parent directories).
 6. Keep every path relative to the repository root. Do not target absolute paths, `..`, `.git`, symlinks, or paths outside the repository; executor enforces its repository-boundary and symlink protections.
@@ -86,5 +90,9 @@ requires returning to the user. Do not invoke executor apply or conductor run di
 Author only the selected issue's operations using actual current source and inherited
 contracts. Never generate a feature-wide operation set and split afterwards.
 Corrections use the actual partial tree, fixed baseline/requirements and previousAttempt.
+Include only the required corrections; already-applied edits need no identity
+operations. A verification-only retry uses `{"operations":[]}`. If a replacement
+lost existing code, inspect the baseline and current file and restore that content
+through explicit correction operations, keeping the authenticated current tree.
 Keep .scaffold bookkeeping out of source operations. Oversized work uses Design's
 suspend/decompose/resume path, preserving prior work and attempt budgets.

@@ -4,7 +4,7 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 // not import files from the OpenCode installation. Keep protocol behavior in sync.
 // The adapter authors the fixed Executor -> checks -> Review sequence; Conductor executes it.
 import { issueFeature, approvedIssue, issueDesignRequirements, issueRequirements, requireIssueBinding, issueExecutionScope } from './issue-state.mjs';
-import { verificationChecks, sameVerification } from './verification.mjs';
+import { verificationChecks, correctionVerification } from './verification.mjs';
 import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from './protocol.mjs';
 import { spawn } from 'node:child_process';
 import { validateBinding, snapshot, readEvidence, retainEvidence, verifiedResult } from './evidence.mjs';
@@ -226,18 +226,23 @@ export async function executeAndReview(args, context = {}, options = {}) {
       const previous = await readEvidence(repository, args.previousAttempt);
       await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
       if (['rebase-handoff', 'issue-handoff', 'issue-zero-handoff'].includes(previous.kind)) await readTaskHandoff(repository, args.previousAttempt, args.task);
-      if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) ||
-          previous.args.baseRef !== args.baseRef || (previous.kind !== 'issue-zero-handoff' && (previous.args.requirements !== args.requirements ||
-          !sameVerification(previous.args, args))) ||
-          previous.result.status === 'PASSED' || before.head !== previous.after.head ||
-          before.digest !== previous.after.digest) {
-        throw new Error('Previous attempt does not match this task, fixed requirements or current tree; reconcile before continuing');
-      }
+      if (['featureId', 'taskId', 'designRef'].some(k => previous.task[k] !== args.task[k]) || previous.args.baseRef !== args.baseRef)
+        throw new Error('Previous attempt task/design or baseRef mismatch; copy continuation fields from inspect_issue_attempt');
+      if (previous.kind !== 'issue-zero-handoff' && previous.args.requirements !== args.requirements)
+        throw new Error('Fixed requirements mismatch; copy exact requirements from inspect_issue_attempt, preserving original criteria and findings');
+      if (previous.kind !== 'issue-zero-handoff' && !correctionVerification(previous, args))
+        throw new Error('Verification plan mismatch; command repairs require verificationRepairReason and must preserve check names/order, coverage and success conditions');
+      if (previous.result.status === 'PASSED')
+        throw new Error('Previous attempt already PASSED; recover checkpoint finalization instead of reapplying operations');
+      if (before.head !== previous.after.head || before.digest !== previous.after.digest || before.tree !== previous.after.tree)
+        throw new Error('Current source/index or HEAD differs from the previous attempt after snapshot; preserve changes and reconcile before continuing');
       attempt = previous.attempt + 1;
       if (!Number.isInteger(attempt) || attempt > 5) throw new Error('Five-attempt limit reached; stop this loop');
+    } else if (args.verificationRepairReason !== undefined) {
+      throw new Error('verificationRepairReason requires previousAttempt');
     } else if (!before.clean) {
       return outcome('BLOCKED', 'PRECHECK', { repository, reason: 'CHECKPOINT_REQUIRED',
-        message: 'Implementation changes remain outside this task loop; reconcile and obtain an authorised Git checkpoint first' });
+        message: 'Working tree contains changes without a continuation receipt. If a prior attempt applied them, inspect_issue_attempt and supply its latest reference as previousAttempt; author corrections against that retained tree. Otherwise preserve and reconcile the unrelated changes' });
     }
     // Write intent before applying anything so a killed Pi session leaves the
     // original baseline, requirements and attempt count discoverable.

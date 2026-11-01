@@ -38,3 +38,18 @@ export function verificationChecks(args) {
 export function sameVerification(left, right) {
   return JSON.stringify(verificationChecks(left)) === JSON.stringify(verificationChecks(right));
 }
+
+// Repair command invocation without silently replacing the verification contract.
+// The original design still governs coverage; every command is rerun and Review
+// must approve the result. Both preflight and receipt authentication use this rule.
+export function correctionVerification(previous, args) {
+  const reason = args.verificationRepairReason;
+  if (reason !== undefined && (typeof reason !== 'string' || !reason.trim() ||
+      reason.length > 4000 || reason.includes('\0'))) return false;
+  if (sameVerification(previous.args, args)) return true;
+  if (!reason || !['BLOCKED', 'NEEDS_DESIGN'].includes(previous.result.status)) return false;
+  const before = verificationChecks(previous.args), after = verificationChecks(args);
+  return before.length === after.length && before.every((check, i) =>
+    check.name === after[i].name &&
+    JSON.stringify(check.successCondition) === JSON.stringify(after[i].successCondition));
+}

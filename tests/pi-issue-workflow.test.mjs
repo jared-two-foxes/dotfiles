@@ -292,7 +292,17 @@ test('started issue with no receipts returns to design without consuming an atte
   await f.approve('F'); await f.call('design-finish');
   const resumed = await resumeIssue({ ...f.scope('F'), suspensionRef: parked.suspensionRef }, { directory: f.dir }, f.options);
   assert.equal(resumed.status, 'READY', JSON.stringify(resumed)); assert.equal(resumed.consumedAttempts, 0);
+  const capsule = await prepareIssueHandoff({ featureId: 'F', taskId: 'F' }, { directory: f.dir }, f.options);
+  assert.equal(capsule.applicable, true, JSON.stringify(capsule));
+  const revision = (await f.call('list')).feature.task_revision;
   await f.call('start', { task_id: 'F' });
+  assert.ok((await f.call('list')).feature.task_revision > revision);
+  assert.equal((await inspectIssueHandoff({ reference: capsule.reference }, { directory: f.dir }, f.options)).applicable, false);
+  // Context must refresh, but the execution handoff is still authentic after start.
+  const continuation = await inspectIssueAttempt({ reference: resumed.handoffRef }, { directory: f.dir });
+  assert.equal(continuation.ok, true, JSON.stringify(continuation)); assert.equal(continuation.matches_source, true);
+  const refreshed = await prepareIssueHandoff({ featureId: 'F', taskId: 'F' }, { directory: f.dir }, f.options);
+  assert.equal(refreshed.applicable, true, JSON.stringify(refreshed));
   const bypass = await f.run(await f.args('F')); assert.equal(bypass.status, 'BLOCKED');
   const c = await f.finish('F', { ...await f.args('F'), ...resumed.resume, requirements: '', input: '{"operations":[]}' });
   assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 1);

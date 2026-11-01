@@ -122,7 +122,7 @@ test('corrections retain the complete ordered plan and reject scope changes', as
     const result = await executeAndReview({ ...f.args, checks, previousAttempt: first.evidence.reference }, { directory: f.dir }, {
       invokeConductor: () => assert.fail('changed plan must not invoke'),
     });
-    assert.equal(result.status, 'BLOCKED'); assert.match(result.message, /Previous attempt/);
+    assert.equal(result.status, 'BLOCKED'); assert.match(result.message, /Verification plan mismatch/);
   }
   const corrected = await executeAndReview({ ...f.args, previousAttempt: first.evidence.reference }, { directory: f.dir }, { invokeConductor: respond });
   assert.equal(corrected.status, 'PASSED'); assert.equal(corrected.evidence.attempt, 2);

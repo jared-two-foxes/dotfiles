@@ -30,6 +30,12 @@ independent review, then present results for user review. Findings within scope 
 through the same graph without new permission requests. Never weaken criteria or
 reset attempt budgets. Maximum five attempts; repeated failure without progress stops.
 
+BLOCKED ends the current Conductor command list, not the approved local delivery
+loop. Diagnose retained evidence and current files, then continue recoverable
+in-scope corrections with the latest previousAttempt under /skill:conductor.
+Preserve applied edits, baseline, criteria and consumed attempts. Do not reset the
+tree, delete evidence or reapprove an unchanged direction to recover a failed check.
+
 Source edits through write/edit or Bash are prohibited. Native execute_and_review,
 verified checkpoints, feature checks and explicit issue/rebase recovery are narrow
 exceptions using the retained feature authority. Never merge PRs, stash/reset from
