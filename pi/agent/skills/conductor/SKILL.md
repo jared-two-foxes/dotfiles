@@ -32,7 +32,11 @@ and review settings to execute_and_review; do not construct shell strings or cal
 those binaries yourself. All three binaries must be installed separately. Review
 model and budget overrides become CLI flags; defaults are 180 seconds and 20 turns.
 The final task check captures the source/index boundary before independent review.
-Do not add a Git commit to this list; use checkpoint_verified_task after completion.
+Supply `checkpoint: {defaultBranch, protectedBranches}` using the known repository
+default branch and all additional protected branches (or []). After a completed
+APPROVED review, the native adapter retains successful evidence and automatically
+runs a final Conductor Git commit command. It records Scaffold completion and
+commits only the exact reviewed tree, using the existing verified checkpoint logic.
 
 Conductor's generic FAILED is interpreted by the adapter. A failed application or
 check and a completed CHANGES_REQUESTED review mean NEEDS_DESIGN; unavailable,
@@ -51,8 +55,13 @@ criteria/findings, baseline and checks within an epoch. BLOCKED stops automatic 
 Maximum budgets and provider errors are never review approval. Inspect real receipts;
 PASSED requires successful execution, checks and APPROVED independent review.
 
-Complete the exact Scaffold issue from authentic evidence, end the active verification/correction loop,
-then checkpoint_verified_task. Each parent needs its own original-criteria verification
+On `stage: COMMITTED`, completion and the local checkpoint are already recorded.
+Automatic finalization follows the receipt ending the active verification/correction loop.
+Use `nextBaseRef` for the next issue; do not repeat completion or commit commands.
+If `implementationStatus: PASSED` but finalization is BLOCKED, preserve its evidence
+and call checkpoint_verified_task with that receipt and matching feature/branch
+metadata. This resumes completion/commit only; never reapply operations or rerun
+review to recover a failed commit. Each parent needs its own original-criteria verification
 and commit after children, even if its commit is empty. Finish with validate_feature
 against the original baseline. Inspect actual meaningful checks and final review;
 add in-scope corrective issues and revalidate without additional permission prompts.

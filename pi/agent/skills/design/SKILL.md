@@ -137,7 +137,10 @@ Before generating Executor input, inspect exact current source and load
 `/skill:executor`. Prepare and retain the complete executor input. Use `edit_file` for in-place text changes as documented there; never send unified diffs as operations.
 Generate only the selected issue's complete operations, not a feature-wide operation
 set split afterwards. Pass exact JSON and meaningful verification commands as
-executable/argument arrays to `execute_and_review`. Retained feature direction
+executable/argument arrays to `execute_and_review`, plus
+`checkpoint: {defaultBranch, protectedBranches}` with known repository branch
+protection metadata. A successful review automatically records completion and
+creates a local commit of the exact reviewed tree. Retained feature direction
 approval already covers this action; do not ask again.
 
 ### Select checks for the current issue
@@ -182,8 +185,12 @@ through `inspect_conductor_evidence` only when needed. Do not hide Scaffold stat
 the review diff: bookkeeping must be ignored and untracked.
 
 - PASSED: inspect authentic execution, meaningful check output, APPROVED independent
-  review and exact tree/task binding. Complete the Scaffold issue from that receipt,
-  end the loop and use `checkpoint_verified_task`. Each resolved node gets its own
+  review and exact tree/task binding. Native `execute_and_review` automatically
+  records Scaffold completion and runs the verified Git commit command. On
+  `stage: COMMITTED`, use `nextBaseRef`; do not repeat completion or checkpointing.
+  If implementation passed but commit finalization blocked, use
+  `checkpoint_verified_task` with the same successful receipt and matching scope.
+  Never reapply operations or rerun review to recover a failed commit. Each resolved node gets its own
   commit, including an empty commit for parent verification. A parent remains incomplete
   after children finish until its original integrated criteria pass independently.
 - NEEDS_DESIGN: inspect actual source/diff and findings, author a minimal correction

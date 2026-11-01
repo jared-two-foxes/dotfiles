@@ -7,9 +7,8 @@
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { executeAndReview } from "./adapter.mjs";
+import { executeAndCheckpoint, finalizeVerifiedTask } from "./delivery.mjs";
 import { executionSummary } from "./protocol.mjs";
-import { checkpointVerifiedTask } from "./checkpoint.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
@@ -197,7 +196,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "checkpoint_verified_task",
     label: "Checkpoint verified task",
-    description: "After Scaffold completion under retained feature authority, create or recover ONE local commit of the exact verified Git tree. No push, task selection or source implementation. Uses retained feature direction authority across sessions.",
+    description: "Recover automatic finalization using a successful implementation receipt: record matching Scaffold completion if needed, then create or recover ONE commit of the exact reviewed tree through Conductor. Never reapply operations or rerun review to recover a failed commit. Uses retained feature authority.",
     parameters: Type.Object({
       task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
       evidenceRef: Type.String(),
@@ -208,7 +207,7 @@ export default function (pi: ExtensionAPI) {
       protectedBranches: Type.Array(Type.String(), { description: "All additional known protected branches; [] if none" }),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await checkpointVerifiedTask({ ...params, authorizationMode: "feature" }, { directory: ctx.cwd, abort: signal }, { authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }) });
+      const result = await finalizeVerifiedTask(params, { directory: ctx.cwd, abort: signal });
       return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
         isError: !result.ok, details: result };
     },
@@ -218,9 +217,13 @@ export default function (pi: ExtensionAPI) {
     label: "Execute and Review (Conductor)",
     description:
       "Under the approved feature direction, construct and run ONE Conductor v2 command list: " +
-      "external Executor, caller-selected verification, then external Review. The adapter prepares exact input files and validates complete tool output. " +
+      "external Executor, caller-selected verification, then external Review. After approval, automatically record task completion and run a verified Git commit command through Conductor. " +
       "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
     parameters: Type.Object({
+      checkpoint: Type.Object({
+        defaultBranch: Type.String({ description: "Known repository default branch; protected from automatic commits" }),
+        protectedBranches: Type.Array(Type.String(), { description: "All additional known protected branches, or []" }),
+      }, { additionalProperties: false, description: "Automatic post-review local commit context; branch and original baseline come from the approved feature" }),
       reconciliationRef: Type.Optional(Type.String({ description: "Verified rebase anchor for recursive issue execution" })),
       task: Type.Optional(Type.Object({
         featureId: Type.String(), taskId: Type.String(), designRef: Type.String(),
@@ -288,7 +291,7 @@ export default function (pi: ExtensionAPI) {
       })),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await executeAndReview(params, {
+      const result = await executeAndCheckpoint(params, {
         directory: ctx.cwd,
         abort: signal,
       }, { issueWorkflowOnly: true });

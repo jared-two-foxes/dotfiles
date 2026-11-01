@@ -73,7 +73,7 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   return request.commands.slice(1, -1);
 }
 
-function validateRunner(request, runner, code) {
+export function validateRunner(request, runner, code) {
   requireValue(runner?.schema === 'conductor.result/v2' && Object.hasOwn(exits, runner.status) &&
     exits[runner.status] === code && Array.isArray(runner.commands), 'Conductor schema/status/exit code mismatch');
   const commands = runner.commands;
@@ -151,7 +151,7 @@ export function normalizeWorkflow(request, runner, toolOutputs, code) {
     request, runner, toolOutputs, ...(runner.error ? { error: runner.error } : {}) };
 }
 
-async function toolOutput(request, runner, record) {
+export async function toolOutput(request, runner, record) {
   if (!record || record.exit_code == null) return undefined;
   if (!record.stdout_path) {
     requireValue(!record.stdout_truncated, 'Complete tool output unavailable; upgrade Conductor for retained logs');

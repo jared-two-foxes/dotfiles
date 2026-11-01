@@ -61,8 +61,9 @@ choose actual crate and test names for the project):
 }
 ```
 
-Supply this alongside the existing `input`, `requirements`, `baseRef` and optional
-task/review settings. Supply **either** `checks` **or** both legacy
+Supply this alongside the existing `input`, `requirements`, `baseRef`, task/review
+settings and required native `checkpoint: {defaultBranch, protectedBranches}`
+metadata. Supply **either** `checks` **or** both legacy
 `buildCommand`/`testCommand` arrays; mixing them is rejected before invocation.
 Legacy calls still become checks named `build` and `test`. No default build or
 full test suite is added when `checks` is supplied. The list requires 1–64 checks
@@ -122,9 +123,57 @@ extra limits. These defaults are caller policy, not Conductor's old scaled budge
 
 For task-bound attempts the last selected check runs through `test-boundary.mjs`,
 which preserves that command's stdout/stderr and exit status and records the
-source/index snapshot immediately before Review. Checkpoint creation stays a
-separate authenticated native operation after task completion; the implementation
-command list never stages, commits or changes HEAD.
+source/index snapshot immediately before Review. After successful verification,
+the adapter retains its completed immutable receipt and automatically runs a final
+Conductor request containing a verified Git commit command. The implementation
+request itself never changes HEAD, preserving the original reviewed baseline.
+
+### Automatic post-review commit
+
+The native `execute_and_review` tool now includes local task finalization. Supply:
+
+```json
+"checkpoint": {"defaultBranch": "main", "protectedBranches": []}
+```
+
+Use the actual default and all additional known protected branches. The feature's
+approved branch and original baseline come from Scaffold, not newly guessed values.
+Missing metadata or a protected target blocks before source application.
+
+The completed review receipt must exist before commit authentication. Therefore
+the adapter ends implementation verification first, then invokes Conductor once
+more with this final command (paths are illustrative):
+
+```json
+{
+  "name": "git commit verified task",
+  "program": "/path/to/node",
+  "args": ["/path/to/extension/commit-task.mjs", "/repo/.git/pi-conductor-finalization/attempt-unique/checkpoint.json"]
+}
+```
+
+That command reauthenticates the retained feature authority, exact task evidence,
+latest attempt, current source/index and branch lineage. It records matching
+Scaffold completion if needed, then invokes the existing checkpoint implementation
+to create a Git commit of the **exact reviewed tree** with its evidence trailer.
+It uses Git's private-index/commit-tree/update-ref mechanism rather than indiscriminate
+staging, hooks or source rewriting. Both the implementation and commit stages are
+deterministic; Pi makes no additional decision or confirmation between them. The
+overall workflow deadline covers both stages.
+
+On success the native result has `stage: COMMITTED`, checkpoint provenance and
+`nextBaseRef` for the next issue. Completion/checkpoint state is already recorded;
+the agent must not repeat those operations. Failed implementation/check/review
+never enters this stage. A failed commit returns BLOCKED with
+`implementationStatus: PASSED`, the original evidence and finalization log path.
+Do not replay source operations. Recover using `checkpoint_verified_task` and the
+same receipt/scope; it resumes completion or commits as needed, including recovery
+of a commit whose response was lost. Successful implementation receipts remain
+immutable and continue to describe the pre-commit reviewed baseline.
+
+The lower-level `executeAndReview` library still performs verification only for
+existing integrations/tests. Automatic completion/commit is the native Pi delivery
+entry point; the unbound OpenCode adapter keeps its existing verification contract.
 
 Conductor returns generic `conductor.result/v2`: exits 0/1/2 mean
 PASSED/FAILED/BLOCKED. The adapter validates every returned command's index,

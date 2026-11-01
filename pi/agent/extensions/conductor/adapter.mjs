@@ -28,14 +28,14 @@ try {
 
 const SHA = /^[0-9a-f]{40}$/i;
 const MAX_LOG_BYTES = 16 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
+export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
   return { schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields };
 }
 
-async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function invoke(program, args, { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(program, args, {
       cwd, signal, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
