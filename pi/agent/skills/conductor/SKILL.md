@@ -25,6 +25,11 @@ verification through validate_feature after checkpoints; corrective issues use
 targeted checks before rerunning that final gate. Keep ordered checks fixed across
 corrections. The buildCommand/testCommand pair remains an alternative input shape,
 not a requirement to run the entire suite for each issue.
+On a first attempt, `requirements` contains additional scope (or an empty string);
+the adapter adds persisted criteria, constraints and the complete approved issue
+design. Do not transcribe that design. On corrections use the exact retained
+requirements from `inspect_issue_attempt` or authenticated resume fields. Branch
+and design-reference mismatches require correcting the context, not reapproval.
 Named checks may include `successCondition: [program, ...args]` for a known
 tool-specific output contract. Conductor passes the original exit code and
 complete stdout/stderr paths through `CONDUCTOR_COMMAND_*` environment variables.

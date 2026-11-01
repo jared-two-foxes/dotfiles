@@ -1,4 +1,5 @@
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
+import { executeAndCheckpoint } from '../pi/agent/extensions/conductor/delivery.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -7,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { git } from '../pi/agent/extensions/conductor/git-tree.mjs';
 import { snapshot, readEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
-import { executeAndReview } from './helpers/conductor-v2.mjs';
+import { executeAndReview, requestView } from './helpers/conductor-v2.mjs';
 import { checkpointVerifiedTask } from '../pi/agent/extensions/conductor/checkpoint.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { issueDesignRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
@@ -87,6 +88,55 @@ test('full downward design then upward implementation has one checkpoint per iss
   assert.deepEqual(history.map(c => c.taskId), ['types', 'api', 'F']);
   assert.equal(f.g('rev-list', '--count', f.base + '..HEAD'), '3');
   assert.equal((await f.call('next')).task, null);
+});
+
+test('persisted criteria and multiline design reach review and receipts without caller transcription', integration, async t => {
+  const f = await fixture(t);
+  const criteria = ["Record resource_type='quote'", 'Guard INSERT/UPDATE/DELETE'];
+  const constraints = ["Preserve 'quote'\nwith actual newlines"];
+  await f.call('decompose', { task_id: 'F', payload: [{ id: 'leaf', title: 'leaf', objective: 'Deliver leaf',
+    acceptance_criteria: criteria, constraints, dependencies: [], context: 'Focused check', origin: { kind: 'design', reference: 'F' } }] });
+  await f.approve('F', true);
+  await f.call('design-record', { task_id: 'leaf', payload: { summary: 'First line\nSecond line\r\nThird line',
+    verification: 'Check quotes / slashes\nand coverage', approval: 'Delegated authority', disposition: 'leaf' } });
+  await f.call('design-finish'); await f.call('start', { task_id: 'leaf' });
+  const a = { ...await f.args('leaf'), requirements: 'Additional interface to preserve' };
+  const original = a.requirements;
+  const result = await f.run(a, 'NEEDS_DESIGN');
+  assert.equal(result.status, 'NEEDS_DESIGN', JSON.stringify(result));
+  assert.equal(a.requirements, original, 'caller input is not mutated');
+  const receipt = await readEvidence(f.dir, result.evidence.reference);
+  const issue = (await f.call('list')).feature.tasks.leaf;
+  for (const text of [...criteria, ...constraints, issueDesignRequirements(issue), original])
+    assert.ok(receipt.args.requirements.includes(text), JSON.stringify(text));
+  assert.ok((await requestView(receipt.request)).review.requirements.includes(issueDesignRequirements(issue)));
+  const stripped = await f.run({ ...a, previousAttempt: result.evidence.reference });
+  assert.equal(stripped.status, 'BLOCKED', 'corrections cannot drop fixed scope');
+  const exact = await inspectIssueAttempt({ reference: result.evidence.reference }, { directory: f.dir });
+  assert.equal(exact.ok, true);
+  const retried = await f.run({ ...exact.continuation, input: a.input }, 'NEEDS_DESIGN');
+  assert.equal(retried.evidence.attempt, 2);
+  assert.equal((await readEvidence(f.dir, retried.evidence.reference)).args.requirements, receipt.args.requirements);
+});
+
+test('native prechecks distinguish wrong branch, malformed/stale design and missing approval', integration, async t => {
+  const f = await fixture(t), context = { directory: f.dir };
+  await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const a = { ...await f.args('F'), checkpoint: { defaultBranch: 'main', protectedBranches: [] } };
+  const run = patch => executeAndCheckpoint({ ...a, ...patch }, context, { ...f.options,
+    invokeConductor: async () => { assert.fail('precheck must not launch commands'); } });
+  f.g('switch', 'main');
+  const approval = await approveFeatureDirection({ featureId: 'F' }, context, f.options);
+  assert.match(approval.message, /current main, expected feature\/issues/);
+  assert.match((await run({})).message, /Feature branch mismatch/);
+  f.g('switch', 'feature/issues');
+  for (const [designRef, message] of [[a.task.designRef.slice(0, -1), /71 characters total/],
+    ['sha256:' + 'a'.repeat(64), /task.designRef mismatch/]]) {
+    const blocked = await run({ task: { ...a.task, designRef } });
+    assert.match(blocked.message, message);
+    assert.ok(blocked.message.includes(a.task.designRef));
+  }
+  assert.match((await run({})).message, /Approve the overall feature direction once/);
 });
 
 test('review discovery parks staged and untracked work, designs child, checkpoints it and resumes attempt four', integration, async t => {
@@ -244,7 +294,7 @@ test('started issue with no receipts returns to design without consuming an atte
   assert.equal(resumed.status, 'READY', JSON.stringify(resumed)); assert.equal(resumed.consumedAttempts, 0);
   await f.call('start', { task_id: 'F' });
   const bypass = await f.run(await f.args('F')); assert.equal(bypass.status, 'BLOCKED');
-  const c = await f.finish('F', { ...await f.args('F'), ...resumed.resume, input: '{"operations":[]}' });
+  const c = await f.finish('F', { ...await f.args('F'), ...resumed.resume, requirements: '', input: '{"operations":[]}' });
   assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 1);
   const chain = await authenticateAttemptChain(f.dir, c.evidenceRef, f.binding('F'));
   assert.deepEqual(chain.records.map(r => r.attempt), [0, 1]);

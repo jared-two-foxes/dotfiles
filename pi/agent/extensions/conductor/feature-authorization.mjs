@@ -16,6 +16,18 @@ async function scopeFor(args, context, options) {
   const response = await scaffoldTasks({ operation: 'list', feature_id: featureId }, { directory: repository }, options.scaffoldOptions);
   requireValue(response.ok, 'Cannot inspect feature direction');
   const f = response.data.feature;
+  const currentBranch = git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
+  requireValue(currentBranch === f.branch,
+    'Feature branch mismatch: current ' + currentBranch + ', expected ' + f.branch +
+    '. Create or switch to the feature branch before approving or executing; approval does not switch branches.');
+  for (const [field, value] of [['designRef', args.designRef], ['task.designRef', args.task?.designRef]]) {
+    if (value === undefined) continue;
+    requireValue(/^sha256:[a-f0-9]{64}$/.test(value), field +
+      ' must be sha256: followed by 64 lowercase hex characters (71 characters total); received ' + String(value).length +
+      '. Read the exact design_ref from scaffold_tasks issue/select. Expected: ' + f.design_ref);
+    requireValue(value === f.design_ref, field + ' mismatch: expected ' + f.design_ref + ', received ' + value +
+      '. Inspect the current feature; do not reapprove an unchanged direction.');
+  }
   requireValue(f.workflow?.kind === 'recursive-issues/v1' && f.branch && f.branch !== defaultBranch && f.original_baseline &&
     (!args.designRef || args.designRef === f.design_ref) &&
     (!args.task || (args.task.featureId === featureId && args.task.designRef === f.design_ref && f.tasks[args.task.taskId])) &&
@@ -35,7 +47,8 @@ export async function featureAuthorized(args, context = {}, options = {}) {
   try { return !!await existing(await scopeFor(args, context, options)); } catch { return false; }
 }
 export async function requireFeatureAuthorization(args, context = {}, options = {}) {
-  requireValue(await featureAuthorized(args, context, options),
+  const scope = await scopeFor(args, context, options);
+  requireValue(await existing(scope),
     'Approve the overall feature direction once with approve_feature_direction before implementation. No per-issue approval is required within that scope');
 }
 export async function approveFeatureDirection(args, context = {}, options = {}) {

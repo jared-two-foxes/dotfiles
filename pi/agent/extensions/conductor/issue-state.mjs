@@ -28,6 +28,14 @@ export function issueDesignRequirements(task) {
   return '\n\nApproved issue design ' + d.reference + '\n' + d.summary + '\nVerification: ' + d.verification +
     '\nApproval record: ' + d.approval;
 }
+// Persisted policy is authoritative; callers supply only additional scope. Keep
+// this idempotent for existing callers that already supply the canonical text.
+export function issueRequirements(task, additional) {
+  requireValue(typeof additional === 'string', 'Issue requirements must be a string');
+  const missing = [...task.acceptance_criteria, ...task.constraints, issueDesignRequirements(task)]
+    .filter(text => !additional.includes(text));
+  return additional + (missing.length ? '\n\n' + missing.join('\n') : '');
+}
 export async function issueMutation(repository, binding, operation, payload, options = {}) {
   const response = await scaffoldTasks({ operation, feature_id: binding.featureId, task_id: binding.taskId, payload },
     { directory: repository }, options.scaffoldOptions);
