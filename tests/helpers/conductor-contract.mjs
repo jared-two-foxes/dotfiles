@@ -12,7 +12,8 @@ async function fixture(t) {
   const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
   git('init', '-q'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@example.invalid');
   await writeFile(path.join(dir, 'source.txt'), 'before'); git('add', '.'); git('commit', '-qm', 'baseline');
-  return { dir, git, args: { input: '{"operations":[]}', requirements: 'Preserve full approved criteria',
+  const repository = path.resolve(git('rev-parse', '--show-toplevel'));
+  return { dir: repository, git, args: { input: '{"operations":[]}', requirements: 'Preserve full approved criteria',
     baseRef: git('rev-parse', 'HEAD'), buildCommand: ['cargo', 'check'], testCommand: ['cargo', 'test', '--lib', 'invoices::'] } };
 }
 
