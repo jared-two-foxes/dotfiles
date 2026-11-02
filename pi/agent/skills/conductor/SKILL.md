@@ -23,7 +23,8 @@ meaningful selection. Retain exact commands and coverage in the issue design.
 Explain any unavoidable broader command. Reserve the full suite for final root
 verification through validate_feature after checkpoints; corrective issues use
 targeted checks before rerunning that final gate. Keep ordered checks fixed across
-corrections. The buildCommand/testCommand pair remains an alternative input shape,
+corrections except for explicit command invocation repairs described below.
+The buildCommand/testCommand pair remains an alternative input shape,
 not a requirement to run the entire suite for each issue.
 On a first attempt, `requirements` contains additional scope (or an empty string);
 the adapter adds persisted criteria, constraints and the complete approved issue
@@ -65,9 +66,46 @@ not by default. Never invoke Conductor/executor/review-cli from Bash or make sou
 
 One call performs one attempt. Pi interprets NEEDS_DESIGN, authors corrections
 against the current tree and supplies previousAttempt. Preserve five total attempts,
-criteria/findings, baseline and checks within an epoch. BLOCKED stops automatic work.
+criteria/findings and baseline within an epoch. BLOCKED stops the current command
+list, not Pi's diagnosis or an authorized, evidence-bound correction.
 Maximum budgets and provider errors are never review approval. Inspect real receipts;
 PASSED requires successful execution, checks and APPROVED independent review.
+
+### Recover a failed or blocked attempt
+
+Inspect the returned receipt with `inspect_issue_attempt`; use its `continuation`
+fields verbatim and supply new operations against the current source. The prior
+attempt's `after` snapshot includes successfully applied edits even when checks
+or Review failed. Keep `baseRef` at the original HEAD: the review covers the entire
+cumulative diff. Do not reset files, delete receipts, reinitialize Scaffold, or
+checkpoint unverified work. Do not replay already-applied operations or add identity
+edits for unchanged files. Use `{"operations":[]}` for a checks-only retry.
+
+If a check's command is wrong (for example `sh` is absent on native Windows), keep
+the named checks in order and supply `verificationRepairReason` explaining the
+failure, repaired invocation and equivalent coverage. This permits command changes,
+not removing/renaming/reordering checks or changing success conditions. Keep the
+approved design and requirements fixed. The repair reason and plan reach independent
+Review and are retained in the authenticated attempt chain. Never change a command
+to hide a failing test. A changed verification contract requires explicit Design
+recovery. Prefer direct executable/argv commands; when shell syntax is essential,
+inspect the host first and use its available shell (`cmd /c` or PowerShell on native
+Windows, `sh -c` only where installed). Preserve environment assignment/quoting semantics.
+
+If Scaffold is blocked/failed, inspect its state, `retry` with the recovery reason,
+then `start` the same issue. Those transitions do not reset receipts or consumed
+attempts. A fresh context may discover the latest receipt through
+`prepare_issue_handoff`; use `inspect_issue_attempt` for execution continuation.
+Refresh a stale context capsule after lifecycle changes; it is data, not the
+`resume_issue.handoffRef` used as `previousAttempt`. A resume receipt remains usable
+after the required `start` even though the context capsule's task_revision changed.
+
+Continue a diagnosed, in-scope correction under the existing direction approval.
+Stop for unavailable prerequisites/credentials, unresolved source/index drift,
+exhausted attempts, or two consecutive substantive failures without progress;
+report the concrete blocker with retained evidence. Do not blindly retry unchanged
+commands. On a source/tree mismatch, preserve all work and use the appropriate
+recovery path; never force acceptance of an unrelated tree.
 
 On `stage: COMMITTED`, completion and the local checkpoint are already recorded.
 Automatic finalization follows the receipt ending the active verification/correction loop.

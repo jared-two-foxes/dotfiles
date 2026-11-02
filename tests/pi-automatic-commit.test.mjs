@@ -14,6 +14,8 @@ import { readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/e
 import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
+import { inspectIssueAttempt } from '../pi/agent/extensions/conductor/issue-context.mjs';
+import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE
   ? 'Requires real Scaffold and POSIX executable fixtures' : false };
@@ -125,6 +127,78 @@ test('successful review automatically completes the task and runs a verified com
     const reference = await retainEvidence(f.directory, tampered);
     await assert.rejects(authenticateTaskEvidence(f.directory, reference, f.args.task));
   }
+});
+
+test('BLOCKED missing executable repairs forward with empty operations and authenticated commit', integration, async t => {
+  const f = await fixture(t);
+  f.args.checks = [{ name: 'environment check', command: [process.execPath, '-e', 'console.log("environment ready")'] }, ...f.args.checks];
+  const broken = { ...f.args, checks: [{ ...f.args.checks[0], command: ['pi-test-missing-shell-ENOENT'] }, f.args.checks[1]] };
+  const first = await executeAndCheckpoint(broken, f.context);
+  assert.equal(first.status, 'BLOCKED', JSON.stringify(first));
+  assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), 'after');
+  assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+  const recovered = await inspectIssueAttempt({ reference: first.evidence.reference }, f.context);
+  assert.equal(recovered.ok, true, JSON.stringify(recovered)); assert.equal(recovered.matches_source, true);
+  const correction = { ...recovered.continuation, input: '{"operations":[]}', checks: f.args.checks };
+  const noReason = await executeAndCheckpoint(correction, f.context);
+  assert.equal(noReason.status, 'BLOCKED'); assert.match(noReason.message, /verificationRepairReason/);
+  assert.equal(noReason.evidence, undefined, 'invalid repairs do not consume an attempt');
+  const reason = 'Missing shell executable; invoke the same targeted regression directly with Node, preserving coverage';
+  process.env.EXPECTED_REVIEW_REQUIREMENTS = '*';
+  const delivered = await executeAndCheckpoint({ ...correction, verificationRepairReason: reason }, f.context);
+  assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.stage, 'COMMITTED');
+  assert.equal(delivered.evidence.attempt, 2); assert.equal(f.confirmations(), 1);
+  const record = await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
+  assert.equal(record.args.requirements, f.args.requirements);
+  assert.equal(record.args.baseRef, f.base); assert.equal(record.args.previousAttempt, first.evidence.reference);
+  assert.match(record.workflow.inputs.requirements, /Missing shell executable/);
+  assert.match(record.workflow.inputs.requirements, /Current verification plan/);
+  const chain = await authenticateAttemptChain(f.directory, delivered.evidence.reference, f.args.task);
+  assert.deepEqual(chain.records.map(r => r.attempt), [1, 2]);
+  assert.deepEqual(JSON.parse(record.args.input).operations, []);
+  assert.equal(f.git('rev-list', '--count', f.base + '..HEAD'), '1');
+  const unaudited = structuredClone(record); delete unaudited.args.verificationRepairReason;
+  const unauditedRef = await retainEvidence(f.directory, unaudited);
+  await assert.rejects(authenticateAttemptChain(f.directory, unauditedRef, f.args.task), /Invalid correction receipt chain/);
+});
+
+test('failed test patches current source with unchanged checks after lifecycle retry', integration, async t => {
+  const f = await fixture(t);
+  const checks = [{ name: 'source regression', command: [process.execPath, '-e',
+    'require("node:assert/strict").equal(require("fs").readFileSync("source.txt","utf8"),"corrected");console.log("1 test passed")'] }];
+  const first = await executeAndCheckpoint({ ...f.args, checks }, f.context);
+  assert.equal(first.status, 'NEEDS_DESIGN', JSON.stringify(first));
+  await f.call('fail', { task_id: 'F', reason: 'Regression assertion failed; retain implementation and receipt' });
+  await f.call('retry', { task_id: 'F', reason: 'Correct current source using retained attempt one' });
+  await f.call('start', { task_id: 'F' });
+  const latest = await inspectIssueAttempt({ reference: first.evidence.reference }, f.context);
+  const input = JSON.stringify({ operations: [{ type: 'edit_file', path: 'source.txt', edits: [{ oldText: 'after', newText: 'corrected' }] }] });
+  await writeFile(path.join(f.directory, 'unrelated.txt'), 'unretained change');
+  const drift = await executeAndCheckpoint({ ...latest.continuation, input }, f.context);
+  assert.equal(drift.status, 'BLOCKED'); assert.match(drift.message, /source\/index or HEAD/);
+  await rm(path.join(f.directory, 'unrelated.txt'));
+  f.git('add', 'source.txt');
+  const staged = await executeAndCheckpoint({ ...latest.continuation, input }, f.context);
+  assert.equal(staged.status, 'BLOCKED'); assert.match(staged.message, /source\/index or HEAD/);
+  f.git('restore', '--staged', 'source.txt');
+  const delivered = await executeAndCheckpoint({ ...latest.continuation, input }, f.context);
+  assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.evidence.attempt, 2);
+  assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), 'corrected');
+  const record = await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
+  assert.deepEqual(record.args.checks, checks); assert.equal(record.args.baseRef, f.base);
+  assert.equal(f.confirmations(), 1);
+});
+
+test('BLOCKED review resumes from retained tree without reapplying successful operations', integration, async t => {
+  const f = await fixture(t); process.env.REVIEW_FIXTURE_STATUS = 'INDETERMINATE';
+  const first = await executeAndCheckpoint(f.args, f.context);
+  assert.equal(first.status, 'BLOCKED', JSON.stringify(first));
+  process.env.REVIEW_FIXTURE_STATUS = 'APPROVED';
+  const latest = await inspectIssueAttempt({ reference: first.evidence.reference }, f.context);
+  const delivered = await executeAndCheckpoint({ ...latest.continuation, input: '{"operations":[]}' }, f.context);
+  assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.evidence.attempt, 2);
+  await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
+  assert.equal(f.confirmations(), 1);
 });
 
 test('invalid workflow preparation does not consume the first task attempt', integration, async t => {

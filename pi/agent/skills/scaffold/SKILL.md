@@ -132,6 +132,14 @@ an explicit handoff and fixed continuation fields. Complete native bookkeeping,
 `previousAttempt`. Three consumed attempts mean attempt four next. READY never
 means PASSED. Conflicts or exhausted budgets block with evidence retained.
 
+The execution `handoffRef` is an authenticated receipt, separate from a
+`prepare_issue_handoff` context capsule. `start` may increment task_revision and
+stale the context capsule; refresh it after the transition. Continue execution
+with the same resume receipt, not a context reference. For ordinary check/source
+failures, use the latest attempt receipt directly; suspension is for new design
+responsibilities, not a prerequisite for patching forward. If lifecycle is blocked
+or failed, `retry` then `start` the same issue, retaining the receipt chain and count.
+
 Without unfinished implementation use `design-reopen` directly. Failed final
 review creates new dependent issues after completed nodes; preserve all completed
 nodes, commits and original criteria. Environmental failures are blocks, not

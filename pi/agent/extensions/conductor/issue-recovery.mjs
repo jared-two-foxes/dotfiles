@@ -179,7 +179,7 @@ export async function resumeIssue(args, context = {}, options = {}) {
     await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
     const { input, ...resume } = h.args;
     return { status: 'READY', handoffRef, consumedAttempts: previous.attempt, remainingAttempts: 5 - previous.attempt,
-      resume: { ...resume, previousAttempt: handoffRef }, message: 'Start the same issue and obtain fresh implementation approval; READY is not PASSED' };
+      resume: { ...resume, previousAttempt: handoffRef }, message: 'Start the same issue, refresh any stale context capsule, and continue with this previousAttempt under the retained feature direction; READY is not PASSED' };
   } catch (error) { return { status: 'BLOCKED', message: error.message, handoffRef, repository,
     recovery: 'Preserve the saved stash, private refs and old receipts. Inspect conflicts/current source; never reset attempts or replay stash blindly' }; }
 }

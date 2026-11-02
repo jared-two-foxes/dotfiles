@@ -218,7 +218,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Under the approved feature direction, construct and run ONE Conductor v2 command list: " +
       "external Executor, caller-selected verification, then external Review. After approval, automatically record task completion and run a verified Git commit command through Conductor. " +
-      "Returns PASSED, NEEDS_DESIGN or BLOCKED. Never retries or generates fixes.",
+      "Returns PASSED, NEEDS_DESIGN or BLOCKED. One call never retries or generates fixes; Pi diagnoses recoverable failures and continues with the latest previousAttempt against its retained after-tree. Use empty operations for verification-only retries.",
     parameters: Type.Object({
       checkpoint: Type.Object({
         defaultBranch: Type.String({ description: "Known repository default branch; protected from automatic commits" }),
@@ -230,6 +230,9 @@ export default function (pi: ExtensionAPI) {
       }, { description: "Scaffold task identity and approved immutable design reference" })),
       previousAttempt: Type.Optional(Type.String({
         description: "Retained receipt for the previous attempt of this same task; required for corrections/recovery",
+      })),
+      verificationRepairReason: Type.Optional(Type.String({ minLength: 1, maxLength: 4000,
+        description: "Explicit command invocation repair after a failed/blocked previousAttempt (for example missing sh on Windows). Explain the failure and why coverage is equivalent. Preserve check names/order and success conditions, fixed requirements, baseline and attempt budget. Never bypass a failing test or weaken coverage.",
       })),
       input: Type.String({
         description: "Exact executor JSON with an operations array; authored by the agent",
@@ -247,7 +250,7 @@ export default function (pi: ExtensionAPI) {
           description: "Optional evaluator executable and arguments; Conductor supplies the original exit code and complete output paths via environment variables. Exit 0 permits the next command." })),
       }, { additionalProperties: false }), {
         minItems: 1, maxItems: 64,
-        description: "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. Supply checks OR both legacy buildCommand/testCommand fields. The plan stays fixed across corrections.",
+        description: "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. Supply checks OR both legacy buildCommand/testCommand fields. Keep the plan fixed except for explicit command repairs with verificationRepairReason.",
       })),
       buildCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy build executable and arguments; use with testCommand and omit checks" })),
       testCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy test executable and arguments; targeted test filters are supported; omit when supplying checks" })),

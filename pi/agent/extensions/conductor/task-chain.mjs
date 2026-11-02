@@ -2,7 +2,7 @@
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from './git-tree.mjs';
 import { readEvidence, validateBinding, taskEvidenceReferences } from './evidence.mjs';
-import { sameVerification } from './verification.mjs';
+import { sameVerification, correctionVerification } from './verification.mjs';
 import { readReconciliation } from './reconciliation.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
@@ -160,7 +160,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const previous = prior.record;
     requireValue(previous.result.status !== 'PASSED' && previous.attempt + 1 === record.attempt &&
       previous.args.baseRef === record.args.baseRef && (previous.kind === 'issue-zero-handoff' || (previous.args.requirements === record.args.requirements &&
-      sameVerification(previous.args, record.args))) && previous.after.head === record.before.head &&
+      correctionVerification(previous, record.args))) && previous.after.head === record.before.head &&
       previous.after.digest === record.before.digest &&
       previous.after.tree === record.before.tree, 'Invalid correction receipt chain');
     return { record, records: [...prior.records, record] };
