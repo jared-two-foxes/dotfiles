@@ -46,7 +46,7 @@ uses `/skill:executor` to author exact operations and the native
 `/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
 implementation strategy within Design.
 
-Pi skills do not pin a model or establish a separate OpenCode-style agent.
+Pi skills do not pin a model or establish a separate agent.
 The active Pi model executes the Design persona in the current conversation.
 
 ## Caller-selected task verification
@@ -221,7 +221,7 @@ never authorizes a commit or replaying the list.
 
 The lower-level `executeAndReview` library still performs verification only for
 existing integrations/tests. Automatic completion/commit is the native Pi delivery
-entry point; the unbound OpenCode adapter keeps its existing verification contract.
+entry point.
 
 Conductor returns generic `conductor.result/v2`: exits 0/1/2 mean
 PASSED/FAILED/BLOCKED. The adapter validates every returned command's index,

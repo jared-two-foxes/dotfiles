@@ -1,7 +1,7 @@
 /**
  * Pi's native execute_and_review tool.
  *
- * Pi and OpenCode have different extension APIs; both send the same
+ * Sends the
  * conductor.request/v2 command-list protocol to the deterministic Rust Conductor CLI.
  * The feature gate reuses bounded Review without Executor or AI retry logic.
  */

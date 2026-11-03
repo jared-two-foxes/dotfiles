@@ -83,10 +83,9 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
   }
 });
 
-test('Pi and OpenCode executor guides use the merged exact-text edit operation', () => {
+test('Pi executor guide uses the merged exact-text edit operation', () => {
   const pi = read('pi/agent/skills/executor/SKILL.md');
-  const openCode = read('opencode/skills/executor/SKILL.md');
-  for (const [name, guide] of [['Pi', pi], ['OpenCode', openCode]]) {
+  for (const [name, guide] of [['Pi', pi]]) {
     assert.ok(guide.includes('\"type\": \"edit_file\"'), name);
     assert.ok(guide.includes('\"oldText\"'), name);
     assert.ok(guide.includes('\"newText\"'), name);
@@ -95,7 +94,6 @@ test('Pi and OpenCode executor guides use the merged exact-text edit operation',
     assert.ok(guide.includes('occur exactly once'), name);
   }
   assert.ok(read('pi/agent/skills/design/SKILL.md').includes('Use `edit_file` for in-place text changes'));
-  assert.ok(read('opencode/agents/design.md').includes('Use `edit_file` for in-place text changes'));
   assert.ok(read('pi/agent/skills/conductor/SKILL.md').includes('removed `patch` variants'));
 });
 
@@ -116,7 +114,7 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   assert.match(read('pi/agent/extensions/conductor/delivery.mjs'), /requireFeatureAuthorization/);
   assert.match(read('pi/agent/extensions/conductor/task-finalization.mjs'), /featureAuthorized/);
   const adapter = read('pi/agent/extensions/conductor/adapter.mjs');
-  assert.match(adapter, /options.issueWorkflowOnly\) await requireFeatureAuthorization/);
+  assert.match(adapter, /options.issueWorkflowOnly\)\s+await requireFeatureAuthorization/);
 });
 
 test('execution guides do not add a second approval after the overall direction', () => {

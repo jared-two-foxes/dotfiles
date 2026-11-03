@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { successResponse, domainResponse } from "./conductor-v2.mjs";
 
@@ -34,7 +33,7 @@ async function fixture(t) {
   };
 }
 
-export function contract(label, executeAndReview, pi = false) {
+export function contract(label, executeAndReview) {
   test(
     label + ": authors v2 command list and exact external tool request files",
     async (t) => {
@@ -110,79 +109,6 @@ export function contract(label, executeAndReview, pi = false) {
       assert.equal(result.conductor.runner.schema, "conductor.result/v2");
     },
   );
-
-  if (!pi)
-    test("OpenCode: build and test can carry caller-owned success conditions", async (t) => {
-      const f = await fixture(t);
-      const args = {
-        ...f.args,
-        buildSuccessCondition: ["rg", "-q", "build finished"],
-        testSuccessCondition: ["rg", "-q", "test result: ok"],
-      };
-      const result = await executeAndReview(
-        args,
-        { directory: f.dir },
-        {
-          invokeConductor: async (json) => {
-            const request = JSON.parse(json);
-            assert.deepEqual(request.commands[1].success_condition, {
-              program: "rg",
-              args: ["-q", "build finished"],
-            });
-            assert.deepEqual(request.commands[2].success_condition, {
-              program: "rg",
-              args: ["-q", "test result: ok"],
-            });
-            return successResponse(request);
-          },
-        },
-      );
-      assert.equal(result.status, "PASSED", JSON.stringify(result));
-    });
-
-  if (!pi)
-    test("OpenCode: structured Review condition runs from its independent installation", async (t) => {
-      const f = await fixture(t);
-      const file = path.join(f.dir, ".git", "review-output.json");
-      const script = new URL(
-        "../../opencode/scripts/review-condition.mjs",
-        import.meta.url,
-      );
-      const { spawnSync } = await import("node:child_process");
-      for (const [status, code] of [
-        ["APPROVED", 0],
-        ["CHANGES_REQUESTED", 1],
-      ]) {
-        await writeFile(
-          file,
-          JSON.stringify({
-            schema: "review.result/v1",
-            status,
-            reason: "REVIEW_COMPLETED",
-            review_id: "test",
-            completed_at: "2026-11-01T00:00:00Z",
-            findings:
-              status === "APPROVED"
-                ? []
-                : [{ severity: "high", blocking: true, message: "fix" }],
-          }),
-        );
-        const result = spawnSync(process.execPath, [fileURLToPath(script)], {
-          cwd: f.dir,
-          env: {
-            ...process.env,
-            CONDUCTOR_COMMAND_EXIT_CODE: String(code),
-            CONDUCTOR_COMMAND_STDOUT_PATH: file,
-          },
-          encoding: "utf8",
-        });
-        assert.equal(
-          result.status,
-          status === "APPROVED" ? 0 : 1,
-          result.stderr,
-        );
-      }
-    });
 
   test(
     label +
@@ -518,7 +444,6 @@ export function contract(label, executeAndReview, pi = false) {
     },
   );
 
-  if (pi)
     test("Pi: review flags and workflow deadline are independent, checks remain caller-selected", async (t) => {
       const f = await fixture(t);
       delete f.args.buildCommand;
@@ -567,7 +492,6 @@ export function contract(label, executeAndReview, pi = false) {
       assert.equal(result.status, "PASSED", JSON.stringify(result));
     });
 
-  if (pi)
     test("Pi: invalid deadlines and runner interruption never retry or approve", async (t) => {
       const f = await fixture(t);
       for (const workflowTimeoutMs of [
