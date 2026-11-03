@@ -879,9 +879,11 @@ test(
     assert.equal(refreshed.applicable, true, JSON.stringify(refreshed));
     const bypass = await f.run(await f.args("F"));
     assert.equal(bypass.status, "BLOCKED");
+    const freshArgs = await f.args("F");
     const c = await f.finish("F", {
-      ...(await f.args("F")),
+      ...freshArgs,
       ...resumed.resume,
+      checks: freshArgs.checks,
       requirements: "",
       input: '{"operations":[]}',
     });
@@ -1635,7 +1637,7 @@ test(
 );
 
 test(
-  "legacy known test-runner plans survive multiple modern continuations without implicit validator changes",
+  "named test-runner checks survive multiple continuations without implicit validator changes",
   integration,
   async (t) => {
     const { retainEvidence } =
@@ -1644,8 +1646,9 @@ test(
     await f.approve("F");
     await f.call("design-finish");
     await f.call("start", { task_id: "F" });
+    const originalArgs = await f.args("F");
     const args = {
-        ...(await f.args("F")),
+        ...originalArgs,
         checks: originalArgs.checks.map((check) =>
           check.name === "test"
             ? { ...check, command: ["pytest", "-q"] }
@@ -1676,7 +1679,7 @@ test(
     assert.equal(
       record.args.checks[1].successCondition,
       undefined,
-      "legacy evaluator contract is not changed implicitly",
+      "the retained check does not acquire an implicit validator",
     );
     assert.deepEqual(record.args.checks[1].command, ["pytest", "-q"]);
     assert.equal(record.attempt, 3);

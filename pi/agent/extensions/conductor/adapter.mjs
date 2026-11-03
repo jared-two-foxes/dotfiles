@@ -404,10 +404,14 @@ export async function hydrateContinuation(args, context) {
   if (args.baseRef && args.baseRef !== previous.args.baseRef)
     throw new Error("Continuation baseline mismatch");
 
-  const inheritedChecks = verificationChecks(previous.args);
   const callerPlan = args.checks !== undefined;
-
-  const checks = callerPlan ? verificationChecks(args) : inheritedChecks;
+  // A zero-attempt handoff has no previous verification plan to inherit.
+  const inheritedChecks =
+    previous.kind === "issue-zero-handoff"
+      ? undefined
+      : verificationChecks(previous.args);
+  const checks =
+    callerPlan || !inheritedChecks ? verificationChecks(args) : inheritedChecks;
 
   const supplied = args.requirements;
   const inherited = previous.args.deliveryContext;
