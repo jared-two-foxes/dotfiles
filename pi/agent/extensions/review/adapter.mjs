@@ -1,4 +1,4 @@
-// Pi-local standalone review adapter. Do not import from an OpenCode installation.
+// Pi-local standalone review adapter.
 // Review is repository-read-only: no executor, builds, tests, checkout or repairs.
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';

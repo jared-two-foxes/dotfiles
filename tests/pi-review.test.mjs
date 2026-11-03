@@ -195,5 +195,5 @@ test('Pi and shared policies allow standalone review without weakening implement
     assert.match(await read(name), /read-only code reviews/);
   }
   assert.match(await read('pi/agent/extensions/review/index.ts'), /pi\.registerTool\(createReviewTool\(Type\)\)/);
-  assert.match(await read('.github/workflows/opencode.yml'), /tests\/pi-review\.test\.mjs/);
+  assert.match(await read('.github/workflows/pi.yml'), /tests\/pi-review\.test\.mjs/);
 });

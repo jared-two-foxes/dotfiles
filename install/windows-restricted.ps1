@@ -219,7 +219,6 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     # AI agent tools
     Install-WingetPackage -Id 'Anthropic.Claude'    -Name 'Claude (desktop)'   -Scope 'user'
     Install-WingetPackage -Id 'GitHub.Copilot'      -Name 'GitHub Copilot CLI' -Scope 'user'
-    Install-WingetPackage -Id 'SST.OpenCodeDesktop' -Name 'OpenCode'          -Scope 'user' -Command 'opencode'
 }
 
 # --- Fonts -------------------------------------------------------
@@ -345,12 +344,6 @@ Write-Host "[review CLI]" -ForegroundColor White
 # --- conductor CLI ---
 Write-Host "[conductor CLI]" -ForegroundColor White
 & (Join-Path $PSScriptRoot 'conductor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
-
-# --- OpenCode ------------------------------------------------
-Write-Host "
-[OpenCode Configuration]" -ForegroundColor White
-
-& (Join-Path $PSScriptRoot 'opencode.ps1') -Mode Copy -Force:$Force -WhatIf:$WhatIfPreference
 
 # --- Copilot cleanup -----------------------------------------
 Write-Host "

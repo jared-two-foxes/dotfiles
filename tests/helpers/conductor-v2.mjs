@@ -2,7 +2,6 @@
 // injected fixtures to actual v2 transport, keeping those tests about task/rebase
 // semantics. Wire-contract tests import the production adapters directly.
 import { executeAndReview as pi } from '../../pi/agent/extensions/conductor/adapter.mjs';
-import { executeAndReview as opencode } from '../../opencode/scripts/execute-and-review.mjs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -110,4 +109,3 @@ function adapt(adapter) {
   });
 }
 export const executeAndReview = adapt(pi);
-export const executeOpenCode = adapt(opencode);

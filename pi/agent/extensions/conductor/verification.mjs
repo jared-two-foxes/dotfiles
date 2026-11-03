@@ -1,53 +1,109 @@
 // Normalize the caller's verification plan; Conductor owns command execution.
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath } from "node:url";
 export function meaningfulChecks(checks) {
-  return checks.map(c => {
-    const runner = c.command[0].split(/[\\/]/).at(-1).replace(/\.exe$/, '');
-    const recognized = (runner === 'cargo' && c.command.includes('test') && !c.command.includes('--no-run')) ||
-      ['pytest', 'vitest', 'jest', 'mocha'].includes(runner) ||
-      (['python', 'python3'].includes(runner) && c.command.includes('pytest'));
-    return recognized && !c.successCondition ? { ...c, successCondition: [process.execPath,
-      fileURLToPath(new URL('./meaningful-test-condition.mjs', import.meta.url))] } : c;
+  return checks.map((c) => {
+    const runner = c.command[0]
+      .split(/[\\/]/)
+      .at(-1)
+      .replace(/\.exe$/, "");
+    const recognized =
+      (runner === "cargo" &&
+        c.command.includes("test") &&
+        !c.command.includes("--no-run")) ||
+      ["pytest", "vitest", "jest", "mocha"].includes(runner) ||
+      (["python", "python3"].includes(runner) && c.command.includes("pytest"));
+    return recognized && !c.successCondition
+      ? {
+          ...c,
+          successCondition: [
+            process.execPath,
+            fileURLToPath(
+              new URL("./meaningful-test-condition.mjs", import.meta.url),
+            ),
+          ],
+        }
+      : c;
   });
 }
 export function verificationChecks(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("Verification arguments must be an object");
+  }
+
   function command(value, label) {
-    if (!Array.isArray(value) || value.length < 1 || value.length > 64 ||
-        value.some(part => typeof part !== 'string' || !part || part.includes('\0') || part.length > 8192) ||
-        !value[0].trim()) {
-      throw new Error(label + ' must be a nonempty executable-and-arguments array');
+    if (
+      !Array.isArray(value) ||
+      value.length < 1 ||
+      value.length > 64 ||
+      value.some(
+        (part) =>
+          typeof part !== "string" ||
+          !part ||
+          part.includes("\0") ||
+          part.length > 8192,
+      ) ||
+      !value[0].trim()
+    ) {
+      throw new Error(
+        label + " must be a nonempty executable-and-arguments array",
+      );
     }
     return [...value];
   }
-  if (args.checks !== undefined) {
-    if (args.buildCommand !== undefined || args.testCommand !== undefined) {
-      throw new Error('Supply checks or buildCommand/testCommand, not both');
-    }
-    if (!Array.isArray(args.checks) || args.checks.length < 1 || args.checks.length > 64) {
-      throw new Error('checks must contain between 1 and 64 named verification commands');
-    }
-    const names = new Set();
-    return args.checks.map(check => {
-      if (!check || typeof check !== 'object' || Array.isArray(check) ||
-          Object.keys(check).some(key => !['name', 'command', 'successCondition'].includes(key)) ||
-          typeof check.name !== 'string' || !check.name.trim() || check.name.length > 256 ||
-          check.name.includes('\0') || check.name !== check.name.trim() || names.has(check.name)) {
-        throw new Error('Each check requires a unique nonblank name and a command (no other fields)');
-      }
-      names.add(check.name);
-      return { name: check.name, command: command(check.command, 'checks.' + check.name + '.command'),
-        ...(check.successCondition === undefined ? {} : { successCondition: command(check.successCondition,
-          'checks.' + check.name + '.successCondition') }) };
-    });
+
+  if (
+    !Array.isArray(args.checks) ||
+    args.checks.length < 1 ||
+    args.checks.length > 64
+  ) {
+    throw new Error(
+      "checks must contain between 1 and 64 named verification commands",
+    );
   }
-  return [
-    { name: 'build', command: command(args.buildCommand, 'buildCommand') },
-    { name: 'test', command: command(args.testCommand, 'testCommand') },
-  ];
+
+  const names = new Set();
+
+  return args.checks.map((check) => {
+    if (
+      !check ||
+      typeof check !== "object" ||
+      Array.isArray(check) ||
+      Object.keys(check).some(
+        (key) => !["name", "command", "successCondition"].includes(key),
+      ) ||
+      typeof check.name !== "string" ||
+      !check.name.trim() ||
+      check.name.length > 256 ||
+      check.name.includes("\0") ||
+      check.name !== check.name.trim() ||
+      names.has(check.name)
+    ) {
+      throw new Error(
+        "Each check reqiures a unique nonblank name and a command (no other fields)",
+      );
+    }
+
+    names.add(check.name);
+    return {
+      name: check.name,
+      command: command(check.command, "checks." + check.name + ".command"),
+      ...(check.successCondition === undefined
+        ? {}
+        : {
+            successCondition: command(
+              check.successCondition,
+              "checks." + check.name + ".successCondition",
+            ),
+          }),
+    };
+  });
 }
 
 export function sameVerification(left, right) {
-  return JSON.stringify(verificationChecks(left)) === JSON.stringify(verificationChecks(right));
+  return (
+    JSON.stringify(verificationChecks(left)) ===
+    JSON.stringify(verificationChecks(right))
+  );
 }
 
 // Repair command invocation without silently replacing the verification contract.
@@ -55,21 +111,51 @@ export function sameVerification(left, right) {
 // must approve the result. Both preflight and receipt authentication use this rule.
 export function correctionVerification(previous, args) {
   const reason = args.verificationRepairReason;
-  if (reason !== undefined && (typeof reason !== 'string' || !reason.trim() ||
-      reason.length > 4000 || reason.includes('\0'))) return false;
+  if (
+    reason !== undefined &&
+    (typeof reason !== "string" ||
+      !reason.trim() ||
+      reason.length > 4000 ||
+      reason.includes("\0"))
+  )
+    return false;
   if (sameVerification(previous.args, args)) return true;
   if (args.deliveryContext && Array.isArray(args.contextUpdates)) {
-    const before = verificationChecks(previous.args), after = verificationChecks(args);
-    const repairs = args.contextUpdates.filter(u => u.kind === 'repair_check');
-    const additions = args.contextUpdates.filter(u => u.kind === 'add_check');
-    if (after.length === before.length + additions.length && before.every((c, i) =>
-      c.name === after[i].name && JSON.stringify(c.successCondition) === JSON.stringify(after[i].successCondition) &&
-      (JSON.stringify(c.command) === JSON.stringify(after[i].command) || repairs.some(u => u.checkId === c.name &&
-        typeof u.reason === 'string' && u.reason.trim())))) return true;
+    const before = verificationChecks(previous.args),
+      after = verificationChecks(args);
+    const repairs = args.contextUpdates.filter(
+      (u) => u.kind === "repair_check",
+    );
+    const additions = args.contextUpdates.filter((u) => u.kind === "add_check");
+    if (
+      after.length === before.length + additions.length &&
+      before.every(
+        (c, i) =>
+          c.name === after[i].name &&
+          JSON.stringify(c.successCondition) ===
+            JSON.stringify(after[i].successCondition) &&
+          (JSON.stringify(c.command) === JSON.stringify(after[i].command) ||
+            repairs.some(
+              (u) =>
+                u.checkId === c.name &&
+                typeof u.reason === "string" &&
+                u.reason.trim(),
+            )),
+      )
+    )
+      return true;
   }
-  if (!reason || !['BLOCKED', 'NEEDS_DESIGN'].includes(previous.result.status)) return false;
-  const before = verificationChecks(previous.args), after = verificationChecks(args);
-  return before.length === after.length && before.every((check, i) =>
-    check.name === after[i].name &&
-    JSON.stringify(check.successCondition) === JSON.stringify(after[i].successCondition));
+  if (!reason || !["BLOCKED", "NEEDS_DESIGN"].includes(previous.result.status))
+    return false;
+  const before = verificationChecks(previous.args),
+    after = verificationChecks(args);
+  return (
+    before.length === after.length &&
+    before.every(
+      (check, i) =>
+        check.name === after[i].name &&
+        JSON.stringify(check.successCondition) ===
+          JSON.stringify(after[i].successCondition),
+    )
+  );
 }

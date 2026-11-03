@@ -150,6 +150,4 @@ explicitly raised up to 8 MiB; oversized context pauses before source execution.
 the system cannot manufacture missing independent verification.
 
 Install the matching Scaffold delivery-record implementation and Review's typed
-failure/obligation-assessment protocol before deploying this Pi extension. Common
-transport changes remain mirrored in the independently installed OpenCode adapter;
-OpenCode's orchestration policy is unchanged.
+failure/obligation-assessment protocol before deploying this Pi extension.

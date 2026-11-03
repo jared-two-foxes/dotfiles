@@ -9,8 +9,8 @@ is not evidence of passing tests and cannot replace Conductor verification.
 ## Native installation
 
 Place the entire `review` directory (including all `.mjs` files and
-`package.json`) in `~/.pi/agent/extensions/review/`. No OpenCode installation
-is required. If the active agent home is this checkout, no copy is needed.
+`package.json`) in `~/.pi/agent/extensions/review/`.
+If the active agent home is this checkout, no copy is needed.
 Reload Pi or restart it after deployment. Also deploy the updated `SYSTEM.md`,
 `AGENTS.md` and review skill to a copy-based agent installation.
 

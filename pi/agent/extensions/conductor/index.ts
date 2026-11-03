@@ -1,7 +1,7 @@
 /**
  * Pi's native execute_and_review tool.
  *
- * Pi and OpenCode have different extension APIs; both send the same
+ * Sends the
  * conductor.request/v2 command-list protocol to the deterministic Rust Conductor CLI.
  * The feature gate reuses bounded Review without Executor or AI retry logic.
  */
@@ -282,10 +282,8 @@ export default function (pi: ExtensionAPI) {
           description: "Optional evaluator executable and arguments; Conductor supplies the original exit code and complete output paths via environment variables. Exit 0 permits the next command." })),
       }, { additionalProperties: false }), {
         minItems: 1, maxItems: 64,
-        description: "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. Supply checks OR both legacy buildCommand/testCommand fields. Revise commands through structured repairs; preserve required coverage and validators.",
+        description: "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. The only supported verification format.  Required on the first attempt; continuations may omit it to inherit the retained verification plan. Revise commands through structured repairs; preserve required coverage and validators.",
       })),
-      buildCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy build executable and arguments; use with testCommand and omit checks" })),
-      testCommand: Type.Optional(Type.Array(Type.String(), { minItems: 1, description: "Legacy test executable and arguments; targeted test filters are supported; omit when supplying checks" })),
       reviewModel: Type.Optional(Type.String({
         description: "Independent review model; default opencode/gpt-6.1-sol",
       })),
