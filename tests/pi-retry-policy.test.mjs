@@ -80,3 +80,12 @@ test('compiler diagnostics emitted by a test runner remain compilation failures'
   assert.equal(failureObservation(record('test', 1, 'error[E0308]: mismatched types')).category, 'compile');
   assert.equal(failureObservation(record('test', 2, 'assertion failed: imported status was accepted')).category, 'test');
 });
+
+test('unchanged source/check scope and source cycles stall even when diagnostic text changes', () => {
+  const sameTree = [1, 2, 3].map(n => record('test', n, 'random diagnostic request ' + n, 'A'));
+  assert.equal(stallDecision(sameTree, {}).reason, 'DIAGNOSIS_REQUIRED');
+  const cycle = [1, 2, 3, 4].map(n => record('test', n, 'different output ' + n, n % 2 ? 'A' : 'B'));
+  assert.equal(stallDecision(cycle, {}).reason, 'DIAGNOSIS_REQUIRED');
+  const progress = [1, 2, 3, 4, 5, 6, 7].map(n => record('test', n, 'new substantive failure ' + n, 'source-' + n));
+  assert.equal(stallDecision(progress, {}), null);
+});

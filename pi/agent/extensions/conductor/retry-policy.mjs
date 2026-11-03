@@ -11,7 +11,7 @@ export function diagnosticSignature(value) {
 }
 export function failureObservation(record) {
   const r = record.result, c = r.conductor ?? r.actualResult?.conductor;
-  let category = 'evidence_integrity', diagnostics = r.reason ?? r.message;
+  let category = 'evidence_integrity', diagnostics = r.reason ?? r.message, scope = c?.phase ?? r.stage;
   const review = c?.review;
   if (r.reason === 'RESOURCE_PAUSED') { category = 'resource'; diagnostics = r.message; }
   else if (c?.failure) { category = c.failure.category; diagnostics = c.failure.code; }
@@ -24,6 +24,7 @@ export function failureObservation(record) {
       .map(f => [f.path, f.message, f.recommendation].join(':')).sort().join('\n') : review.reason;
   } else if (c?.phase === 'verification') {
     const check = c.checks.find(v => v.status !== 'PASSED');
+    scope = check?.name ?? 'verification';
     const command = record.args.checks?.find(v => v.name === check?.name)?.command ?? [];
     const cmd = command.join(' ');
     category = /fmt|format/.test(cmd) ? 'format' : /clippy|lint/.test(cmd) ? 'lint' :
@@ -38,10 +39,11 @@ export function failureObservation(record) {
   const passed = (c?.checks ?? []).filter(v => v.status === 'PASSED' || v.exit_code === 0)
     .map(v => v.name).sort();
   return { category, signature: diagnosticSignature([category, diagnostics]), tree: record.after?.tree,
+    scope, verified: (review?.obligation_assessments ?? []).filter(a => a.disposition === 'verified').map(a => a.obligation_id),
     passed, reviewReached: c?.phase === 'review', at: Date.parse(record.recordedAt),
     environment: record.args.reviewEnvironment };
 }
-const substantive = new Set(['compile', 'format', 'lint', 'test', 'review_finding', 'executor_application']);
+const substantive = new Set(['compile', 'format', 'lint', 'test', 'review_finding', 'executor_application', 'invocation']);
 export function stallDecision(records, args) {
   const lastBridge = records.findLastIndex(r => ['issue-handoff', 'rebase-handoff'].includes(r.kind) &&
     r.args.baseRef !== r.recovery?.featureBaseRef);
@@ -51,11 +53,15 @@ export function stallDecision(records, args) {
   if (!last) return null;
   const repeats = observations.filter(o => o.category === last.category && o.signature === last.signature);
   const recurring = repeats.length >= 3;
+  const priorVerified = new Set(observations.slice(0, -1).flatMap(o => o.verified));
+  const independentlyResolved = last.verified.some(id => !priorVerified.has(id));
+  const unchangedScope = observations.filter(o => o.tree === last.tree && o.category === last.category && o.scope === last.scope);
+  const stationary = unchangedScope.length >= 3 && !independentlyResolved;
   const trees = observations.map(o => o.tree);
   const cycling = trees.length >= 4 && trees.at(-1) === trees.at(-3) && trees.at(-2) === trees.at(-4) &&
-    (observations.at(-1).signature === observations.at(-3).signature || repeats.length >= 2);
+    observations.slice(-4).every(o => o.scope === last.scope && o.category === last.category) && !independentlyResolved;
   // A newly passed stage only counts if the failing obligation does not recur.
-  if (!recurring && !cycling) return null;
+  if (!recurring && !cycling && !stationary) return null;
   const diagnosis = args.contextUpdates?.find(u => u.kind === 'diagnose' && u.signature === last.signature &&
     typeof u.text === 'string' && u.text.trim());
   const alreadyProbed = records.some(r => r.args.contextUpdates?.some(u => u.kind === 'diagnose' && u.signature === last.signature));
