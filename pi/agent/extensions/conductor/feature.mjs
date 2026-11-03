@@ -11,6 +11,7 @@ import { reviewChanges } from '../review/adapter.mjs';
 import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from './feature-verification.mjs';
 import { runCheck } from './feature-process.mjs';
 import { obligationsVerified, findingObligations } from './delivery-context.mjs';
+import { authenticateAmendment } from './context-amendment.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, fields = {}) => ({ schema: 'pi.feature-validation/v1', status, ...fields });
@@ -44,6 +45,9 @@ export async function featurePreconditions(repository, args, options = {}) {
   requireValue(!feature.original_baseline || feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
   requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
   const tasks = feature.tasks;
+  for (const task of Object.values(tasks)) for (const a of task.delivery?.context?.amendments ?? [])
+    requireValue(equal(await authenticateAmendment(repository, a.reference,
+      { featureId: feature.id, taskId: task.id, designRef: feature.design_ref }), a), 'Invalid persisted feature amendment');
   const identifiers = Object.keys(tasks);
   requireValue(identifiers.length > 0 && identifiers.every(id => tasks[id].status === 'completed'),
     'All required tasks, including recursive parents, must be completed');

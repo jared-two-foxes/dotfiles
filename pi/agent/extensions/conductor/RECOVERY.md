@@ -126,7 +126,10 @@ authenticates the old chain, imports original requirements losslessly, retains
 findings and records a journal linking its latest receipt and sequence. Attempt
 five can continue as six and beyond. Legacy requirement prose is inherited; use
 structured updates to revise context. Receipt authentication understands both
-legacy fixed-context records and modern versioned-context records. There is no
+legacy fixed-context records and modern versioned-context records. Imported legacy
+check/evaluator definitions remain unchanged across subsequent continuations;
+new coverage is introduced explicitly through structured additions or repairs.
+New supported test checks receive the default meaningful-count evaluator. There is no
 64-record lifetime cap; cycle checks remain. Rebase/suspension handoffs retain the
 same execution sequence and update the journal anchor.
 

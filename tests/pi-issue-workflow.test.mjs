@@ -568,3 +568,18 @@ test('legacy continuation prose becomes an additive obligation without replacing
   assert.ok(record.args.deliveryContext.obligations.some(o => o.text === addition));
   assert.equal(record.attempt, 2);
 });
+
+test('legacy known test-runner plans survive multiple modern continuations without implicit validator changes', integration, async t => {
+  const { retainEvidence } = await import('../pi/agent/extensions/conductor/evidence.mjs');
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const args = { ...await f.args('F'), testCommand: ['pytest', '-q'] }, state = await snapshot(f.dir);
+  const previous = await retainEvidence(f.dir, { repository: f.dir, task: f.binding('F'), attempt: 1,
+    args, before: state, after: state, result: { status: 'BLOCKED', stage: 'REVIEW' } });
+  const migrated = await f.run({ previousAttempt: previous, input: '{"operations":[]}' }, 'NEEDS_DESIGN');
+  assert.equal(migrated.status, 'NEEDS_DESIGN', JSON.stringify(migrated));
+  const continued = await f.run({ previousAttempt: migrated.evidence.reference, input: '{"operations":[]}' });
+  assert.equal(continued.status, 'PASSED', JSON.stringify(continued));
+  const record = await readEvidence(f.dir, continued.evidence.reference);
+  assert.equal(record.args.checks[1].successCondition, undefined, 'legacy evaluator contract is not changed implicitly');
+  assert.equal(record.attempt, 3);
+});

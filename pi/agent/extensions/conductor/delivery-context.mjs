@@ -100,7 +100,7 @@ export function updateContext(current, updates, checks, normalize = true, approv
     }
     if (raw.kind === 'add_check') {
       requireValue(raw.check && !plan.some(c => c.name === raw.check.name), 'New check must have a new identity');
-      plan.push(raw.check);
+      plan.push(...meaningfulChecks([raw.check]));
     }
     context.updates.push(structuredClone(raw));
   }
@@ -200,7 +200,7 @@ export async function prepareDelivery(repository, feature, issue, args, options 
     approved.set(u.reference, await authenticateAmendment(repository, u.reference, args.task));
   const revised = updateContext(context, updates,
     args.callerPlan ? verificationChecks(args) : context.verification ?? verificationChecks(args),
-    !previous || !!previous.args.deliveryContext, approved);
+    !previous, approved);
   const effectiveUpdates = revised.context.updates.slice(previous?.args.deliveryContext?.updates.length ?? 0);
   const planned = { ...args, contextUpdates: effectiveUpdates,
     checks: revised.checks, buildCommand: undefined, testCommand: undefined,
