@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Under the approved feature direction, construct and run ONE Conductor v2 command list: " +
       "external Executor, caller-selected verification, then external Review. After approval, automatically record task completion and run a verified Git commit command through Conductor. " +
-      "Returns PASSED, NEEDS_DESIGN or BLOCKED. One call never retries or generates fixes; Pi diagnoses recoverable failures and continues with the latest previousAttempt against its retained after-tree. Use empty operations for verification-only retries.",
+      "Returns PASSED, NEEDS_DESIGN or BLOCKED. One call never retries or generates fixes; Pi diagnoses recoverable failures and continues with an applicable issueHandoffRef or the latest previousAttempt against its retained after-tree. Use empty operations for verification-only retries.",
     parameters: Type.Object({
       checkpoint: Type.Optional(Type.Object({
         defaultBranch: Type.String({ description: "Known repository default branch; protected from automatic commits" }),
@@ -243,7 +243,10 @@ export default function (pi: ExtensionAPI) {
         featureId: Type.String(), taskId: Type.String(), designRef: Type.String(),
       }, { description: "Scaffold task identity and approved immutable design reference" })),
       previousAttempt: Type.Optional(Type.String({
-        description: "Retained receipt for the previous attempt of this same task; required for corrections/recovery",
+        description: "Retained receipt for the previous attempt of this same task. Supply this or issueHandoffRef for corrections/recovery.",
+      })),
+      issueHandoffRef: Type.Optional(Type.String({
+        description: "Applicable saved issue handoff. Resolve its exact latest receipt for continuation. Use instead of previousAttempt.",
       })),
       reviewProbe: Type.Optional(Type.Boolean({ description: "Explicit bounded no-source health probe after environment-only credential repair. A failed probe is throttled for five minutes; no assertion of repair grants approval." })),
       reviewContextMaxBytes: Type.Optional(Type.Integer({ minimum: 1024, maximum: 8388608,
@@ -258,7 +261,7 @@ export default function (pi: ExtensionAPI) {
         description: "Additional initial scope; inherited original obligations are assembled from persisted records. Omit on continuation and use structured contextUpdates.",
       })),
       baseRef: Type.Optional(Type.String({
-        description: "Original task-start full 40-character Git SHA; resolved from previousAttempt on continuation",
+        description: "Original task-start full 40-character Git SHA; resolved from the retained receipt on continuation",
       })),
       contextUpdates: Type.Optional(Type.Array(Type.Union([
         Type.Object({ kind: Type.Literal("apply_amendment"), reference: Type.String(), reason: Type.String() }, { additionalProperties: false }),

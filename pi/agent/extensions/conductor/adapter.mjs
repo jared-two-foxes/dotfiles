@@ -386,7 +386,7 @@ async function executeAttempt(args, context = {}, options = {}) {
 // Optional task binding leaves legacy single-change callers unchanged. Receipts
 // retain one attempt only; Pi still owns approvals, interpretation and lifecycle.
 export async function hydrateContinuation(args, context) {
-  if (!args?.previousAttempt) return args;
+  if (args?.previousAttempt === undefined) return args;
   const repository = path.resolve(
     await git(path.resolve(context.worktree ?? context.directory ?? "."), [
       "rev-parse",
@@ -400,9 +400,9 @@ export async function hydrateContinuation(args, context) {
       (k) => args.task[k] !== previous.task[k],
     )
   )
-    throw new Error("Continuation task mismatch");
+    throw Object.assign(new Error("Continuation task mismatch"), { code: "CONTINUATION_TASK_MISMATCH" });
   if (args.baseRef && args.baseRef !== previous.args.baseRef)
-    throw new Error("Continuation baseline mismatch");
+    throw Object.assign(new Error("Continuation baseline mismatch"), { code: "CONTINUATION_RECEIPT_INAPPLICABLE", consumedAttempts: previous.attempt });
 
   const callerPlan = args.checks !== undefined;
   // A zero-attempt handoff has no previous verification plan to inherit.
@@ -635,9 +635,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
         before.digest !== previous.after.digest ||
         before.tree !== previous.after.tree
       )
-        throw new Error(
+        throw Object.assign(new Error(
           "Current source/index or HEAD differs from the previous attempt after snapshot; preserve changes and reconcile before continuing",
-        );
+        ), { code: "CONTINUATION_RECEIPT_INAPPLICABLE", consumedAttempts: previous.attempt });
       attempt = previous.attempt + 1;
       if (!Number.isSafeInteger(attempt))
         throw new Error("Invalid invocation sequence");
@@ -835,7 +835,8 @@ export async function executeAndReview(args, context = {}, options = {}) {
   } catch (error) {
     return outcome("BLOCKED", "PRECHECK_OR_EVIDENCE", {
       ...(repository ? { repository } : {}),
-      reason: "TASK_CONTEXT_INVALID",
+      reason: error.code?.startsWith("CONTINUATION_") ? error.code : "TASK_CONTEXT_INVALID",
+      consumedAttempts: error.consumedAttempts,
       message:
         error.message +
         "; inspect persisted state and working tree before retrying",
