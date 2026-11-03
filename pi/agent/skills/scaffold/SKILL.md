@@ -127,7 +127,7 @@ from Bash or invoke `design-reopen` with a fabricated suspension reference.
 Decompose the remaining work, redesign the affected contract within scope, design new issues,
 finish the graph design and implement/checkpoint eligible prerequisites. Use
 `resume_issue` to restore the saved work onto authenticated checkpoints; it returns
-an explicit handoff and fixed continuation fields. Complete native bookkeeping,
+an explicit handoff and inherited continuation context. Complete native bookkeeping,
 `start` the same issue, continue within the retained overall feature authority and use that handoff as
 `previousAttempt`. Three consumed attempts mean attempt four next. READY never
 means PASSED. Conflicts or exhausted budgets block with evidence retained.
@@ -143,7 +143,7 @@ or failed, `retry` then `start` the same issue, retaining the receipt chain and 
 Without unfinished implementation use `design-reopen` directly. Failed final
 review creates new dependent issues after completed nodes; preserve all completed
 nodes, commits and original criteria. Environmental failures are blocks, not
-invented code issues. Do not use decomposition or retry to reset attempt budgets.
+invented code issues. Do not use decomposition or retry to reset execution history.
 
 On interruption reload the issue handoff and scoped summary/issue state, then
 inspect relevant Git source/index and receipt references before mutating. Native
@@ -187,7 +187,7 @@ requirements/checks and consumed attempts without loading raw logs or executor
 input. Retrieve full diagnostics through inspect_conductor_evidence only when needed.
 Latest finding excerpts never establish that earlier findings were resolved.
 These context tools grant no design/execution/checkpoint authority and never replace
-receipt authentication, fixed requirements or the attempt budget.
+receipt authentication, original obligations or invocation history.
 
 
 ## Single feature direction authority
@@ -199,3 +199,14 @@ strings must identify delegated authority and the actual reference, never claim 
 user individually approved an issue. Local checks, independent reviews, verified
 commits and recovery reuse that authority across sessions. Material changes outside
 the agreed objectives/constraints return to the user. Final feature review is mandatory.
+
+
+## Delivery journal
+
+The native delivery boundary uses internal delivery-record transactions for
+versioned context, execution reservation, terminal receipt association and handoff
+anchors. Scaffold applies expected-revision checks under its file lock and retains
+all events. Do not call this internal operation to manufacture authority or mark a
+finding independently verified. Its journal is bookkeeping, never PASSED evidence.
+Native code authenticates receipts and the matching Git audit anchor before reuse.
+Missing/corrupt history is a recovery blocker, not permission to initialize again.

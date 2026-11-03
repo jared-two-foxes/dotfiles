@@ -8,8 +8,9 @@ import { checkpointHistory } from './history.mjs';
 import { readReconciliation } from './reconciliation.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../review/adapter.mjs';
-import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord } from './feature-verification.mjs';
+import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from './feature-verification.mjs';
 import { runCheck } from './feature-process.mjs';
+import { obligationsVerified, findingObligations } from './delivery-context.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, fields = {}) => ({ schema: 'pi.feature-validation/v1', status, ...fields });
@@ -50,12 +51,28 @@ export async function featurePreconditions(repository, args, options = {}) {
     ? await readReconciliation(repository, args.reconciliationRef, feature, args) : undefined;
   const checkpoints = await checkpointHistory(repository, feature, {
     head: args.headRef, baseline: args.featureBaseRef, branch: args.branch, anchor });
-  return { feature, before, checkpoints, design, anchor };
+  const reviews = [];
+  const resumedId = args.resumeEvidenceRef ? (await readFeatureEvidence(repository, args.resumeEvidenceRef)).attemptId : null;
+  for (const reference of await featureEvidenceReferences(repository)) {
+    const r = await readFeatureEvidence(repository, reference);
+    if (r.attemptId !== resumedId && r.binding?.feature_id === args.featureId && r.result?.schema === 'pi.feature-validation/v1' && r.review)
+      reviews.push(r);
+  }
+  const obligations = findingObligations(reviews.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
+    .map(r => ({ result: { conductor: { review: r.review } } })));
+  return { feature, before, checkpoints, design, anchor, obligations };
 }
 
 function handoff(record, reference) {
   return { ...record.result, attempt_id: record.attemptId, binding: record.binding, reference,
     checks: record.checks, review: record.review ?? null, message: record.result.message ?? '' };
+}
+function assembledRequirements(pre, args, versioned = true) {
+  return featureRequirements(pre.feature, pre.design) + (versioned ?
+    '\n\nPersisted feature obligations: ' + JSON.stringify(pre.obligations) +
+    '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.' : '') +
+    (args.reconciliationRef ? '\n\nVerified rebase reconciliation: ' + args.reconciliationRef +
+      '\nNew upstream baseline: ' + pre.anchor.baseline : '');
 }
 export async function validateFeature(args, context = {}, options = {}) {
   let repository, startedReference, reference, record, monitor, started = false;
@@ -67,8 +84,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.featureBaseRef,
       head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision ?? 0,
       plan_digest: digest(JSON.stringify(plan)) };
-    const requirements = featureRequirements(pre.feature, pre.design) + (args.reconciliationRef
-      ? '\n\nVerified rebase reconciliation: ' + args.reconciliationRef + '\nNew upstream baseline: ' + pre.anchor.baseline : '');
+    const requirements = assembledRequirements(pre, args);
     if (args.resumeEvidenceRef) {
       record = await readFeatureEvidence(repository, args.resumeEvidenceRef);
       requireValue(record.requirements === requirements && (record.reconciliationRef ?? null) === (args.reconciliationRef ?? null), 'Approved feature requirements or reconciliation changed');
@@ -87,6 +103,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     requireValue(equal(confirmed.feature.tasks, pre.feature.tasks) && stable(pre.before, confirmed.before), 'Source/state changed during authorization');
     monitor = monitorTrackedInputs(repository);
     record = { attemptId: randomUUID(), binding, plan, reconciliationRef: args.reconciliationRef, tasks: pre.feature.tasks, requirements,
+      obligations: pre.obligations,
       before: pre.before, after: pre.before, checkpoints: pre.checkpoints, checks: [], review: null,
       result: result('BLOCKED', { message: 'INTERRUPTED_OR_RUNNING' }) };
     startedReference = await retainFeatureEvidence(repository, record);
@@ -117,7 +134,8 @@ export async function validateFeature(args, context = {}, options = {}) {
         requirements: reviewScope(requirements, record.checks) }, context, options.reviewOptions);
       record.review = { ...review, requirementsDigest: digest(reviewScope(requirements, record.checks)) };
       await unchanged();
-      record.result = result(review.status === 'APPROVED' ? 'PASSED' : review.status === 'CHANGES_REQUESTED' ? 'NEEDS_DESIGN' : 'BLOCKED',
+      record.result = result(review.status === 'APPROVED' && featureObligationsVerified(pre.feature.tasks, review) &&
+        obligationsVerified({ deliveryContext: { obligations: pre.obligations } }, review) ? 'PASSED' : review.status === 'CHANGES_REQUESTED' ? 'NEEDS_DESIGN' : 'BLOCKED',
         { message: review.reason ?? review.message ?? 'Independent review indeterminate' });
     }
     await unchanged();
@@ -156,15 +174,15 @@ export async function inspectFeatureValidation(args, context = {}, options = {})
     const results = [];
     for (const reference of refs) {
       const record = await readFeatureEvidence(repository, reference);
-      if (['reconciliation', 'feature-authorization'].includes(record.kind) || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
+      if (['reconciliation', 'feature-authorization', 'delivery-amendment'].includes(record.kind) || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
       let applicable = false, reason;
       try {
         const b = record.binding;
-        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, reconciliationRef: record.reconciliationRef };
+        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, reconciliationRef: record.reconciliationRef, resumeEvidenceRef: reference };
         const pre = await featurePreconditions(repository, args, options);
         requireValue(pre.feature.validation?.current === record.attemptId, 'Validation superseded');
-        authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision ?? 0 }, record.plan, pre.feature.tasks, featureRequirements(pre.feature, pre.design) + (record.reconciliationRef
-          ? '\n\nVerified rebase reconciliation: ' + record.reconciliationRef + '\nNew upstream baseline: ' + pre.anchor.baseline : ''));
+        authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision ?? 0 }, record.plan,
+          pre.feature.tasks, assembledRequirements(pre, args, record.obligations !== undefined));
         applicable = true;
       } catch (error) { reason = error.message; }
       results.push({ reference, record, applicable, ...(reason ? { reason } : {}) });

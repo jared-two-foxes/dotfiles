@@ -12,12 +12,13 @@ const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', a
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
 const params = operation => ({ operation, feature_id: 'F1',
-  ...(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume'].includes(operation) ? { task_id: 'T1' } : {}),
+  ...(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume', 'delivery-record'].includes(operation) ? { task_id: 'T1' } : {}),
   ...(['block', 'fail', 'retry'].includes(operation) ? { reason: 'Explicit decision' } : {}),
   ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] },
     'design-record': { payload: { summary: 'Approved', verification: 'Tests', approval: 'User confirmed', disposition: 'leaf' } },
     'design-reopen': { payload: { reason: 'Review finding' } },
     'checkpoint-record': { payload: { commit: 'a'.repeat(40), reference: 'receipt' } },
+    'delivery-record': { payload: { expected_revision: 0, event: { kind: 'initialized', context: {}, head: null, sequence: 0 } } },
     'issue-resume': { payload: { reference: 'suspension', handoff: 'handoff' } } }[operation] ?? {}),
 });
 const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 2, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });

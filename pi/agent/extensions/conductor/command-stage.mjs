@@ -1,3 +1,4 @@
+import { replayCheck } from './stage-reuse.mjs';
 // Transparent Conductor command: preserve the child's streams and exit code,
 // retaining an actual process receipt before the final in-list commit can run.
 import { spawn } from 'node:child_process';
@@ -5,7 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 let exit = 125;
 try {
   const stage = JSON.parse(await readFile(process.argv[2], 'utf8'));
-  const result = await new Promise(resolve => {
+  const result = stage.reuse ? await replayCheck(stage) : await new Promise(resolve => {
     let error;
     const child = spawn(stage.command.program, stage.command.args, {
       cwd: stage.repository, shell: false, windowsHide: true, stdio: ['ignore', 'inherit', 'inherit'],

@@ -5,9 +5,9 @@ import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
-export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume', 'summary', 'issue', 'select', 'design-select'];
-const taskActions = new Set(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
-const inputActions = new Set(['init', 'add', 'complete', 'decompose', 'design-record', 'design-reopen', 'checkpoint-record', 'issue-resume']);
+export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume', 'summary', 'issue', 'select', 'design-select', 'delivery-record'];
+const taskActions = new Set(['delivery-record', 'issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
+const inputActions = new Set(['delivery-record', 'init', 'add', 'complete', 'decompose', 'design-record', 'design-reopen', 'checkpoint-record', 'issue-resume']);
 const reasonActions = new Set(['block', 'fail', 'retry']);
 const statuses = new Set(['pending', 'in_progress', 'completed', 'blocked', 'failed', 'decomposed']);
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -134,7 +134,7 @@ function validateResponse(data, params) {
     }
     return;
   }
-  const needsFeature = ['init', 'add', 'list', 'next', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation);
+  const needsFeature = ['delivery-record', 'init', 'add', 'list', 'next', 'decompose', 'design-next', 'design-record', 'design-finish', 'design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation);
   if (needsFeature) {
     requireValue(object(data.feature) && data.feature.id === params.feature_id && object(data.feature.tasks), 'Invalid feature response or feature identity mismatch');
     validateDesign(data.feature);

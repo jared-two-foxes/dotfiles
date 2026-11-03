@@ -59,20 +59,26 @@ import fs from 'node:fs';
 const args = process.argv.slice(2), value = flag => args[args.indexOf(flag) + 1];
 const request = JSON.parse(fs.readFileSync(value('--request'), 'utf8'));
 if (request.schema !== 'review.request/v1' || (request.head_ref !== ':working' && !/^[a-f0-9]{40}$/.test(request.head_ref)) ||
-  (process.env.EXPECTED_REVIEW_REQUIREMENTS !== '*' && fs.readFileSync(request.requirements, 'utf8') !==
-    (process.env.EXPECTED_REVIEW_REQUIREMENTS ?? 'Complete immutable review requirements'))) throw Error('review contract');
+  (process.env.EXPECTED_REVIEW_REQUIREMENTS !== '*' && !fs.readFileSync(request.requirements, 'utf8').includes(
+    process.env.EXPECTED_REVIEW_REQUIREMENTS ?? 'Complete immutable review requirements'))) throw Error('review contract');
 fs.appendFileSync('.git/trace', 'review\\n');
 if (process.env.REVIEW_FIXTURE_TERMINAL_LOCK) fs.writeFileSync(value('--request').slice(0, -'review.json'.length) + 'terminal.lock', 'owned claim');
 if (process.env.REVIEW_FIXTURE_LOCK) fs.writeFileSync('.git/index.lock', 'existing lock');
 if (process.env.REVIEW_FIXTURE_DRIFT) fs.writeFileSync('source.txt', 'unreviewed drift');
 const status = process.env.REVIEW_FIXTURE_STATUS;
+const requirements = fs.readFileSync(request.requirements, 'utf8');
+const contextLine = requirements.split('\\n').find(l => l.startsWith('{"design":'));
+const context = contextLine ? JSON.parse(contextLine) : null;
+const obligations = context?.obligations ?? [];
+const obligation_assessments = obligations.filter(o => o.status !== 'independently_verified')
+  .map(o => ({ obligation_id: o.id, disposition: 'verified', evidence: 'Independent fixture inspected source and regression output' }));
 if (process.env.REVIEW_FIXTURE_MALFORMED) { console.log('{invalid JSON'); process.exit(0); }
 if (process.env.REVIEW_FIXTURE_TAMPER) {
   const file = value('--request').slice(0, -'review.json'.length) + '0.receipt.json';
   const receipt = JSON.parse(fs.readFileSync(file, 'utf8')); receipt.program = 'unverified-command'; fs.writeFileSync(file, JSON.stringify(receipt));
 }
 console.log(JSON.stringify({ schema: 'review.result/v1', status, review_id: 'external-review',
-  reason: status === 'INDETERMINATE' ? 'BUDGET_EXHAUSTED' : 'REVIEW_COMPLETED', completed_at: '2026-11-01T00:00:00Z',
+  reason: status === 'INDETERMINATE' ? (process.env.REVIEW_FIXTURE_REASON ?? 'BUDGET_EXHAUSTED') : 'REVIEW_COMPLETED', obligation_assessments, completed_at: '2026-11-01T00:00:00Z',
   findings: status === 'CHANGES_REQUESTED' ? [{ severity: 'high', blocking: true, message: 'Correct the edge case' }] : [],
   padding: 'x'.repeat(40000) }));
 process.exitCode = { APPROVED: 0, CHANGES_REQUESTED: 1, INDETERMINATE: 3 }[status];

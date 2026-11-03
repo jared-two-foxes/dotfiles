@@ -27,4 +27,10 @@ async function main() {
   process.exitCode = code;
 }
 
-main().catch(error => { console.error(error.message); process.exitCode = 125; });
+main().catch(error => {
+  console.error(error.message);
+  console.log(JSON.stringify({ schema: 'pi.tool-invocation-error/v1',
+    category: error.code === 'ENOENT' ? 'invocation' : 'evidence_integrity',
+    code: error.code === 'ENOENT' ? 'EXECUTABLE_NOT_FOUND' : 'GUARDED_TOOL_FAILED' }));
+  process.exitCode = 125;
+});

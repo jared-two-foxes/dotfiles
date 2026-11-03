@@ -12,7 +12,7 @@ implement upward through execute_and_review, which automatically completes and
 checkpoints each verified node after review. Supply known checkpoint branch
 protection metadata; recover finalization failures from the successful receipt.
 Scaffold validates structure and association, not authenticity. Preserve original
-criteria, receipts, consumed attempt counts and completed descendants. Context notes
+criteria, receipts, monotonically increasing invocation history and completed descendants. Context notes
 are not approval or verification. Use scoped issue views and retained handoffs.
 
 Never directly apply source edits or run executor/review-cli from Bash. Never merge

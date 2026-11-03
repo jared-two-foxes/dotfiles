@@ -104,13 +104,13 @@ test('delegated issue designs remain explicit and final review remains mandatory
   const design = read('pi/agent/skills/design/SKILL.md');
   for (const phrase of ['agent-authored', 'design-record', 'actual reference',
     'Never claim the user approved an individual issue', 'Final feature review is mandatory',
-    'five total application attempts', 'previousAttempt', 'completed descendants']) assert.ok(design.includes(phrase), phrase);
+    'no per-issue attempt limit', 'previousAttempt', 'completed descendants']) assert.ok(design.includes(phrase), phrase);
   assert.match(design, /material scope changes|material commitments|material departures|material changes/);
 });
 
 test('native checkpoints, recovery and validation reuse the same durable direction authority', () => {
   const native = read('pi/agent/extensions/conductor/index.ts');
-  assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 1);
+  assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 2, 'one routine direction confirmation and one explicit material-amendment confirmation');
   assert.match(native, /approveFeatureDirection/);
   assert.equal((native.match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
   assert.match(read('pi/agent/extensions/conductor/delivery.mjs'), /requireFeatureAuthorization/);

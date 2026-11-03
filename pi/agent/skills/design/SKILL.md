@@ -93,10 +93,9 @@ Scaffold validates structure and association, not authority or verification trut
 Use `select` for one eligible issue. Recover its current design and inspect source.
 Do not redo design approvals or request execution confirmation. On the first attempt,
 the adapter assembles persisted issue acceptance criteria, constraints and the complete
-approved design into fixed review requirements. Supply only additional applicable
+approved design into versioned review context. Supply only additional applicable
 constraints and established interfaces in `requirements` (or an empty string); do not
-manually reconstruct the design suffix or retype its formatting; future feature criteria
-remain context. Copy `task.designRef` exactly from the scoped issue/select
+manually reconstruct the design suffix or retype its formatting; original feature criteria remain authoritative. Copy `task.designRef` exactly from the scoped issue/select
 response; it is the feature's `design_ref`, not the issue design reference. A branch
 or reference mismatch requires inspecting current state, not another approval.
 
@@ -179,11 +178,12 @@ verification contracts require Design recovery retaining criteria, history and c
 
 ## 5. Own the execution and review loop
 
-Capture the current checkpoint HEAD once as the issue's baseRef and keep requirements,
-baseline fixed within its correction epoch. Preserve the check contract; explicit
+Capture the current checkpoint HEAD once as the issue's baseRef and retain that
+baseline within its correction epoch. The adapter versions and assembles context. Preserve the check contract; explicit
 invocation repairs follow /skill:conductor. Start the explicit
 Scaffold issue before execution. Supply task identity and the previousAttempt for
-corrections. Recover exact fields using `inspect_issue_attempt`; inspect full logs
+corrections. Use `previousAttempt`, fresh `input` and structured `contextUpdates`; inspect
+`inspect_issue_attempt` for the authoritative context; inspect full logs
 through `inspect_conductor_evidence` only when needed. Do not hide Scaffold state in
 the review diff: bookkeeping must be ignored and untracked.
 
@@ -206,9 +206,11 @@ the review diff: bookkeeping must be ignored and untracked.
   operations array. Stop only for a concrete unresolved blocker or loop limit.
 - Oversized task: suspend and decompose only the remaining unverified responsibilities.
 
-Maximum **five total application attempts** per issue, preserving consumed counts
-across contexts and handoffs. Stop after two consecutive attempts with the same
-substantive failure and no progress. Do not create replacement issues to reset limits.
+There is **no per-issue attempt limit**. Preserve every invocation across contexts
+and handoffs. Native stall detection pauses after three equivalent substantive
+outcomes or recurring source cycles. Infrastructure circuits and resource pauses
+are separate. Diagnose the returned signature and change the relevant correction
+or plan; never create replacement issues or remove history to continue.
 Scaffold state transitions do not prove verification. If authentic completion or a
 checkpoint is unavailable, report checkpoint required and stop dependent execution.
 
@@ -311,4 +313,41 @@ requirements/checks and consumed attempts without loading raw logs or executor
 input. Retrieve full diagnostics through inspect_conductor_evidence only when needed.
 Latest finding excerpts never establish that earlier findings were resolved.
 These context tools grant no design/execution/checkpoint authority and never replace
-receipt authentication, fixed requirements or the attempt budget.
+receipt authentication, original obligations or execution history.
+
+
+## Versioned continuation
+
+A correction supplies `previousAttempt`, fresh exact `input` and optional structured
+`contextUpdates`. Native tools inherit task identity, baseline, approval, checks and
+all original obligations. Do not copy approval prose, hashes or requirements text.
+Use add_obligation for discoveries, annotate/correct_assumption/revise_design for
+in-scope evolution, repair_check for equivalent invocation repairs and add_check
+for additional coverage. Every update needs a reason. Removing obligations or
+material scope changes requires the explicit Design/approval transition.
+
+A proposed_addressed claim never closes a finding. Independent Review must return
+an explicit verified assessment for each open stable obligation ID. Final feature
+review carries original criteria, issue contexts and unresolved feature findings.
+
+Use checkEnvironmentInputs only when all relevant inputs of deterministic checks
+can be measured; otherwise omit it and rerun checks. No secrets belong in this
+manifest. A reviewer-only repair can reuse matching source/index/HEAD, definitions,
+environment and authenticated successful check evidence. Reused stages are linked
+to their original receipts; they are not described as freshly executed checks.
+
+INFRASTRUCTURE_PAUSED requires relevant repair or the permitted bounded probe after
+cooldown. RESOURCE_PAUSED retains usage and needs an explicit allowance revision.
+DIAGNOSIS_REQUIRED includes evidence-backed signatures; unsupported claims of
+progress do not reset it. EVIDENCE_RECOVERY_REQUIRED means restore authoritative
+proof or report the exact blocker. Preserve files, index, original baseline, Git
+audit anchors and all receipts. Never reapprove unchanged direction to recover.
+
+Material contract amendments use approve_delivery_amendment with the latest receipt,
+concrete original criterion/finding IDs, replacement and reason. Only that exceptional
+delta requests user confirmation. Apply its returned reference through
+contextUpdates.apply_amendment; originals and invocation history remain retained,
+and replacement behavior requires independent verification. For environment-only
+credential rotation use reviewProbe with empty operations; failed probes are bounded
+and throttled. Oversized review context can resume with an explicit
+reviewContextMaxBytes allowance increase without dropping obligations.

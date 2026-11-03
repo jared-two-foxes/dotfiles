@@ -39,7 +39,7 @@ async function fixture(t) {
     'sys.path.insert(0, ' +
     JSON.stringify(path.join(process.env.SCAFFOLD_SOURCE, 'src')) + ')\nfrom scaffold_cli.cli import main\nmain()\n');
   await chmod(path.join(bin, 'scaffold'), 0o755);
-  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'EXPECTED_REVIEW_REQUIREMENTS', 'REVIEW_FIXTURE_LOCK', 'REVIEW_FIXTURE_DRIFT', 'REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER', 'REVIEW_FIXTURE_TERMINAL_LOCK'].map(k => [k, process.env[k]]));
+  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'REVIEW_FIXTURE_REASON', 'EXPECTED_REVIEW_REQUIREMENTS', 'REVIEW_FIXTURE_LOCK', 'REVIEW_FIXTURE_DRIFT', 'REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER', 'REVIEW_FIXTURE_TERMINAL_LOCK'].map(k => [k, process.env[k]]));
   Object.assign(process.env, { PATH: bin + path.delimiter + process.env.PATH,
     CONDUCTOR_BIN: process.env.CONDUCTOR_TEST_BIN ?? path.join(bin, 'conductor'),
     EXECUTOR_BIN: path.join(bin, 'executor'), REVIEW_CLI_BIN: path.join(bin, 'review-cli'), REVIEW_FIXTURE_STATUS: 'APPROVED' });
@@ -92,7 +92,7 @@ test('successful review automatically completes the task and runs a verified com
   const task = (await f.call('list')).feature.tasks.F;
   assert.equal(task.status, 'completed'); assert.equal(task.checkpoint.commit, result.nextBaseRef);
   const record = await readEvidence(f.directory, result.evidence.reference);
-  assert.equal(record.args.requirements, expected);
+  assert.ok(record.args.requirements.includes(expected));
   assert.equal(record.after.head, f.base); assert.equal(record.result.status, 'PASSED');
   assert.equal(f.git('rev-parse', 'HEAD^{tree}'), record.after.tree);
   const request = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'request.json'), 'utf8'));
@@ -149,7 +149,7 @@ test('BLOCKED missing executable repairs forward with empty operations and authe
   assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.stage, 'COMMITTED');
   assert.equal(delivered.evidence.attempt, 2); assert.equal(f.confirmations(), 1);
   const record = await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
-  assert.equal(record.args.requirements, f.args.requirements);
+  assert.ok(record.args.requirements.includes(f.args.requirements));
   assert.equal(record.args.baseRef, f.base); assert.equal(record.args.previousAttempt, first.evidence.reference);
   assert.match(record.workflow.inputs.requirements, /Missing shell executable/);
   assert.match(record.workflow.inputs.requirements, /Current verification plan/);
@@ -195,7 +195,7 @@ test('BLOCKED review resumes from retained tree without reapplying successful op
   assert.equal(first.status, 'BLOCKED', JSON.stringify(first));
   process.env.REVIEW_FIXTURE_STATUS = 'APPROVED';
   const latest = await inspectIssueAttempt({ reference: first.evidence.reference }, f.context);
-  const delivered = await executeAndCheckpoint({ ...latest.continuation, input: '{"operations":[]}' }, f.context);
+  const delivered = await executeAndCheckpoint({ ...latest.continuation, input: '{"operations":[]}', reviewMaxTurns: 21 }, f.context);
   assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.evidence.attempt, 2);
   await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
   assert.equal(f.confirmations(), 1);
@@ -377,4 +377,63 @@ test('an existing terminal receipt claim blocks commit without competing success
   assert.equal(record.result.stage, 'STARTED');
   const records = (await readdir(path.join(f.directory, '.git/pi-conductor-evidence'))).filter(x => /^[a-f0-9]{64}\.json$/.test(x));
   assert.equal(records.length, 1);
+});
+
+test('review circuit preserves edited source, then environment repair reuses valid check evidence', integration, async t => {
+  const f = await fixture(t);
+  f.args.checkEnvironmentInputs = { files: [], variables: [], executables: [process.execPath] };
+  process.env.REVIEW_FIXTURE_STATUS = 'INDETERMINATE'; process.env.REVIEW_FIXTURE_REASON = 'NETWORK_FAILURE';
+  const first = await executeAndCheckpoint(f.args, f.context);
+  assert.equal(first.status, 'BLOCKED', JSON.stringify(first));
+  const retained = await readEvidence(f.directory, first.evidence.reference);
+  assert.equal(retained.result.conductor.review.reason, 'NETWORK_FAILURE');
+  const paused = await executeAndCheckpoint({ previousAttempt: first.evidence.reference, input: '{"operations":[]}' }, f.context);
+  assert.equal(paused.reason, 'INFRASTRUCTURE_PAUSED', JSON.stringify(paused));
+  assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), 'after');
+  // Repair the installed reviewer, a measurable environment change outside source/index.
+  const reviewer = process.env.REVIEW_CLI_BIN;
+  await writeFile(reviewer, (await readFile(reviewer, 'utf8')) + '\n// repaired reviewer configuration\n');
+  process.env.REVIEW_FIXTURE_STATUS = 'APPROVED'; delete process.env.REVIEW_FIXTURE_REASON;
+  const passed = await executeAndCheckpoint({ previousAttempt: first.evidence.reference, input: '{"operations":[]}' }, f.context);
+  assert.equal(passed.status, 'PASSED', JSON.stringify(passed));
+  assert.equal(passed.stage, 'COMMITTED'); assert.equal(passed.evidence.attempt, 2);
+  const verified = await authenticateTaskEvidence(f.directory, passed.evidence.reference, f.args.task);
+  assert.equal(verified.result.conductor.runner.receipts[1].reusedFrom.reference, first.evidence.reference);
+  const trace = await readFile(path.join(f.directory, '.git/trace'), 'utf8');
+  assert.equal(trace.split('\n').filter(l => l === 'check').length, 1, trace);
+  assert.equal(f.confirmations(), 1);
+});
+
+test('compilation failure, test failure and review finding advance to an authenticated correction and commit', integration, async t => {
+  const f = await fixture(t);
+  const validateTests = [process.execPath, new URL('../pi/agent/extensions/conductor/meaningful-test-condition.mjs', import.meta.url).pathname];
+  const readModule = 'const fs=require("fs"), vm=require("vm"), assert=require("assert/strict"); const module={exports:{}}; new vm.Script(fs.readFileSync("source.txt","utf8")).runInNewContext({module});';
+  f.args.checks = [
+    { name: 'compile', command: [process.execPath, '-e', 'new (require("vm").Script)(require("fs").readFileSync("source.txt","utf8"))'] },
+    { name: 'value regression', command: [process.execPath, '-e', readModule + 'assert.equal(module.exports.value,2);console.log("1 test passed")'], successCondition: validateTests },
+  ];
+  const edit = (oldText, newText) => JSON.stringify({ operations: [{ type: 'edit_file', path: 'source.txt', edits: [{ oldText, newText }] }] });
+  const initial = '// after\nmodule.exports = {value: ;};';
+  const compileFailed = await executeAndCheckpoint({ ...f.args, input: edit('before', initial) }, f.context);
+  assert.equal(compileFailed.status, 'NEEDS_DESIGN', JSON.stringify(compileFailed));
+  assert.equal(compileFailed.conductor.checks.length, 1);
+  const testFailed = await executeAndCheckpoint({ previousAttempt: compileFailed.evidence.reference, input: edit('value: ;', 'value: 1') }, f.context);
+  assert.equal(testFailed.status, 'NEEDS_DESIGN', JSON.stringify(testFailed));
+  assert.equal(testFailed.conductor.checks[0].status, 'PASSED');
+  process.env.REVIEW_FIXTURE_STATUS = 'CHANGES_REQUESTED';
+  const finding = await executeAndCheckpoint({ previousAttempt: testFailed.evidence.reference, input: edit('value: 1', 'value: 2') }, f.context);
+  assert.equal(finding.status, 'NEEDS_DESIGN', JSON.stringify(finding));
+  assert.equal(finding.conductor.review.status, 'CHANGES_REQUESTED');
+  process.env.REVIEW_FIXTURE_STATUS = 'APPROVED';
+  const fixed = await executeAndCheckpoint({ previousAttempt: finding.evidence.reference,
+    input: edit('value: 2', 'value: 2, acceptStatus: value => ["draft","accepted"].includes(value)'),
+    contextUpdates: [
+      { kind: 'add_obligation', id: 'quote-status', text: 'Reject invalid imported quote statuses', reason: 'Independent review regression discovery' },
+      { kind: 'add_check', reason: 'Exercise accepted and invalid imported statuses', check: { name: 'status regression',
+        command: [process.execPath, '-e', readModule + 'assert.equal(module.exports.acceptStatus("invalid"),false);assert.equal(module.exports.acceptStatus("draft"),true);console.log("2 tests passed")'], successCondition: validateTests } },
+    ] }, f.context);
+  assert.equal(fixed.stage, 'COMMITTED', JSON.stringify(fixed)); assert.equal(fixed.evidence.attempt, 4);
+  const record = await authenticateTaskEvidence(f.directory, fixed.evidence.reference, f.args.task);
+  assert.equal(record.args.baseRef, f.base); assert.equal(record.args.deliveryContext.obligations.some(o => o.id === 'quote-status'), true);
+  assert.equal(f.confirmations(), 1);
 });

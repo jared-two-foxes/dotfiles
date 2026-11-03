@@ -1,3 +1,4 @@
+import { anchorHandoff } from './delivery-context.mjs';
 // Native, explicitly authorized recovery: preserve dirty task work and consumed attempts.
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -9,7 +10,7 @@ import { planFor } from './feature-verification.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, message) => ({ schema: 'pi.interrupted-task-recovery/v1', status, message });
-const definition = task => Object.fromEntries(Object.entries(task).filter(([key]) => !['status', 'history'].includes(key)));
+const definition = task => Object.fromEntries(Object.entries(task).filter(([key]) => !['status', 'history', 'delivery'].includes(key)));
 
 async function state(repository, featureId, options) {
   const response = await scaffoldTasks({ operation: 'list', feature_id: featureId }, { directory: repository }, options.scaffoldOptions);
@@ -76,15 +77,16 @@ export async function recoverInterruptedTaskRebase(args, context = {}, options =
         (anchor.record.previousReconciliationRef ?? null) === (args.previousReconciliationRef ?? null), 'Handoff targets another rebase or verification plan');
       await pinHandoff(repository, args.resumeHandoffRef, h);
       await readTaskHandoff(repository, args.resumeHandoffRef, args.task);
+      await anchorHandoff(repository, args.task, args.resumeHandoffRef, args.previousAttempt, options);
       return { ...result('READY', 'Recovered retained handoff; task remains unverified'), handoffRef: args.resumeHandoffRef,
-        reconciliationRef: h.recovery.reconciliationRef, consumedAttempts: h.attempt, remainingAttempts: 5 - h.attempt,
+        reconciliationRef: h.recovery.reconciliationRef, consumedAttempts: h.attempt,
         resume: resumeArgs(h, args.resumeHandoffRef), recovered: true };
     }
     const chain = await authenticateAttemptChain(repository, args.previousAttempt, args.task);
     const previous = chain.record;
     await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
-    requireValue(previous.result.status !== 'PASSED' && previous.attempt < 5 && previous.args.baseRef === args.oldHeadRef &&
-      previous.args.baseRef !== args.headRef, 'Recovery requires unfinished retained work, changed baseline and remaining attempts');
+    requireValue(previous.result.status !== 'PASSED' && previous.args.baseRef === args.oldHeadRef &&
+      previous.args.baseRef !== args.headRef, 'Recovery requires unfinished retained work, changed baseline');
     const transplanted = rebasedAttemptTree(repository, previous, args.headRef);
     requireValue(transplanted.tree === before.tree,
       'Current files do not exactly match the retained task tree transplanted onto rebased HEAD; preserve both trees and explicitly reconcile conflicts/extra edits');
@@ -104,7 +106,7 @@ export async function recoverInterruptedTaskRebase(args, context = {}, options =
     const prefix = await reconcileFeature({ ...args, resumeEvidenceRef: args.prefixEvidenceRef }, context, {
       ...options, interruptedTask: { taskId: args.task.taskId, snapshot: before },
       authorize: scope => options.authorize?.({ ...scope, interruptedTask: args.task, consumedAttempts: previous.attempt,
-        remainingAttempts: 5 - previous.attempt, sourceTree: before.tree,
+         sourceTree: before.tree,
         originalRequirements: previous.args.requirements, carriedRequirements: requirements,
         taskVerification: previous.args.checks ?? { buildCommand: previous.args.buildCommand, testCommand: previous.args.testCommand } }),
     });
@@ -124,8 +126,9 @@ export async function recoverInterruptedTaskRebase(args, context = {}, options =
     await pinHandoff(repository, handoffRef, handoff);
     await options.interrupt?.('afterHandoffRetention'); await unchanged();
     await readTaskHandoff(repository, handoffRef, args.task);
+    await anchorHandoff(repository, args.task, handoffRef, args.previousAttempt, options);
     return { ...result('READY', 'Completed prefix verified; interrupted task remains unverified'), handoffRef, reconciliationRef,
-      consumedAttempts: previous.attempt, remainingAttempts: 5 - previous.attempt, resume: resumeArgs(handoff, handoffRef) };
+      consumedAttempts: previous.attempt,  resume: resumeArgs(handoff, handoffRef) };
   } catch (error) {
     return { ...result('BLOCKED', error.message), handoffRef, reconciliationRef,
       recovery: 'Preserve work and old receipts. Inspect current Git, Scaffold and returned evidence; never reset source, replace task identity or restart attempt count' };
@@ -149,6 +152,6 @@ export async function inspectTaskRebaseRecovery(args, context = {}, options = {}
         { featureBaseRef: record.recovery.featureBaseRef, branch: record.recovery.branch });
       applicable = true;
     } catch (error) { reason = error.message; }
-    return { ok: true, reference: args.reference, record, applicable, reason, consumedAttempts: record.attempt, remainingAttempts: 5 - record.attempt };
+    return { ok: true, reference: args.reference, record, applicable, reason, consumedAttempts: record.attempt,  };
   } catch (error) { return { ok: false, message: error.message }; }
 }

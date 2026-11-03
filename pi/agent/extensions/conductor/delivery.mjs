@@ -3,7 +3,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
-import { executeAndReview, invoke, DEFAULT_TIMEOUT_MS } from './adapter.mjs';
+import { executeAndReview, hydrateContinuation, invoke, DEFAULT_TIMEOUT_MS } from './adapter.mjs';
 import { git } from './git-tree.mjs';
 import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
@@ -72,6 +72,7 @@ export async function finalizeVerifiedTask(args, context = {}, options = {}) {
 
 export async function executeAndCheckpoint(args, context = {}, options = {}) {
   try {
+    args = await hydrateContinuation(args, context);
     validateCheckpoint(args?.checkpoint);
     requireValue(Object.keys(args.checkpoint).every(k => ['defaultBranch', 'protectedBranches'].includes(k)), 'Unexpected checkpoint metadata');
     await requireFeatureAuthorization(args, context, options);

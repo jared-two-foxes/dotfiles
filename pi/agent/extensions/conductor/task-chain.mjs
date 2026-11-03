@@ -1,3 +1,4 @@
+import { validContextContinuation } from './delivery-context.mjs';
 // Authenticate correction epochs and explicit rebase bridges without resetting attempts.
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from './git-tree.mjs';
@@ -19,7 +20,8 @@ export function carriedRequirements(requirements, records) {
   const text = requirements + '\n\nInterrupted issue continuation: preserve all original criteria above. ' +
     'The task is NOT verified. Resolve retained findings and rerun the unchanged task checks. ' +
     'Consumed attempts are not reset. Full original requests/responses and check logs remain in the linked previousAttempt receipts; inspect them when interpreting failures. Retained outcomes and unresolved review findings:\n' + JSON.stringify(findings);
-  requireValue(text.length <= 180000, 'Retained findings exceed review scope limit; explicit bounded recovery design required');
+  // Review context allowances are enforced as resumable resource controls at the
+  // next invocation, never by stranding a suspended issue or resetting its history.
   return text;
 }
 
@@ -55,11 +57,11 @@ export async function assertLatestAttempt(repository, reference, binding, attemp
 }
 
 export async function authenticateAttemptChain(repository, reference, binding, seen = new Set(), pendingReference) {
-  requireValue(!seen.has(reference) && seen.size < 64, 'Cyclic or excessive correction/recovery chain'); seen.add(reference);
+  requireValue(!seen.has(reference), 'Cyclic or excessive correction/recovery chain'); seen.add(reference);
   validateBinding(binding);
   const record = await readEvidence(repository, reference);
   requireValue(equal(record.task, binding) && equal(record.args?.task, binding) &&
-    Number.isInteger(record.attempt) && (record.attempt >= 1 || (record.attempt === 0 && record.kind === 'issue-zero-handoff')) && record.attempt <= 5 &&
+    Number.isInteger(record.attempt) && (record.attempt >= 1 || (record.attempt === 0 && record.kind === 'issue-zero-handoff')) &&
     sha(record.args.baseRef) && record.before?.head === record.args.baseRef && sha(record.after?.head) &&
     (record.after.head === record.args.baseRef || (record.result?.status === 'BLOCKED' && record.result.reason === 'HEAD_CHANGED')) &&
     sha(record.before.tree) && sha(record.after.tree) &&
@@ -97,7 +99,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const { checkpointHistory } = await import('./history.mjs');
     requireValue(parked.kind === 'issue-suspension' && equal(parked.task, binding) &&
       parked.args.previousAttempt === record.args.previousAttempt && equal(parked.after, previous.after) &&
-      previous.result.status !== 'PASSED' && previous.attempt === record.attempt && record.attempt < 5 &&
+      previous.result.status !== 'PASSED' && previous.attempt === record.attempt &&
       sameVerification(previous.args, record.args) && recovery.feature.design_ref === binding.designRef &&
       recovery.feature.tasks[binding.taskId].suspension?.reference === recovery.suspensionRef &&
       record.args.requirements === carriedRequirements(previous.args.requirements, prior.records) +
@@ -129,7 +131,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
   if (record.kind === 'rebase-handoff') {
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record, recovery = record.recovery;
-    requireValue(previous.result.status !== 'PASSED' && previous.attempt === record.attempt && previous.attempt < 5 &&
+    requireValue(previous.result.status !== 'PASSED' && previous.attempt === record.attempt &&
       previous.args.baseRef !== record.args.baseRef && sameVerification(previous.args, record.args) &&
       record.args.requirements === carriedRequirements(previous.args.requirements, prior.records) &&
       record.result.status === 'BLOCKED' && record.result.reason === 'REBASE_RECOVERY_READY' &&
@@ -159,7 +161,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record;
     requireValue(previous.result.status !== 'PASSED' && previous.attempt + 1 === record.attempt &&
-      previous.args.baseRef === record.args.baseRef && (previous.kind === 'issue-zero-handoff' || (previous.args.requirements === record.args.requirements &&
+      previous.args.baseRef === record.args.baseRef && (previous.kind === 'issue-zero-handoff' || (validContextContinuation(previous, record.args) &&
       correctionVerification(previous, record.args))) && previous.after.head === record.before.head &&
       previous.after.digest === record.before.digest &&
       previous.after.tree === record.before.tree, 'Invalid correction receipt chain');

@@ -65,6 +65,12 @@ export async function domainResponse(request, response) {
       if (review) review = { schema: 'review.result/v1', review_id: 'fixture-review', completed_at: '2026-11-01T00:00:00Z',
         reason: review.status === 'INDETERMINATE' ? 'BUDGET_EXHAUSTED' : 'REVIEW_COMPLETED',
         findings: review.status === 'CHANGES_REQUESTED' ? [{ severity: 'high', blocking: true, message: 'Fixture correction required' }] : [], ...review };
+      if (['APPROVED', 'CHANGES_REQUESTED'].includes(review?.status)) {
+        const line = legacy.review.requirements.split('\n').find(l => l.startsWith('{"design":'));
+        const context = line ? JSON.parse(line) : null;
+        review.obligation_assessments ??= (context?.obligations ?? []).filter(o => o.status !== 'independently_verified')
+          .map(o => ({ obligation_id: o.id, disposition: 'verified', evidence: 'Independent fixture inspected the correction and regression output' }));
+      }
       if (review?.findings) review.findings = review.findings.map(f => ({
         severity: 'high', blocking: review.status === 'CHANGES_REQUESTED', ...f,
       }));

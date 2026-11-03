@@ -120,7 +120,7 @@ test('task receipts retain workflow timeout and corrections may increase it with
 test('corrections preserve baseline/requirements and count attempts without automatic retry', async t => {
   const f = await fixture(t);
   let last;
-  for (let attempt = 1; attempt <= 5; attempt++) {
+  for (let attempt = 1; attempt <= 7; attempt++) {
     const result = await executeAndReview({ ...f.args, previousAttempt: last }, { directory: f.dir }, {
       invokeConductor: async () => response('NEEDS_DESIGN'),
     });
@@ -128,11 +128,7 @@ test('corrections preserve baseline/requirements and count attempts without auto
     assert.equal(result.evidence.attempt, attempt);
     last = result.evidence.reference;
   }
-  const limited = await executeAndReview({ ...f.args, previousAttempt: last }, { directory: f.dir }, {
-    invokeConductor: () => assert.fail('must stop at five'),
-  });
-  assert.match(limited.message, /Five-attempt limit/);
-  for (const patch of [{ requirements: 'weakened' }, { task: { ...task, taskId: 'consumer' } }, { testCommand: ['true'] }]) {
+  for (const patch of [{ task: { ...task, taskId: 'consumer' } }, { testCommand: ['true'] }]) {
     const invalid = await executeAndReview({ ...f.args, ...patch, previousAttempt: last }, { directory: f.dir }, {
       invokeConductor: () => assert.fail('must not invoke'),
     });
@@ -245,9 +241,9 @@ test('real Scaffold rejects the original execution-first lifecycle', {
 test('workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals', async () => {
   const design = await readFile(new URL('../pi/agent/skills/design/SKILL.md', import.meta.url), 'utf8');
   for (const phrase of ['Mandatory decomposition', 'Before generating Executor', 'approve_feature_direction',
-    'Verification:', 'ancestor dependencies', 'future feature criteria',
+    'Verification:', 'ancestor dependencies', 'original feature criteria',
     'previousAttempt', 'inspect_conductor_evidence', 'Oversized task', 'completed descendants',
-    'parent remains incomplete', 'five total application attempts', 'two consecutive attempts',
+    'parent remains incomplete', 'no per-issue attempt limit', 'three equivalent substantive',
     'Conversational memory is not authoritative', 'checkpoint required', 'single approval']) {
     assert.ok(design.includes(phrase), phrase);
   }
