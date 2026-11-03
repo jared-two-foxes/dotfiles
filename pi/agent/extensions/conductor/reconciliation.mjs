@@ -63,7 +63,7 @@ async function reconciliationRequirements(repository, feature, source, originalB
 }
 
 export async function readReconciliation(repository, reference, feature, args, seen = new Set()) {
-  requireValue(!seen.has(reference) && seen.size < 32, 'Cyclic or excessive reconciliation chain'); seen.add(reference);
+  requireValue(!seen.has(reference), 'Cyclic reconciliation chain'); seen.add(reference);
   const r = await readFeatureEvidence(repository, reference);
   requireValue(r.kind === 'reconciliation' && r.result?.schema === 'pi.feature-reconciliation/v1' && r.result.status === 'PASSED',
     'Missing successful rebase reconciliation');

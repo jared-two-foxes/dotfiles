@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 // Durable authority for one approved feature direction. Separate from verification evidence.
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -46,8 +47,14 @@ async function existing(scope) {
 export async function featureAuthorized(args, context = {}, options = {}) {
   try { return !!await existing(await scopeFor(args, context, options)); } catch { return false; }
 }
+async function requireRecoverableAuthority(scope) {
+  const state = JSON.parse(await readFile(path.join(scope.repository, '.scaffold/tasks.json'), 'utf8'));
+  requireValue(!Object.values(state.features[scope.featureId].tasks).some(t => t.delivery),
+    'EVIDENCE_RECOVERY_REQUIRED: original feature authorization is missing; restore evidence, never reapprove unchanged direction to reset execution history');
+}
 export async function requireFeatureAuthorization(args, context = {}, options = {}) {
   const scope = await scopeFor(args, context, options);
+  if (!await existing(scope)) await requireRecoverableAuthority(scope);
   requireValue(await existing(scope),
     'Approve the overall feature direction once with approve_feature_direction before implementation. No per-issue approval is required within that scope');
 }
@@ -56,6 +63,7 @@ export async function approveFeatureDirection(args, context = {}, options = {}) 
     const scope = await scopeFor(args, context, options);
     const prior = await existing(scope);
     if (prior) return { ok: true, reference: prior, scope, recovered: true };
+    await requireRecoverableAuthority(scope);
     requireValue(await options.confirm?.(scope), 'Feature direction approval required');
     context.abort?.throwIfAborted();
     requireValue(equal(scope, await scopeFor(args, context, options)), 'Feature direction changed during approval');

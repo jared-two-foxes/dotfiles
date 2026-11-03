@@ -28,7 +28,8 @@ operations. Each issue receives its own checkpoint,
 including verification-only parents. Finish with mandatory full feature checks and
 independent review, then present results for user review. Findings within scope go
 through the same graph without new permission requests. Never weaken criteria or
-reset attempt budgets. Maximum five attempts; repeated failure without progress stops.
+reset execution history. There is no per-issue attempt limit. Evidence-backed stalls,
+infrastructure circuits and resumable resource allowances govern continuation.
 
 BLOCKED ends the current Conductor command list, not the approved local delivery
 loop. Diagnose retained evidence and current files, then continue recoverable
@@ -45,7 +46,7 @@ Use summary/design-select/select/issue for compact scoped context. Preserve prio
 context handoff and attempt receipts; notes cannot confer approval or verification.
 On resume authenticate current scope and retained feature authorization. Missing
 approval requires approving the overall direction once, not individually approving
-all outstanding issues. inspect_issue_attempt recovers fixed continuation fields;
+all outstanding issues. inspect_issue_attempt recovers versioned context and the latest receipt;
 inspect_conductor_evidence supplies full diagnostics only when necessary.
 
 Standalone review stays in Research mode. Do not run builds, tests, review-cli, executor, Conductor

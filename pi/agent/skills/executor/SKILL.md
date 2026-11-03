@@ -95,4 +95,4 @@ operations. A verification-only retry uses `{"operations":[]}`. If a replacement
 lost existing code, inspect the baseline and current file and restore that content
 through explicit correction operations, keeping the authenticated current tree.
 Keep .scaffold bookkeeping out of source operations. Oversized work uses Design's
-suspend/decompose/resume path, preserving prior work and attempt budgets.
+suspend/decompose/resume path, preserving prior work and execution history.

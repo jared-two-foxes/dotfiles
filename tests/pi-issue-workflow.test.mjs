@@ -52,14 +52,14 @@ async function fixture(t) {
   const args = async id => ({ task: binding(id), baseRef: g('rev-parse', 'HEAD'), input: '{"operations":[]}',
     requirements: (await call('list')).feature.tasks[id].acceptance_criteria.join('\n') + issueDesignRequirements((await call('list')).feature.tasks[id]),
     buildCommand: ['build'], testCommand: ['test'] });
-  async function run(a, status = 'PASSED', change = async () => {}) {
+  async function run(a, status = 'PASSED', change = async () => {}, finding = 'Missing prerequisite and regression') {
     return executeAndReview(a, { directory: dir }, { scaffoldOptions, invokeConductor: async json => {
       await change();
       const request = JSON.parse(json), boundary = JSON.parse(request.checks[1].args[1]);
       await writeFile(boundary.output, JSON.stringify(await snapshot(dir)));
       return { code: status === 'PASSED' ? 0 : 2, stdout: JSON.stringify({ schema: 'conductor.result/v1', status, phase: 'review',
         execution: { success: true }, checks: ['build', 'test'].map(name => ({ name, exit_code: 0 })),
-        review: { status: status === 'PASSED' ? 'APPROVED' : 'CHANGES_REQUESTED', findings: status === 'PASSED' ? [] : [{ message: 'Missing prerequisite and regression' }] } }) };
+        review: { status: status === 'PASSED' ? 'APPROVED' : 'CHANGES_REQUESTED', findings: status === 'PASSED' ? [] : [{ message: finding }] } }) };
     } });
   }
   async function finish(id, a, change, checkpointOptions = {}) {
@@ -110,13 +110,14 @@ test('persisted criteria and multiline design reach review and receipts without 
   for (const text of [...criteria, ...constraints, issueDesignRequirements(issue), original])
     assert.ok(receipt.args.requirements.includes(text), JSON.stringify(text));
   assert.ok((await requestView(receipt.request)).review.requirements.includes(issueDesignRequirements(issue)));
-  const stripped = await f.run({ ...a, previousAttempt: result.evidence.reference });
-  assert.equal(stripped.status, 'BLOCKED', 'corrections cannot drop fixed scope');
-  const exact = await inspectIssueAttempt({ reference: result.evidence.reference }, { directory: f.dir });
+  const stripped = await f.run({ previousAttempt: result.evidence.reference, input: a.input }, 'NEEDS_DESIGN');
+  assert.equal(stripped.status, 'NEEDS_DESIGN', 'original scope is inherited without caller transcription');
+  const exact = await inspectIssueAttempt({ reference: stripped.evidence.reference }, { directory: f.dir });
   assert.equal(exact.ok, true);
   const retried = await f.run({ ...exact.continuation, input: a.input }, 'NEEDS_DESIGN');
-  assert.equal(retried.evidence.attempt, 2);
-  assert.equal((await readEvidence(f.dir, retried.evidence.reference)).args.requirements, receipt.args.requirements);
+  assert.equal(retried.evidence.attempt, 3);
+  for (const text of [...criteria, ...constraints, original])
+    assert.ok((await readEvidence(f.dir, retried.evidence.reference)).args.requirements.includes(text));
 });
 
 test('native prechecks distinguish wrong branch, malformed/stale design and missing approval', integration, async t => {
@@ -242,7 +243,14 @@ test('final review findings return to the same graph and full feature validation
   t.after(() => rm(outside, { recursive: true, force: true }));
   const script = path.join(outside, 'review.cjs');
   async function reviewer(status) {
-    await writeFile(script, `const fs=require('node:fs'); const args=process.argv.slice(2); const req=JSON.parse(fs.readFileSync(args[args.indexOf('--request')+1],'utf8')); const requirements=fs.readFileSync(req.requirements,'utf8'); if (!requirements.includes('Approved solution F')) process.exit(9); console.log(JSON.stringify({schema:'review.result/v1',status:${JSON.stringify(status)},reason:'REVIEW_COMPLETED',review_id:'issue-feature-review',completed_at:'2026-10-29T00:00:00Z',findings:${status === 'APPROVED' ? '[]' : "[{blocking:true,severity:'high',message:'Integration edge case missing'}]"}})); process.exit(${status === 'APPROVED' ? 0 : 1});`);
+    await writeFile(script, `const fs=require('node:fs'); const args=process.argv.slice(2); const req=JSON.parse(fs.readFileSync(args[args.indexOf('--request')+1],'utf8')); const requirements=fs.readFileSync(req.requirements,'utf8');
+const obligations=[];
+for(const line of requirements.split('\\n')) {
+ if(line.startsWith('[{"id":')) for(const task of JSON.parse(line)) obligations.push(...(task.deliveryContext?.obligations??[]));
+ if(line.startsWith('Persisted feature obligations: ')) obligations.push(...JSON.parse(line.slice('Persisted feature obligations: '.length)));
+}
+const obligation_assessments=[...new Set(obligations.map(o=>o.id))].map(id=>({obligation_id:id,disposition:'verified',evidence:'Independent fixture inspected the correction and integration regressions'}));
+ if (!requirements.includes('Approved solution F')) process.exit(9); console.log(JSON.stringify({schema:'review.result/v1',obligation_assessments,status:${JSON.stringify(status)},reason:'REVIEW_COMPLETED',review_id:'issue-feature-review',completed_at:'2026-10-29T00:00:00Z',findings:${status === 'APPROVED' ? '[]' : "[{blocking:true,severity:'high',message:'Integration edge case missing'}]"}})); process.exit(${status === 'APPROVED' ? 0 : 1});`);
   }
   const validate = () => validateFeature({ featureId: 'F', designRef: f.binding('F').designRef,
     featureBaseRef: f.base, branch: 'feature/issues', headRef: f.g('rev-parse', 'HEAD'),
@@ -379,7 +387,7 @@ test('scoped handoff survives fresh module load and detects graph, source and re
   assert.match(updated.handoff.attempt.latest_findings[0].message, /Missing prerequisite/);
   const exact = await inspectIssueAttempt({ reference: failed.evidence.reference }, { directory: f.dir });
   assert.equal(exact.ok, true); assert.equal(exact.continuation.input, undefined);
-  assert.equal(exact.continuation.requirements, (await f.args('F')).requirements);
+  assert.ok(exact.review_context.original.includes((await f.args('F')).requirements));
   assert.equal(exact.matches_source, true);
   const dir = path.resolve(f.dir, f.g('rev-parse', '--git-path', 'pi-issue-context'));
   const file = path.join(dir, updated.reference.split(':').at(-1) + '.json');
@@ -448,4 +456,130 @@ test('cancellation, branch changes during confirmation and corrupted evidence ne
   const filename = path.join(evidenceDirectory, 'feature-' + granted.reference.split(':').at(-1) + '.json');
   await writeFile(filename, '{}');
   assert.equal(await featureAuthorized({ featureId: 'F' }, context, options), false);
+});
+
+test('seven productive corrections retain one issue, all obligations and authenticated checkpoint history', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  let a = await f.args('F'), latest;
+  for (let n = 1; n <= 7; n++) {
+    const r = await f.run(a, 'NEEDS_DESIGN', () => writeFile(path.join(f.dir, 'source.txt'), 'progress ' + n), 'Independent regression ' + n);
+    assert.equal(r.status, 'NEEDS_DESIGN', JSON.stringify(r)); assert.equal(r.evidence.attempt, n);
+    latest = r.evidence.reference;
+    a = { previousAttempt: latest, input: '{"operations":[]}', contextUpdates: n === 3 ? [{ kind: 'add_obligation', id: 'import-status', text: 'Validate imported quote statuses', reason: 'New regression requirement' }] : [] };
+  }
+  const checkpoint = await f.finish('F', { previousAttempt: latest, input: '{"operations":[]}' });
+  const chain = await authenticateAttemptChain(f.dir, checkpoint.evidenceRef, f.binding('F'));
+  assert.equal(chain.records.length, 8); assert.equal(chain.record.attempt, 8);
+  assert.ok(chain.record.args.deliveryContext.obligations.some(o => o.id === 'import-status'));
+  assert.equal(chain.records[0].args.baseRef, f.base);
+});
+
+test('repeated equivalent review failures pause without deleting source or creating another invocation', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  let a = await f.args('F'), latest;
+  for (let n = 1; n <= 3; n++) {
+    const r = await f.run(a, 'NEEDS_DESIGN'); assert.equal(r.evidence.attempt, n);
+    latest = r.evidence.reference; a = { previousAttempt: latest, input: '{"operations":[]}' };
+  }
+  const paused = await f.run(a, 'NEEDS_DESIGN');
+  assert.equal(paused.reason, 'DIAGNOSIS_REQUIRED', JSON.stringify(paused));
+  assert.equal(paused.evidence, undefined); assert.equal(f.g('rev-parse', 'HEAD'), f.base);
+  assert.equal((await authenticateAttemptChain(f.dir, latest, f.binding('F'))).record.attempt, 3);
+});
+
+test('deleted evidence cannot become fresh history even when the working tree is clean', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const first = await f.run(await f.args('F'), 'NEEDS_DESIGN');
+  const evidenceDir = path.resolve(f.dir, f.g('rev-parse', '--git-path', 'pi-conductor-evidence'));
+  await rm(evidenceDir, { recursive: true });
+  const cold = await f.run(await f.args('F'));
+  assert.equal(cold.status, 'BLOCKED'); assert.match(cold.message, /EVIDENCE_RECOVERY_REQUIRED/);
+  const continued = await f.run({ previousAttempt: first.evidence.reference, input: '{"operations":[]}' });
+  assert.equal(continued.reason, 'EVIDENCE_RECOVERY_REQUIRED');
+  assert.equal((await f.call('list')).feature.tasks.F.delivery.sequence, 1);
+});
+
+test('material obligation amendments require explicit retained authority and independent replacement verification', integration, async t => {
+  const { approveDeliveryAmendment } = await import('../pi/agent/extensions/conductor/context-amendment.mjs');
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const authority = await approveFeatureDirection({ featureId: 'F' }, { directory: f.dir }, { ...f.options, confirm: async () => true });
+  assert.equal(authority.ok, true, JSON.stringify(authority));
+  const first = await f.run(await f.args('F'), 'NEEDS_DESIGN');
+  const record = await readEvidence(f.dir, first.evidence.reference);
+  const id = record.args.deliveryContext.contractItems[1].id;
+  const request = { previousAttempt: first.evidence.reference, ids: [id],
+    replacement: 'Behavior works and imported statuses are validated', reason: 'User changed the acceptance contract' };
+  const denied = await approveDeliveryAmendment(request, { directory: f.dir }, { ...f.options, confirm: async () => false });
+  assert.equal(denied.ok, false); assert.match(denied.message, /requires user approval/);
+  const granted = await approveDeliveryAmendment(request, { directory: f.dir }, { ...f.options, confirm: async () => true });
+  assert.equal(granted.ok, true, JSON.stringify(granted));
+  const result = await f.run({ previousAttempt: first.evidence.reference, input: '{"operations":[]}',
+    contextUpdates: [{ kind: 'apply_amendment', reference: granted.reference, reason: request.reason }] });
+  assert.equal(result.status, 'PASSED', JSON.stringify(result));
+  const next = await readEvidence(f.dir, result.evidence.reference);
+  assert.ok(next.args.deliveryContext.original.includes('Behavior works'));
+  assert.equal(next.args.deliveryContext.amendments[0].reference, granted.reference);
+  assert.ok(next.args.deliveryContext.obligations.some(o => o.source === granted.reference));
+  assert.equal(next.attempt, 2);
+});
+
+test('legacy attempt-five migration and chains longer than 64 retain every original receipt', integration, async t => {
+  const { retainEvidence } = await import('../pi/agent/extensions/conductor/evidence.mjs');
+  for (const count of [5, 70]) {
+    const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+    const args = await f.args('F'), state = await snapshot(f.dir);
+    let previous, originalBytes;
+    for (let n = 1; n <= count; n++) previous = await retainEvidence(f.dir, {
+      repository: f.dir, task: f.binding('F'), attempt: n,
+      args: { ...args, ...(previous ? { previousAttempt: previous } : {}) },
+      before: state, after: state, result: { status: 'BLOCKED', stage: 'REVIEW', reason: 'LEGACY_REVIEW_UNAVAILABLE' },
+    });
+    const original = path.join(f.dir, '.git/pi-conductor-evidence', previous.split(':').at(-1) + '.json');
+    originalBytes = await readFile(original);
+    const delivered = await f.run({ previousAttempt: previous, input: '{"operations":[]}' });
+    assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.evidence.attempt, count + 1);
+    assert.deepEqual(await readFile(original), originalBytes);
+    const chain = await authenticateAttemptChain(f.dir, delivered.evidence.reference, f.binding('F'));
+    assert.equal(chain.records.length, count + 1);
+    assert.equal((await f.call('list')).feature.tasks.F.delivery.sequence, count + 1);
+  }
+});
+
+test('a previously started legacy issue with no receipts cannot silently initialize new delivery history', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const stateFile = path.join(f.dir, '.scaffold/tasks.json');
+  const state = JSON.parse(await readFile(stateFile, 'utf8')); delete state.features.F.tasks.F.delivery_policy;
+  await writeFile(stateFile, JSON.stringify(state));
+  const result = await f.run(await f.args('F'));
+  assert.equal(result.status, 'BLOCKED'); assert.match(result.message, /legacy issue.*no latest receipt/);
+  assert.equal((await f.call('list')).feature.tasks.F.delivery, undefined);
+  const parked = await suspendIssue({ ...f.scope('F'), reason: 'Try zero-attempt recovery' }, { directory: f.dir }, f.options);
+  assert.equal(parked.status, 'BLOCKED'); assert.match(parked.message, /legacy issue cannot assert zero/);
+});
+
+test('legacy continuation prose becomes an additive obligation without replacing inherited criteria', integration, async t => {
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const first = await f.run(await f.args('F'), 'NEEDS_DESIGN');
+  const addition = 'Clarification: imported invalid quote statuses need a dedicated regression';
+  const next = await f.run({ previousAttempt: first.evidence.reference, input: '{"operations":[]}', requirements: addition });
+  assert.equal(next.status, 'PASSED', JSON.stringify(next));
+  const record = await readEvidence(f.dir, next.evidence.reference);
+  assert.ok(record.args.deliveryContext.original.includes('Behavior works'));
+  assert.ok(record.args.deliveryContext.obligations.some(o => o.text === addition));
+  assert.equal(record.attempt, 2);
+});
+
+test('legacy known test-runner plans survive multiple modern continuations without implicit validator changes', integration, async t => {
+  const { retainEvidence } = await import('../pi/agent/extensions/conductor/evidence.mjs');
+  const f = await fixture(t); await f.approve('F'); await f.call('design-finish'); await f.call('start', { task_id: 'F' });
+  const args = { ...await f.args('F'), testCommand: ['pytest', '-q'] }, state = await snapshot(f.dir);
+  const previous = await retainEvidence(f.dir, { repository: f.dir, task: f.binding('F'), attempt: 1,
+    args, before: state, after: state, result: { status: 'BLOCKED', stage: 'REVIEW' } });
+  const migrated = await f.run({ previousAttempt: previous, input: '{"operations":[]}' }, 'NEEDS_DESIGN');
+  assert.equal(migrated.status, 'NEEDS_DESIGN', JSON.stringify(migrated));
+  const continued = await f.run({ previousAttempt: migrated.evidence.reference, input: '{"operations":[]}' });
+  assert.equal(continued.status, 'PASSED', JSON.stringify(continued));
+  const record = await readEvidence(f.dir, continued.evidence.reference);
+  assert.equal(record.args.checks[1].successCondition, undefined, 'legacy evaluator contract is not changed implicitly');
+  assert.equal(record.attempt, 3);
 });

@@ -1,4 +1,15 @@
 // Normalize the caller's verification plan; Conductor owns command execution.
+import { fileURLToPath } from 'node:url';
+export function meaningfulChecks(checks) {
+  return checks.map(c => {
+    const runner = c.command[0].split(/[\\/]/).at(-1).replace(/\.exe$/, '');
+    const recognized = (runner === 'cargo' && c.command.includes('test') && !c.command.includes('--no-run')) ||
+      ['pytest', 'vitest', 'jest', 'mocha'].includes(runner) ||
+      (['python', 'python3'].includes(runner) && c.command.includes('pytest'));
+    return recognized && !c.successCondition ? { ...c, successCondition: [process.execPath,
+      fileURLToPath(new URL('./meaningful-test-condition.mjs', import.meta.url))] } : c;
+  });
+}
 export function verificationChecks(args) {
   function command(value, label) {
     if (!Array.isArray(value) || value.length < 1 || value.length > 64 ||
@@ -47,6 +58,15 @@ export function correctionVerification(previous, args) {
   if (reason !== undefined && (typeof reason !== 'string' || !reason.trim() ||
       reason.length > 4000 || reason.includes('\0'))) return false;
   if (sameVerification(previous.args, args)) return true;
+  if (args.deliveryContext && Array.isArray(args.contextUpdates)) {
+    const before = verificationChecks(previous.args), after = verificationChecks(args);
+    const repairs = args.contextUpdates.filter(u => u.kind === 'repair_check');
+    const additions = args.contextUpdates.filter(u => u.kind === 'add_check');
+    if (after.length === before.length + additions.length && before.every((c, i) =>
+      c.name === after[i].name && JSON.stringify(c.successCondition) === JSON.stringify(after[i].successCondition) &&
+      (JSON.stringify(c.command) === JSON.stringify(after[i].command) || repairs.some(u => u.checkId === c.name &&
+        typeof u.reason === 'string' && u.reason.trim())))) return true;
+  }
   if (!reason || !['BLOCKED', 'NEEDS_DESIGN'].includes(previous.result.status)) return false;
   const before = verificationChecks(previous.args), after = verificationChecks(args);
   return before.length === after.length && before.every((check, i) =>

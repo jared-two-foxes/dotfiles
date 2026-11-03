@@ -16,7 +16,7 @@ material changes outside that scope. Final feature checks and review remain mand
 Before execute_and_review, inspect current source, select one issue, persist its
 agent-designed contract and prepare complete executor JSON using /skill:executor.
 The removed `patch` variants are unsupported. Pass exact input, task identity,
-fixed requirements and baseRef plus an explicit `checks` array. Prefer targeted
+initial additional requirements and baseRef plus an explicit `checks` array. Prefer targeted
 regressions for leaves and scoped integration tests for intermediate parents;
 exclude the full repository/workspace test command whenever the runner supports
 meaningful selection. Retain exact commands and coverage in the issue design.
@@ -28,8 +28,8 @@ The buildCommand/testCommand pair remains an alternative input shape,
 not a requirement to run the entire suite for each issue.
 On a first attempt, `requirements` contains additional scope (or an empty string);
 the adapter adds persisted criteria, constraints and the complete approved issue
-design. Do not transcribe that design. On corrections use the exact retained
-requirements from `inspect_issue_attempt` or authenticated resume fields. Branch
+design. Do not transcribe that design. On corrections supply previousAttempt and fresh operations; native tools assemble
+inherited context. Use structured contextUpdates for discoveries and repairs. Branch
 and design-reference mismatches require correcting the context, not reapproval.
 Named checks may include `successCondition: [program, ...args]` for a known
 tool-specific output contract. Conductor passes the original exit code and
@@ -65,16 +65,16 @@ Use meaningful tests and inspect actual output. Offer full operations on request
 not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 
 One call performs one attempt. Pi interprets NEEDS_DESIGN, authors corrections
-against the current tree and supplies previousAttempt. Preserve five total attempts,
-criteria/findings and baseline within an epoch. BLOCKED stops the current command
+against the current tree and supplies previousAttempt. There is no per-issue attempt limit; preserve
+criteria/findings, baseline and invocation history. BLOCKED stops the current command
 list, not Pi's diagnosis or an authorized, evidence-bound correction.
 Maximum budgets and provider errors are never review approval. Inspect real receipts;
 PASSED requires successful execution, checks and APPROVED independent review.
 
 ### Recover a failed or blocked attempt
 
-Inspect the returned receipt with `inspect_issue_attempt`; use its `continuation`
-fields verbatim and supply new operations against the current source. The prior
+Inspect the returned receipt with `inspect_issue_attempt`; use its minimal `continuation`
+receipt reference and supply new operations against the current source. The prior
 attempt's `after` snapshot includes successfully applied edits even when checks
 or Review failed. Keep `baseRef` at the original HEAD: the review covers the entire
 cumulative diff. Do not reset files, delete receipts, reinitialize Scaffold, or
@@ -85,7 +85,7 @@ If a check's command is wrong (for example `sh` is absent on native Windows), ke
 the named checks in order and supply `verificationRepairReason` explaining the
 failure, repaired invocation and equivalent coverage. This permits command changes,
 not removing/renaming/reordering checks or changing success conditions. Keep the
-approved design and requirements fixed. The repair reason and plan reach independent
+original criteria and constraints retained. The repair reason and plan reach independent
 Review and are retained in the authenticated attempt chain. Never change a command
 to hide a failing test. A changed verification contract requires explicit Design
 recovery. Prefer direct executable/argv commands; when shell syntax is essential,
@@ -102,7 +102,7 @@ after the required `start` even though the context capsule's task_revision chang
 
 Continue a diagnosed, in-scope correction under the existing direction approval.
 Stop for unavailable prerequisites/credentials, unresolved source/index drift,
-exhausted attempts, or two consecutive substantive failures without progress;
+resource pauses, infrastructure circuits or evidence-backed DIAGNOSIS_REQUIRED;
 report the concrete blocker with retained evidence. Do not blindly retry unchanged
 commands. On a source/tree mismatch, preserve all work and use the appropriate
 recovery path; never force acceptance of an unrelated tree.
@@ -126,3 +126,44 @@ new confirmations; it does not authorize doing a rebase or arbitrary history cha
 
 See extensions/conductor/README.md for complete protocol/verification contracts.
 Git/GitHub publishing follows SYSTEM.md and requires a user request. Never merge PRs.
+
+
+### Structured context and resumption
+
+`contextUpdates` accepts add_obligation, annotate, correct_assumption, revise_design,
+propose_addressed, repair_check, add_check and diagnose. Supply a reason per update.
+Original criteria remain immutable in the review context; material scope changes
+and obligation removal go through Design approval. Findings have stable IDs;
+propose_addressed is an author claim, never independent verification. Review must
+explicitly assess every open obligation before checkpointing.
+
+Three equivalent substantive outcomes or source-state cycles trigger diagnosis.
+Compile → test → new review findings may demonstrate progress; changed wording,
+check labels or unrelated edits do not. Review infrastructure opens a circuit.
+Measured executable/credential-file repair permits continuation; transient network
+or provider failures permit one caller-driven probe after five minutes. There is
+no sleep loop or scheduler. A depleted invocation allowance pauses until a revised
+budget is supplied and records previous usage.
+
+Empty operations support verification-only continuation. Optional
+checkEnvironmentInputs declares non-secret files, variables and executables for
+pure deterministic checks. Reuse requires exact source/index/HEAD, unchanged
+commands/validators and matching measured environment. Unknown ambient state means
+rerun checks. Reused receipts remain explicitly linked and authenticated. Recognized
+Cargo, pytest, Vitest, Jest and Mocha test runs receive a meaningful-count validator
+when no explicit semantic validator was supplied. Never weaken a validator to pass.
+
+An existing v1 chain migrates on its original identity, baseline and receipt links,
+including a latest fifth attempt. Scaffold's journal and Git audit anchor prevent
+missing evidence from looking like a new run. A missing or contradictory anchor,
+in-flight intent or receipt requires explicit recovery; no reset or reapproval.
+See extensions/conductor/RECOVERY.md for runtime details and current limitations.
+
+Material contract amendments use approve_delivery_amendment with the latest receipt,
+concrete original criterion/finding IDs, replacement and reason. Only that exceptional
+delta requests user confirmation. Apply its returned reference through
+contextUpdates.apply_amendment; originals and invocation history remain retained,
+and replacement behavior requires independent verification. For environment-only
+credential rotation use reviewProbe with empty operations; failed probes are bounded
+and throttled. Oversized review context can resume with an explicit
+reviewContextMaxBytes allowance increase without dropping obligations.

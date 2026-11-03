@@ -1,3 +1,4 @@
+import { reusePlan } from './stage-reuse.mjs';
 // One Conductor request, including the final Git commit command. Process receipts
 // make the verified prefix available inside that list, before Conductor returns.
 import path from 'node:path';
@@ -12,9 +13,17 @@ import { assertLatestAttempt } from './task-chain.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { git } from './git-tree.mjs';
 import { createHash } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, stage, fields = {}) => ({ schema: 'opencode.execute_and_review.result/v1', status, stage, ...fields });
 const exit = status => ({ PASSED: 0, FAILED: 1, BLOCKED: 2 })[status];
+async function logDigest(file) {
+  const info = await lstat(file);
+  requireValue(info.isFile() && !info.isSymbolicLink(), 'Unsafe retained log file');
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  return hash.digest('hex');
+}
 
 async function preview(file) {
   const handle = await open(file, 'r');
@@ -73,9 +82,11 @@ export async function commandResults(plan, rawRunner) {
         stdout: cstdout, stderr: cstderr, stdout_truncated: ctruncated, stderr_truncated: cetruncated,
         ...(proof ? { stdout_path: out, stderr_path: err } : {}), ...(proof?.error ? { error: proof.error } : {}) };
     }
-    if (rawRunner) requireValue(rawRunner.commands[index].status === status, 'Conductor and retained stage decision disagree');
+    if (rawRunner) requireValue(rawRunner.commands[index].status === status ||
+      (status === 'BLOCKED' && receipt?.status === 'BLOCKED' && rawRunner.commands[index].exit_code === 125), 'Conductor and retained stage decision disagree');
     commands.push({ ...spec, index, status, exit_code: receipt?.exit_code ?? null,
       stdout, stderr, stdout_truncated, stderr_truncated, stdout_path, stderr_path,
+      stdout_sha256: await logDigest(stdout_path), stderr_sha256: await logDigest(stderr_path),
       ...(condition ? { condition } : {}),
       ...(receipt?.error ? { error: receipt.error } : {}) });
     receipts.push(receipt);
@@ -145,9 +156,12 @@ export async function runPipeline(meta, feature, context, options = {}) {
   const plan = { schema: 'pi.delivery-plan/v1', ...meta,
     feature: { branch: feature.branch, original_baseline: feature.original_baseline }, stages: [] };
   const commands = [];
+  const reused = await reusePlan(meta.repository, meta.args, meta.before);
   for (const [index, command] of meta.workflow.request.commands.entries()) {
     const file = path.join(root, `${index}.stage.json`);
-    const stage = { index, repository: meta.repository, command, receipt: path.join(root, `${index}.receipt.json`),
+    const stage = { index, repository: meta.repository, command,
+      ...(reused && index > 0 && index <= reused.count ? { reuse: { ...reused, index,
+        boundaryPath: meta.boundaryPath, last: index === reused.count } } : {}), receipt: path.join(root, `${index}.receipt.json`),
       ...(command.success_condition ? { conditionReceipt: path.join(root, `${index}.condition.json`) } : {}) };
     plan.stages.push(stage);
     await writeFile(file, JSON.stringify(stage), { mode: 0o600, flag: 'wx' });
@@ -162,7 +176,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
   plan.deliveryRequest = { ...meta.workflow.request, commands };
   await writeFile(planPath, JSON.stringify(plan), { flag: 'wx', mode: 0o600 });
   await writeFile(path.join(root, 'request.json'), JSON.stringify(plan.deliveryRequest), { flag: 'wx', mode: 0o600 });
-  let response, runner, problem;
+  let response, runner, problem, problemCode;
   try {
     response = await (options.invokeConductor ?? ((body, timeoutMs) => invoke(process.env.CONDUCTOR_BIN ?? 'conductor',
       ['run', '--request', '-'], { cwd: meta.repository, signal: context.abort, input: body, timeoutMs })))(
@@ -170,7 +184,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
     await writeFile(path.join(root, 'response.json'), JSON.stringify(response), { flag: 'wx', mode: 0o600 });
     runner = JSON.parse(response.stdout);
     validateRunner(plan.deliveryRequest, runner, response.code);
-  } catch (error) { problem = error.message; }
+  } catch (error) { problem = error.message; problemCode = error.code; }
   // The in-list sealer may still be running after coordinator timeout. Never
   // write a competing terminal receipt while it owns this attempt's claim.
   const lockPath = path.join(root, 'terminal.lock');
@@ -219,13 +233,16 @@ export async function runPipeline(meta, feature, context, options = {}) {
       // merely from a passed prefix. Its source/receipt gate must also succeed.
       if (outcome.status === 'PASSED') outcome = result('BLOCKED', 'EVIDENCE', {
         reason: 'COMMIT_GATE_FAILED', message: runner.error ?? 'Commit verification receipt was not retained', conductor });
-    } catch (error) { outcome = result('BLOCKED', 'CONDUCTOR', { reason: 'PROTOCOL_MISMATCH', message: error.message }); }
+    } catch (error) { outcome = result('BLOCKED', 'CONDUCTOR', {
+      reason: ['WORKFLOW_TIMEOUT', 'OUTPUT_LIMIT', 'CANCELLED'].includes(problemCode) ? 'RESOURCE_PAUSED' : 'PROTOCOL_MISMATCH',
+      message: error.message }); }
     const after = await snapshot(meta.repository);
     if (after.head !== meta.before.head) outcome = result('BLOCKED', 'EVIDENCE', { reason: 'HEAD_CHANGED', actualResult: outcome });
     const reference = await retainEvidence(meta.repository, { repository: meta.repository, task: meta.args.task,
       args: meta.args, before: meta.before, after, attempt: meta.attempt, startedReference: meta.startedReference,
       request: meta.workflow.request, workflow: meta.workflow, deliveryRequest: plan.deliveryRequest,
-      response: response ?? null, result: outcome });
+      response: response ?? null,
+      reviewSnapshot: await readFile(meta.boundaryPath, 'utf8').then(JSON.parse).catch(() => null), result: outcome });
     return { ...outcome, evidence: { reference, task: meta.args.task, attempt: meta.attempt } };
   } finally { await terminal.close(); await rm(lockPath); }
 }

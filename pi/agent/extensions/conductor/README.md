@@ -1,3 +1,7 @@
+> Current Pi continuation API: see [RECOVERY.md](RECOVERY.md). Continuations inherit
+> context from receipts and Scaffold; no exact requirements-string copy or lifetime
+> attempt allowance is required. Historical wire examples below remain compatible.
+
 # Pi Conductor integration
 
 The native Pi extension in `extensions/conductor/` registers
@@ -293,15 +297,16 @@ the check names/order, all success conditions and the approved coverage contract
 Preflight and correction-chain authentication enforce the same rule. The reason,
 prior receipt reference and current plan are appended to independent Review's
 requirements without changing the fixed task requirements. Old and new commands
-remain in linked receipts; all checks and Review run again. This allows a missing
+remain in linked receipts; all invalidated checks and Review run again; unchanged checks can be reused only
+with the explicit measured-environment declaration described in RECOVERY.md. This allows a missing
 `sh` command to be replaced with an equivalent native invocation, not a failing
 test to be bypassed. Semantic coverage remains a Pi/Review responsibility; a reason
 alone is not proof of equivalence. Contract or validator changes require Design
-recovery. Ordinary corrections still require identical commands.
+recovery. Ordinary corrections preserve check identities and coverage; structured revisions are audited.
 
 BLOCKED stops that command list. Pi diagnoses the result and continues recoverable,
 in-scope corrections under the existing feature authorization, subject to the same
-five-attempt and repeated-failure limits. Unavailable credentials/prerequisites or
+persisted infrastructure/resource pauses and evidence-backed stall detection. Unavailable credentials/prerequisites or
 unrelated source/index drift remain concrete blockers. Prefer executable/argv
 commands; inspect the platform before using shell syntax. Native Windows does not
 imply `sh` is installed. Use an available native shell only when necessary.
@@ -448,8 +453,7 @@ baseline handoff. Recovery authenticates the entire receipt chain and consumed
 attempt count, and uses Git object-only three-way merging to prove the current
 implementation tree equals the retained task tree transplanted onto rebased HEAD.
 It never applies that merge to the source checkout. Conflicts, extra/missing edits,
-missing receipts/objects, divergent staged variants and exhausted five-attempt
-budgets block recovery rather than guessing. A clean index at HEAD or an index
+missing receipts/objects, divergent staged variants and stale execution history block recovery rather than guessing. A clean index at HEAD or an index
 containing the entire current task tree is supported; other staged variants need
 explicit reconciliation. Git must support `merge-tree --write-tree --merge-base`.
 
@@ -472,8 +476,9 @@ A successful result is **READY**, never task PASSED. It returns:
 For example, three consumed attempts remain three; the next Conductor invocation
 is attempt four and at most two attempts remain. The handoff links the old three
 receipts unchanged, retains all original requests/responses and diagnostics, and
-adds unresolved review findings to the new fixed requirements. Ordinary retries
-keep those requirements/checks fixed. Later rebases preserve the same budget.
+retains unresolved review findings and prior context revisions. Ordinary retries
+inherit them automatically; structured repairs and added checks preserve coverage.
+Later rebases preserve the same invocation history.
 
 Inspect the handoff through `inspect_task_rebase_recovery` or
 `inspect_conductor_evidence`. If the task is blocked/failed, explicitly reconcile
@@ -506,8 +511,9 @@ zero-attempt recovery handoff), the adapter adds the persisted acceptance criter
 constraints and exact approved design to caller-supplied additional `requirements`
 (which may be empty). Existing callers supplying the complete canonical text remain
 supported. The assembled scope goes to Review and the retained receipt. Corrections
-must supply the exact retained requirements via `inspect_issue_attempt` or authenticated
-resume fields; no formatting normalization or advisory checks weaken that boundary.
+supply previousAttempt and fresh operations; the native adapter inherits the contract,
+checks and authority. Structured contextUpdates retain discoveries and revisions.
+No caller transcription of inherited requirements or approval prose is needed.
 Branch mismatches report current/expected branches, while malformed or stale
 `task.designRef` values report the expected feature reference. These precheck errors
 do not consume an execution attempt and do not require reapproval. Unbound execution cannot

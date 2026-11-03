@@ -35,7 +35,7 @@ async function attempt(repository, binding) {
   await assertLatestAttempt(repository, reference, binding, record.attempt);
   const c = record.result.conductor ?? record.result.actualResult?.conductor;
   const findings = c?.review?.findings ?? [];
-  return JSON.parse(JSON.stringify({ reference, consumed_attempts: record.attempt, remaining_attempts: Math.max(0, 5 - record.attempt),
+  return JSON.parse(JSON.stringify({ reference, consumed_attempts: record.attempt,
     matches_source: equal(await snapshot(repository), record.after),
     status: record.result.status, stage: record.result.stage, reason: record.result.reason,
     latest_findings: findings.slice(0, 24).map(f => ({ severity: f.severity, message: String(f.message ?? '').slice(0, 800),
@@ -126,7 +126,9 @@ export async function inspectIssueAttempt(args, context = {}) {
     await assertLatestAttempt(repository, args.reference, record.task, record.attempt);
     const { input, ...fixed } = record.args;
     return { ok: true, reference: args.reference, task: record.task, consumed_attempts: record.attempt,
-      matches_source: equal(await snapshot(repository), record.after), continuation: { ...fixed, previousAttempt: args.reference },
-      status: record.result.status, note: 'Exact retained requirements/checks; no source operations. Inspect full receipt by reference for diagnostics. Reconcile phase, source and approvals before execution.' };
+      matches_source: equal(await snapshot(repository), record.after),
+      review_context: fixed.deliveryContext ?? { legacy_requirements: fixed.requirements },
+      continuation: { previousAttempt: args.reference },
+      status: record.result.status, note: 'Inherited context is authoritative; supply previousAttempt, fresh operations and structured updates. Inspect full receipt by reference for diagnostics. Reconcile phase, source and approvals before execution.' };
   } catch (e) { return { ok: false, message: e.message }; }
 }

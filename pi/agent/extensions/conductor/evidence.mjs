@@ -1,3 +1,4 @@
+import { obligationsVerified } from './delivery-context.mjs';
 // Local, content-addressed receipts. No task selection, lifecycle writes or retries.
 import { verificationChecks } from './verification.mjs';
 import { authenticNormalized } from './protocol.mjs';
@@ -91,7 +92,7 @@ export function verifiedResult(result, args) {
     checks.every((check, index) => c.checks[index]?.name === check.name &&
       (c.schema === 'conductor.result/v1' ? c.checks[index].exit_code === 0 :
         c.checks[index].status === 'PASSED' && (check.successCondition || c.checks[index].exit_code === 0))) &&
-    c.review?.status === 'APPROVED';
+    c.review?.status === 'APPROVED' && obligationsVerified(args ?? {}, c.review);
 }
 
 export async function inspectEvidence(reference, context) {

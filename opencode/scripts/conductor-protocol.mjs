@@ -164,6 +164,13 @@ export function reviewResult(value, code) {
     (finding.line == null || (Number.isInteger(finding.line) && finding.line >= 0)) &&
     (finding.recommendation == null || typeof finding.recommendation === 'string'),
   'Invalid Review finding');
+  if (value.obligation_assessments !== undefined) {
+    const assessments = value.obligation_assessments;
+    requireValue(Array.isArray(assessments) && new Set(assessments.map(a => a.obligation_id)).size === assessments.length &&
+      assessments.every(a => a && typeof a.obligation_id === 'string' && a.obligation_id.trim() &&
+        ['verified', 'unresolved', 'not_applicable'].includes(a.disposition) && typeof a.evidence === 'string' && a.evidence.trim()),
+    'Invalid independent obligation assessments');
+  }
   const blocking = value.findings.some(f => f.blocking);
   requireValue(value.status === 'INDETERMINATE' || (value.status === 'APPROVED' ? !blocking : blocking), 'Review verdict contradicts findings');
   return value;
@@ -196,10 +203,11 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
     }
   }
   const results = runner.commands;
-  let execution = null, review = null, status = 'BLOCKED', phase = 'execution';
+  let execution = null, review = null, failure = null, status = 'BLOCKED', phase = 'execution';
   if (results[0]?.exit_code != null) {
     execution = JSON.parse(toolOutputs.execution);
-    requireValue(typeof execution?.success === 'boolean' && Number.isInteger(execution.operations_applied) &&
+    if (execution?.schema === 'pi.tool-invocation-error/v1') { failure = execution; execution = null; }
+    else requireValue(typeof execution?.success === 'boolean' && Number.isInteger(execution.operations_applied) &&
       execution.operations_applied >= 0 && results[0].exit_code === (execution.success ? 0 : 1) &&
       (!execution.success || execution.operations_applied === expectedOperations), 'Executor outcome/exit code/count mismatch');
   }
@@ -210,6 +218,12 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
     const last = results.at(-1);
     // Validation/setup errors from Review are BLOCKED, not correction requests.
     if (last.exit_code != null && [0, 1, 3].includes(last.exit_code)) review = reviewResult(JSON.parse(toolOutputs.review), last.exit_code);
+    else if (toolOutputs.review) {
+      const error = JSON.parse(toolOutputs.review);
+      if (error.schema_version === 'agent.error/v1') failure = { category: 'review_engine', code: error.code };
+      else if (error.schema === 'pi.tool-invocation-error/v1') failure = {
+        category: error.category === 'invocation' ? 'review_engine' : 'evidence_integrity', code: error.code };
+    }
   }
   if (runner.status !== 'BLOCKED') {
     if (phase === 'review') status = review?.status === 'APPROVED' && runner.status === 'PASSED'
@@ -217,7 +231,7 @@ export function normalizeWorkflow(request, runner, toolOutputs, code, expectedSc
     else if (runner.status === 'FAILED') status = results.at(-1)?.exit_code == null ? 'BLOCKED' : 'NEEDS_DESIGN';
   }
   return { schema: 'pi.conductor-result/v1', status, phase, execution, checks, review,
-    request, runner, toolOutputs, expectedOperations, ...(runner.error ? { error: runner.error } : {}) };
+    request, runner, toolOutputs, expectedOperations, ...(failure ? { failure } : {}), ...(runner.error ? { error: runner.error } : {}) };
 }
 
 export async function toolOutput(request, runner, record) {

@@ -1,3 +1,5 @@
+import { reusableCheck } from './stage-reuse.mjs';
+import { authenticateAmendment } from './context-amendment.mjs';
 // Authenticate immutable task receipts independently of current branch history.
 import { sameVerification } from './verification.mjs';
 import { authenticateAttemptChain } from './task-chain.mjs';
@@ -11,6 +13,8 @@ const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 // Shared authentication for task checkpoints and cumulative feature validation.
 export async function authenticateTaskEvidence(repository, reference, binding) {
   const record = await readEvidence(repository, reference);
+  for (const a of record.args.deliveryContext?.amendments ?? [])
+    requireValue(equal(await authenticateAmendment(repository, a.reference, binding), a), 'Invalid amendment authority');
   requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === binding[k]), 'Task/design identity mismatch');
   // Authenticate the retained request against the caller's full plan. The final
   // command is transparently wrapped to capture the source/index review boundary.
@@ -50,6 +54,10 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
     record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
     record.response?.code === 0 &&
     (modern || verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args)), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
+  for (const receipt of record.result.conductor?.runner?.receipts ?? []) {
+    if (receipt?.reusedFrom) await reusableCheck(repository, receipt.reusedFrom.reference,
+      receipt.reusedFrom.index, record.args, record.before);
+  }
   await authenticateAttemptChain(repository, reference, binding);
   return record;
 }

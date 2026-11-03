@@ -1,3 +1,4 @@
+import { obligationsVerified } from './delivery-context.mjs';
 // Shared bounded verification contracts for final validation and rebase recovery.
 import { watch } from 'node:fs';
 import path from 'node:path';
@@ -84,8 +85,9 @@ export function featureRequirements(feature, design) {
   return design + '\n\nOriginal feature acceptance criteria:\n' +
       feature.acceptance_criteria.map(c => '- ' + c).join('\n') + '\n\nConstraints:\n' +
       (feature.constraints ?? []).join('\n') +
-      ('\n\nApproved issue designs and contracts:\n' + JSON.stringify(Object.values(feature.tasks).map(t => ({ id: t.id, parent: t.parent_id, origin: t.origin, criteria: t.acceptance_criteria, constraints: t.constraints, designs: t.designs, earlierDesigns: t.design_history })))) +
-      '\n\nIndependently assess the COMPLETE feature, cross-task integration, interfaces, data structures, invariants, architecture, regressions, missing behavior, errors and edge cases. Inspect check diagnostics for meaningful coverage; zero exits alone are insufficient. Never weaken the original acceptance criteria.';
+      ('\n\nApproved issue designs and contracts:\n' + JSON.stringify(Object.values(feature.tasks).map(t => ({ id: t.id, parent: t.parent_id, origin: t.origin, criteria: t.acceptance_criteria, constraints: t.constraints, designs: t.designs, earlierDesigns: t.design_history, deliveryContext: t.delivery?.context, deliveryHead: t.delivery?.head })))) +
+      '\n\nOriginal criteria remain retained for audit. Native-authenticated deliveryContext.amendments explicitly supersede only their listed original IDs; assess their replacement obligations and every unchanged criterion. Agent annotations cannot authorize a relaxation.' +
+      '\n\nIndependently assess the COMPLETE feature, cross-task integration, interfaces, data structures, invariants, architecture, regressions, missing behavior, errors and edge cases. Inspect check diagnostics for meaningful coverage; zero exits alone are insufficient. Never silently weaken acceptance criteria or omit an approved replacement obligation.';
 }
 export const reviewScope = (requirements, checks) => requirements +
   '\n\nActual full-project verification diagnostics:\n' + JSON.stringify(checks);
@@ -100,9 +102,16 @@ export function authenticateFeatureRecord(record, binding, plan, tasks, requirem
       equal(c.definition, plan.checks[i]) && meaningful(c.definition, c) && c.meaningful === true),
   'Retained result is interrupted, stale or incomplete');
   validateReviewResult(record.review, 0);
+  requireValue(featureObligationsVerified(tasks, record.review), 'Unresolved feature obligations need independent assessments');
+  requireValue(obligationsVerified({ deliveryContext: { obligations: record.obligations ?? [] } }, record.review),
+    'Retained feature findings require explicit independent assessments');
   requireValue(record.review.status === 'APPROVED' && record.review.baseRef === binding.baseline &&
     record.review.headRef === binding.head && record.review.model === plan.review.model &&
     record.review.requirementsDigest === digest(reviewScope(record.requirements, record.checks)),
   'Retained review is incomplete or mismatched');
 }
 
+
+export function featureObligationsVerified(tasks, review) {
+  return Object.values(tasks).every(t => obligationsVerified({ deliveryContext: t.delivery?.context }, review));
+}

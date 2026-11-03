@@ -1,3 +1,4 @@
+import { anchorHandoff } from './delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
 import { suspensionAnchor } from './issue-anchors.mjs';
 import path from 'node:path';
@@ -10,7 +11,7 @@ import { checkpointHistory } from './history.mjs';
 import { readReconciliation } from './reconciliation.mjs';
 import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from './issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
-const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension'].includes(k)));
+const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {
   validateBinding(args.task);
   const repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
@@ -49,6 +50,8 @@ export async function suspendIssue(args, context = {}, options = {}) {
       const beforeStart = await snapshot(repository);
       const chain = args.previousAttempt ? await authenticateAttemptChain(repository, args.previousAttempt, args.task) : null;
       if (!chain) {
+        requireValue(task.delivery_policy === 'versioned-context/v1',
+          'EVIDENCE_RECOVERY_REQUIRED: legacy issue cannot assert zero invocations without retained history');
         await assertLatestAttempt(repository, undefined, args.task, 0);
         requireValue(beforeStart.clean && !beforeStart.bookkeepingVisible, 'Zero-attempt suspension requires clean source/index');
       }
@@ -56,8 +59,8 @@ export async function suspendIssue(args, context = {}, options = {}) {
         args: { task: args.task, baseRef: beforeStart.head } };
       await assertLatestAttempt(repository, args.previousAttempt, args.task, previous.attempt);
       const before = await snapshot(repository);
-      requireValue(previous.result.status !== 'PASSED' && previous.attempt < 5 && equal(before, previous.after) &&
-        before.head === previous.args.baseRef && !before.bookkeepingVisible, 'Use latest unfinished receipt with unchanged source and remaining attempts');
+      requireValue(previous.result.status !== 'PASSED' && equal(before, previous.after) &&
+        before.head === previous.args.baseRef && !before.bookkeepingVisible, 'Use latest unfinished receipt with unchanged source');
       await prefix(repository, feature, args, before.head);
       const indexTree = await currentIndexTree(repository, path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index'])));
       const sourceCommit = git(repository, ['commit-tree', before.tree, '-p', before.head],
@@ -147,6 +150,7 @@ export async function resumeIssue(args, context = {}, options = {}) {
       requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === args.suspensionRef &&
         (h.recovery.reconciliationRef ?? null) === (args.reconciliationRef ?? null) && equal(await snapshot(repository), h.after), 'Stale issue handoff');
       await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
+      await anchorHandoff(repository, args.task, handoffRef, parked.args.previousAttempt, options);
       const { input, ...resume } = h.args;
       return { status: 'READY', handoffRef, consumedAttempts: h.attempt, resume: { ...resume, previousAttempt: handoffRef } };
     }
@@ -177,8 +181,9 @@ export async function resumeIssue(args, context = {}, options = {}) {
     await pinHandoff(repository, handoffRef, h);
     await readTaskHandoff(repository, handoffRef, args.task);
     await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
+    await anchorHandoff(repository, args.task, handoffRef, parked.args.previousAttempt, options);
     const { input, ...resume } = h.args;
-    return { status: 'READY', handoffRef, consumedAttempts: previous.attempt, remainingAttempts: 5 - previous.attempt,
+    return { status: 'READY', handoffRef, consumedAttempts: previous.attempt,
       resume: { ...resume, previousAttempt: handoffRef }, message: 'Start the same issue, refresh any stale context capsule, and continue with this previousAttempt under the retained feature direction; READY is not PASSED' };
   } catch (error) { return { status: 'BLOCKED', message: error.message, handoffRef, repository,
     recovery: 'Preserve the saved stash, private refs and old receipts. Inspect conflicts/current source; never reset attempts or replay stash blindly' }; }
