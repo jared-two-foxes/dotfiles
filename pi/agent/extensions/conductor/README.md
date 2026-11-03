@@ -514,6 +514,12 @@ constraints and exact approved design to caller-supplied additional `requirement
 supported. The assembled scope goes to Review and the retained receipt. Corrections
 supply previousAttempt and fresh operations; the native adapter inherits the contract,
 checks and authority. Structured contextUpdates retain discoveries and revisions.
+Use `issueHandoffRef` instead of `previousAttempt` to continue directly from a
+saved, applicable `prepare_issue_handoff` result. The adapter reauthenticates the
+handoff and resolves its latest receipt before running the normal continuation
+checks. If continuation reports a stale handoff or receipt, use the returned
+`prepare_issue_handoff` recovery action to refresh the context, then inspect the
+latest attempt before authoring corrections.
 No caller transcription of inherited requirements or approval prose is needed.
 Branch mismatches report current/expected branches, while malformed or stale
 `task.designRef` values report the expected feature reference. These precheck errors

@@ -134,9 +134,20 @@ export async function retainEvidence(repository, record) {
 
 export async function readEvidence(repository, reference) {
   const match = /^pi-evidence:sha256:([a-f0-9]{64})$/.exec(reference ?? "");
-  if (!match) throw new Error("Invalid evidence reference");
-  const file = path.join(await directory(repository), match[1] + ".json");
-  const stat = await lstat(file);
+  if (!match)
+    throw Object.assign(new Error("Invalid evidence reference; expected pi-evidence:sha256: followed by 64 lowercase hex characters"), {
+      code: "CONTINUATION_RECEIPT_MALFORMED",
+    });
+  let file, stat;
+  try {
+    file = path.join(await directory(repository), match[1] + ".json");
+    stat = await lstat(file);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    throw Object.assign(new Error("Evidence receipt is missing from this checkout"), {
+      code: "CONTINUATION_RECEIPT_MISSING",
+    });
+  }
   if (!stat.isFile() || stat.isSymbolicLink())
     throw new Error("Evidence must be a regular file");
   const bytes = await readFile(file, "utf8");

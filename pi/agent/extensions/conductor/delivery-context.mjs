@@ -330,10 +330,16 @@ export async function prepareDelivery(
   }
   if (journal) {
     // The anchor survives deleting the evidence directory. Never downgrade to a first attempt.
-    requireValue(
-      journal.head === (args.previousAttempt ?? null),
-      "EVIDENCE_RECOVERY_REQUIRED: use the anchored latest receipt; preserve the current source/index",
-    );
+    if (journal.head !== (args.previousAttempt ?? null)) {
+      const error = new Error(
+        "EVIDENCE_RECOVERY_REQUIRED: use the anchored latest receipt; preserve the current source/index",
+      );
+      if (args.previousAttempt) {
+        error.code = "CONTINUATION_RECEIPT_STALE";
+        error.consumedAttempts = journal.sequence;
+      }
+      throw error;
+    }
     if (journal.head)
       try {
         await readEvidence(repository, journal.head);

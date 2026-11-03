@@ -14,7 +14,7 @@ import { readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/e
 import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
-import { inspectIssueAttempt } from '../pi/agent/extensions/conductor/issue-context.mjs';
+import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/conductor/issue-context.mjs';
 import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE
@@ -421,11 +421,39 @@ test('compilation failure, test failure and review finding advance to an authent
   assert.equal(testFailed.status, 'NEEDS_DESIGN', JSON.stringify(testFailed));
   assert.equal(testFailed.conductor.checks[0].status, 'PASSED');
   process.env.REVIEW_FIXTURE_STATUS = 'CHANGES_REQUESTED';
+  const scope = { featureId: 'F', taskId: 'F' };
+  const oldHandoff = await prepareIssueHandoff(scope, f.context);
+  assert.equal(oldHandoff.applicable, true, JSON.stringify(oldHandoff));
   const finding = await executeAndCheckpoint({ previousAttempt: testFailed.evidence.reference, input: edit('value: 1', 'value: 2') }, f.context);
   assert.equal(finding.status, 'NEEDS_DESIGN', JSON.stringify(finding));
   assert.equal(finding.conductor.review.status, 'CHANGES_REQUESTED');
   process.env.REVIEW_FIXTURE_STATUS = 'APPROVED';
-  const fixed = await executeAndCheckpoint({ previousAttempt: finding.evidence.reference,
+  const handoff = await prepareIssueHandoff(scope, f.context);
+  assert.equal(handoff.applicable, true, JSON.stringify(handoff));
+  assert.equal(handoff.handoff.attempt.consumed_attempts, 3);
+  assert.equal(handoff.handoff.attempt.reference, finding.evidence.reference);
+  const before = await readFile(path.join(f.directory, 'source.txt'), 'utf8');
+  for (const [continuation, reason] of [
+    [{ previousAttempt: finding.evidence.reference.slice(0, -1) }, 'CONTINUATION_RECEIPT_MALFORMED'],
+    [{ previousAttempt: 'pi-evidence:sha256:' + 'f'.repeat(64) }, 'CONTINUATION_RECEIPT_MISSING'],
+    [{ previousAttempt: testFailed.evidence.reference }, 'CONTINUATION_RECEIPT_STALE'],
+    [{ issueHandoffRef: oldHandoff.reference }, 'CONTINUATION_HANDOFF_STALE'],
+    [{ issueHandoffRef: handoff.reference, previousAttempt: finding.evidence.reference }, 'CONTINUATION_INPUT_CONFLICT'],
+  ]) {
+    const blocked = await executeAndCheckpoint({ task: f.args.task, ...continuation,
+      input: edit('value: 2', 'value: 9') }, f.context);
+    assert.equal(blocked.reason, reason, JSON.stringify(blocked));
+    assert.deepEqual(blocked.recovery, { tool: 'prepare_issue_handoff', ...scope });
+    assert.equal(blocked.evidence, undefined);
+    if (reason === 'CONTINUATION_RECEIPT_STALE') assert.equal(blocked.consumedAttempts, 3);
+  }
+  const mismatch = await executeAndCheckpoint({
+    task: { ...f.args.task, taskId: 'other' }, issueHandoffRef: handoff.reference, input: edit('value: 2', 'value: 9'),
+  }, f.context);
+  assert.equal(mismatch.reason, 'CONTINUATION_TASK_MISMATCH');
+  assert.equal(mismatch.evidence, undefined);
+  assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), before);
+  const fixed = await executeAndCheckpoint({ issueHandoffRef: handoff.reference,
     input: edit('value: 2', 'value: 2, acceptStatus: value => ["draft","accepted"].includes(value)'),
     contextUpdates: [
       { kind: 'add_obligation', id: 'quote-status', text: 'Reject invalid imported quote statuses', reason: 'Independent review regression discovery' },
@@ -435,5 +463,7 @@ test('compilation failure, test failure and review finding advance to an authent
   assert.equal(fixed.stage, 'COMMITTED', JSON.stringify(fixed)); assert.equal(fixed.evidence.attempt, 4);
   const record = await authenticateTaskEvidence(f.directory, fixed.evidence.reference, f.args.task);
   assert.equal(record.args.baseRef, f.base); assert.equal(record.args.deliveryContext.obligations.some(o => o.id === 'quote-status'), true);
+  assert.equal(record.args.previousAttempt, finding.evidence.reference);
+  assert.equal(record.args.issueHandoffRef, undefined);
   assert.equal(f.confirmations(), 1);
 });

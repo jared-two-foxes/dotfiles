@@ -28,8 +28,9 @@ final gate. Keep ordered checks fixed across corrections except for explicit
 command invocation repairs described below. On a first attempt, `requirements`
 contains additional scope (or an empty string); the adapter adds persisted
 criteria, constraints and the complete approved issue design. Do not transcribe
-that design. On corrections supply previousAttempt and fresh operations; native
-tools assemble inherited context. Use structured contextUpdates for discoveries
+that design. For corrections, supply fresh operations and either an applicable
+`issueHandoffRef` or the exact `previousAttempt` receipt. Native tools assemble
+inherited context. Use structured contextUpdates for discoveries
 and repairs. Branch and design-reference mismatches require correcting the
 context, not reapproval. Named checks may include
 `successCondition: [program, ...args]` for a known tool-specific output
@@ -64,7 +65,7 @@ Use meaningful tests and inspect actual output. Offer full operations on request
 not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 
 One call performs one attempt. Pi interprets NEEDS_DESIGN, authors corrections
-against the current tree and supplies previousAttempt. There is no per-issue attempt limit; preserve
+against the current tree and supplies the continuation reference. There is no per-issue attempt limit; preserve
 criteria/findings, baseline and invocation history. BLOCKED stops the current command
 list, not Pi's diagnosis or an authorized, evidence-bound correction.
 Maximum budgets and provider errors are never review approval. Inspect real receipts;
@@ -94,10 +95,12 @@ Windows, `sh -c` only where installed). Preserve environment assignment/quoting 
 If Scaffold is blocked/failed, inspect its state, `retry` with the recovery reason,
 then `start` the same issue. Those transitions do not reset receipts or consumed
 attempts. A fresh context may discover the latest receipt through
-`prepare_issue_handoff`; use `inspect_issue_attempt` for execution continuation.
-Refresh a stale context capsule after lifecycle changes; it is data, not the
-`resume_issue.handoffRef` used as `previousAttempt`. A resume receipt remains usable
-after the required `start` even though the context capsule's task_revision changed.
+`prepare_issue_handoff`. Inspect the receipt details with `inspect_issue_attempt`
+when diagnosing a correction. Pass the applicable saved context reference as
+`issueHandoffRef` to continue without copying the receipt hash. For stale context
+or receipt prechecks, use the returned `prepare_issue_handoff` recovery action
+and inspect the latest attempt before retrying. After `resume_issue` and the
+required `start`, pass its execution receipt `handoffRef` as `previousAttempt`.
 
 Continue a diagnosed, in-scope correction under the existing direction approval.
 Stop for unavailable prerequisites/credentials, unresolved source/index drift,

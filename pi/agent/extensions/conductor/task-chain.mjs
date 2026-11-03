@@ -51,8 +51,9 @@ export async function assertLatestAttempt(repository, reference, binding, attemp
   for (const otherRef of await taskEvidenceReferences(repository)) {
     const other = await readEvidence(repository, otherRef);
     if (!equal(other.task, binding)) continue;
-    requireValue(!(other.attempt > attempt) && (!reference || other.startedReference !== reference),
-      'A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count');
+    if (other.attempt > attempt || (reference && other.startedReference === reference))
+      throw Object.assign(new Error('A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count'),
+        reference ? { code: 'CONTINUATION_RECEIPT_STALE' } : {});
   }
 }
 
