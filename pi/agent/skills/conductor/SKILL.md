@@ -16,35 +16,34 @@ material changes outside that scope. Final feature checks and review remain mand
 Before execute_and_review, inspect current source, select one issue, persist its
 agent-designed contract and prepare complete executor JSON using /skill:executor.
 The removed `patch` variants are unsupported. Pass exact input, task identity,
-initial additional requirements and baseRef plus an explicit `checks` array. Prefer targeted
-regressions for leaves and scoped integration tests for intermediate parents;
-exclude the full repository/workspace test command whenever the runner supports
-meaningful selection. Retain exact commands and coverage in the issue design.
-Explain any unavoidable broader command. Reserve the full suite for final root
-verification through validate_feature after checkpoints; corrective issues use
-targeted checks before rerunning that final gate. Keep ordered checks fixed across
-corrections except for explicit command invocation repairs described below.
-The buildCommand/testCommand pair remains an alternative input shape,
-not a requirement to run the entire suite for each issue.
-On a first attempt, `requirements` contains additional scope (or an empty string);
-the adapter adds persisted criteria, constraints and the complete approved issue
-design. Do not transcribe that design. On corrections supply previousAttempt and fresh operations; native tools assemble
-inherited context. Use structured contextUpdates for discoveries and repairs. Branch
-and design-reference mismatches require correcting the context, not reapproval.
-Named checks may include `successCondition: [program, ...args]` for a known
-tool-specific output contract. Conductor passes the original exit code and
-complete stdout/stderr paths through `CONDUCTOR_COMMAND_*` environment variables.
+initial additional requirements and baseRef. Supply an explicit `checks` array
+on the first attempt. Continuations may omit `checks` to inherit the retained
+verification plan. Prefer targeted regressions for leaves and scoped integration
+tests for intermediate parents; exclude the full repository/workspace test
+command whenever the runner supports meaningful selection. Retain exact commands
+and coverage in the issue design. Explain any unavoidable broader command.
+Reserve the full suite for final root verification through validate_feature
+after checkpoints; corrective issues use targeted checks before rerunning that
+final gate. Keep ordered checks fixed across corrections except for explicit
+command invocation repairs described below. On a first attempt, `requirements`
+contains additional scope (or an empty string); the adapter adds persisted
+criteria, constraints and the complete approved issue design. Do not transcribe
+that design. On corrections supply previousAttempt and fresh operations; native
+tools assemble inherited context. Use structured contextUpdates for discoveries
+and repairs. Branch and design-reference mismatches require correcting the
+context, not reapproval. Named checks may include
+`successCondition: [program, ...args]` for a known tool-specific output
+contract. Conductor passes the original exit code and complete stdout/stderr
+paths through `CONDUCTOR_COMMAND_*`environment variables.
 Use the default exit-code rule for ordinary Cargo compile/test commands.
-The native adapter constructs Conductor v2's ordered command list: `executor apply`
-with the exact operations file, your selected checks, then `review-cli run --request`
-with the fixed baseline and complete requirements file. Supply operations, checks
+The native adapter constructs Conductor v2's ordered command list:`executor apply`with the exact operations file, your selected checks, then`review-cli run --request`with the fixed baseline and complete requirements file. Supply operations, checks
 and review settings to execute_and_review; do not construct shell strings or call
 those binaries yourself. All three binaries must be installed separately. Review
 model and budget overrides become CLI flags; defaults are 180 seconds and 20 turns.
 The final task check captures the source/index boundary before independent review.
 Review has a built-in structured condition requiring complete APPROVED output;
 its verdict is checked before the in-list commit can run.
-Supply `checkpoint: {defaultBranch, protectedBranches}` using the known repository
+Supply`checkpoint: {defaultBranch, protectedBranches}` using the known repository
 default branch and all additional protected branches (or []). After a completed
 APPROVED review, the final command in the SAME Conductor list seals verification
 evidence and creates the Git checkpoint. Normal delivery uses one runner call;
@@ -126,7 +125,6 @@ new confirmations; it does not authorize doing a rebase or arbitrary history cha
 
 See extensions/conductor/README.md for complete protocol/verification contracts.
 Git/GitHub publishing follows SYSTEM.md and requires a user request. Never merge PRs.
-
 
 ### Structured context and resumption
 

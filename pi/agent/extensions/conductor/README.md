@@ -51,9 +51,9 @@ The active Pi model executes the Design persona in the current conversation.
 
 ## Caller-selected task verification
 
-`execute_and_review` accepts an ordered `checks` list instead of requiring a
-single build and a single test command. For example (Cargo filters are illustrative;
-choose actual crate and test names for the project):
+`execute_and_review` takes an ordered `checks` list defining the verification
+commands for an issue.  For example (Cargo filters are illustrative; choose
+actual crate and test names for the project):
 
 ```json
 {
@@ -65,32 +65,36 @@ choose actual crate and test names for the project):
 }
 ```
 
-Supply this alongside the existing `input`, `requirements`, `baseRef`, task/review
-settings and required native `checkpoint: {defaultBranch, protectedBranches}`
-metadata. Supply **either** `checks` **or** both legacy
-`buildCommand`/`testCommand` arrays; mixing them is rejected before invocation.
-Legacy calls still become checks named `build` and `test`. No default build or
-full test suite is added when `checks` is supplied. The list requires 1–64 checks
-with unique nonblank names (no surrounding whitespace, at most 256 characters).
-Each command is an executable/argv array, never shell text, and runs sequentially
-from the repository root through Conductor. Check objects accept only `name` and
-`command`; per-check timeout options are not supported by the Conductor protocol.
+On the first attempt, supply `checks` alongside `input`, `requirements`,
+`baseRef`, task/review settings and the required native
+`checkpoint: {defaultBranch, protectedBranches}` metadata.
+
+Continuations may omit `checks` to inherit the retained verification plan.
+Explicitly supplied plans remain subject to the existing correction and
+verification-repair rules.  No build or test commands are added automatically.
+
+The list required 1-64 checks with unique nonblank names, no surrounding
+whitespace and at most 256 characters per name.  Each check contains `name`,
+an executable/argv `command` array, and an optional executable/argv
+`successCondition` array.  Commands run sequentially from the repository root
+through Conductor.  Per-check timeout options are not supported.
 
 Choose verification during task design and include the commands and their scope
 within the approved feature direction. Use focused tests for task changes and broader regression
 checks for the final `validate_feature` gate. Inspect output to confirm relevant
 tests actually ran; an exit code of zero can also mean the filter selected no tests.
 The existing overall workflow deadline and independent review budgets still apply.
-This interface is a Pi-local addition; the OpenCode adapter retains its legacy inputs.
 
 Task receipts retain the exact caller inputs and translated request. Corrections
 must preserve the normalized ordered names and commands, including test filters;
 changing verification scope requires reconciliation within the approved direction rather than
 weakening the existing attempt. The pre-review source/index snapshot is captured
 after the **last** requested command succeeds, even if that check is not a test.
-All requested check results must appear in order, exactly once, with zero exits
-and an APPROVED independent review before task evidence can justify a checkpoint.
-`validate_feature` keeps its existing full-project verification interface.
+All requested check results must appear in order, exactly once, and satisfy
+their configured success rules.  Without a successCondition, command exit code
+zero is required.  WHen a successCondition is supplied, its sucessful evaluation
+is required.  An APPROVED independent review is also required before task evidence can justify a
+checkpoint.  `validate_feature` keeps its existing full-project verification interface.
 
 After updating, copy the entire extension directory (including `verification.mjs`)
 and restart Pi. Upgrade the installed Conductor binary for the v2 command API.
@@ -259,9 +263,6 @@ The runs and receipts are local data and are not transferred by Git push/clone.
 - Pi's Docker launcher currently mounts only selected extensions and the
   images do not ship Conductor. Native Pi is supported here; Docker needs
   a separate binary provisioning decision.
-- Pi and OpenCode carry identical `protocol.mjs` / `conductor-protocol.mjs`
-  helpers because their agent homes are independently installed. Tests keep
-  the wire protocol and domain interpretation aligned.
 - Conductor does not yet prove tests executed or detect unexpected source
   modifications during verification. The adapter imposes a 30-minute overall
   workflow deadline by default, covering execution, formatting, checks and
