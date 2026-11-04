@@ -69,7 +69,7 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
     'pi/agent/SYSTEM.md',
     'pi/agent/AGENTS.md',
     'pi/agent/skills/design/SKILL.md',
-    'pi/agent/skills/conductor/SKILL.md',
+    'pi/agent/skills/execute-and-review/SKILL.md',
   ]) {
     const text = read(name).replace(/\s+/g, ' ');
     assert.match(text, /Git\/GitHub publishing|Git and GitHub publishing/, name);
@@ -94,7 +94,7 @@ test('Pi executor guide uses the merged exact-text edit operation', () => {
     assert.ok(guide.includes('occur exactly once'), name);
   }
   assert.ok(read('pi/agent/skills/design/SKILL.md').includes('Use `edit_file` for in-place text changes'));
-  assert.ok(read('pi/agent/skills/conductor/SKILL.md').includes('removed `patch` variants'));
+  assert.ok(read('pi/agent/skills/execute-and-review/SKILL.md').includes('removed `patch` variants'));
 });
 
 
@@ -118,7 +118,7 @@ test('native checkpoints, recovery and validation reuse the same durable directi
 });
 
 test('execution guides do not add a second approval after the overall direction', () => {
-  for (const file of ['pi/agent/skills/design/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/conductor/SKILL.md']) {
+  for (const file of ['pi/agent/skills/design/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/execute-and-review/SKILL.md']) {
     const text = read(file);
     assert.doesNotMatch(text, /After \*\*separate explicit execution approval|Explicitly ask the user whether to \*\*execute/);
     assert.match(text, /full operations on request/);
