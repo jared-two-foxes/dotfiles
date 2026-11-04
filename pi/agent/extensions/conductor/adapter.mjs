@@ -20,7 +20,7 @@ import {
   decodeWorkflow,
   validateWorkflowPreparation,
 } from "./protocol.mjs";
-import { spawn } from "node:child_process";
+import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "./client.mjs";
 import {
   validateBinding,
   snapshot,
@@ -64,8 +64,6 @@ function refreshManagedCredentials() {
 refreshManagedCredentials();
 
 const SHA = /^[0-9a-f]{40}$/i;
-const MAX_LOG_BYTES = 16 * 1024 * 1024;
-export const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
@@ -75,114 +73,6 @@ function outcome(status, stage, fields = {}) {
     stage,
     ...fields,
   };
-}
-
-export async function invoke(
-  program,
-  args,
-  { cwd, signal, input, timeoutMs = DEFAULT_TIMEOUT_MS } = {},
-) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(program, args, {
-      cwd,
-      detached: process.platform !== "win32",
-      shell: false,
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let stdout = "",
-      stderr = "",
-      bytes = 0,
-      failure,
-      killTimer,
-      termination;
-    const stop = () => {
-      if (!child.pid) return;
-      if (process.platform === "win32") {
-        termination ??= new Promise((resolve) => {
-          const killer = spawn(
-            "taskkill",
-            ["/pid", String(child.pid), "/T", "/F"],
-            { windowsHide: true },
-          );
-          killer.on("error", () => {
-            child.kill("SIGKILL");
-            resolve();
-          });
-          killer.on("close", resolve);
-        });
-      } else {
-        try {
-          process.kill(-child.pid, "SIGTERM");
-        } catch {}
-        killTimer ??= setTimeout(() => {
-          try {
-            process.kill(-child.pid, "SIGKILL");
-          } catch {}
-        }, 250);
-      }
-    };
-    const abort = () => {
-      failure ??= Object.assign(
-        new Error(
-          "CANCELLED: workflow interrupted; preserve source and receipts",
-        ),
-        { code: "CANCELLED" },
-      );
-      stop();
-    };
-    signal?.addEventListener("abort", abort, { once: true });
-    if (signal?.aborted) abort();
-    const timer = setTimeout(() => {
-      failure = new Error(
-        "Conductor exceeded the workflow deadline; the working tree may be partially modified",
-      );
-      failure.code = "WORKFLOW_TIMEOUT";
-      stop();
-    }, timeoutMs);
-    const collect = (kind) => (chunk) => {
-      bytes += Buffer.byteLength(chunk);
-      if (bytes > MAX_LOG_BYTES) {
-        failure = new Error(
-          "Process output exceeded 16 MiB; the working tree may be partially modified",
-        );
-        failure.code = "OUTPUT_LIMIT";
-        stop();
-        return;
-      }
-      if (kind === "stdout") stdout += chunk.toString("utf8");
-      else stderr += chunk.toString("utf8");
-    };
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", collect("stdout"));
-    child.stderr.on("data", collect("stderr"));
-    child.on("error", (error) => {
-      failure ??= error;
-    });
-    child.on("close", async (code) => {
-      clearTimeout(timer);
-      clearTimeout(killTimer);
-      signal?.removeEventListener("abort", abort);
-      if (failure && child.pid && process.platform !== "win32") {
-        try {
-          process.kill(-child.pid, "SIGKILL");
-        } catch {}
-      }
-      if (termination) await termination;
-      if (failure) reject(failure);
-      else resolve({ code, stdout, stderr });
-    });
-    child.stdin.on("error", (error) => {
-      // EPIPE is expected if the child rejects input early; the close handler
-      // reports its actual status. Other errors are process failures.
-      if (error.code !== "EPIPE") {
-        failure = error;
-        stop();
-      }
-    });
-    child.stdin.end(input);
-  });
 }
 
 async function git(repository, args, signal) {
@@ -336,14 +226,12 @@ async function executeAttempt(args, context = {}, options = {}) {
     options.onPrepared?.(workflow);
     if (options.runWorkflow) return await options.runWorkflow(workflow);
     const { request } = workflow;
-    const binary = process.env.CONDUCTOR_BIN ?? "conductor";
     const invokeConductor =
       options.invokeConductor ??
       ((requestJson, timeoutMs) =>
-        invoke(binary, ["run", "--request", "-"], {
+        runConductor(requestJson, {
           cwd: repository,
           signal: context.abort,
-          input: requestJson,
           timeoutMs,
         }));
     const response = await invokeConductor(
@@ -748,7 +636,6 @@ export async function executeAndReview(args, context = {}, options = {}) {
         evidence: { reference, task: args.task, attempt },
       });
     }
-    const binary = process.env.CONDUCTOR_BIN ?? "conductor";
     let result = await executeAttempt(args, context, {
       verificationBoundary,
       onPrepared: (prepared) => {
@@ -759,10 +646,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
         response = await (
           options.invokeConductor ??
           ((body, timeoutMs) =>
-            invoke(binary, ["run", "--request", "-"], {
+            runConductor(body, {
               cwd: repository,
               signal: context.abort,
-              input: body,
               timeoutMs,
             }))
         )(json, args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);

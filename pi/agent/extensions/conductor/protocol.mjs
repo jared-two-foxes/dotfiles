@@ -1,9 +1,8 @@
-// Conductor v2 transport. Domain policy lives here in the caller, not in the runner.
+// Delivery request preparation and Executor/Review evidence validation.
 import {
   mkdir,
   mkdtemp,
   writeFile,
-  readFile,
   lstat,
   realpath,
 } from "node:fs/promises";
@@ -11,11 +10,18 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual as equal } from "node:util";
+import {
+  conductorRequest,
+  decodeRunner,
+  runnerExitCodes,
+  toolOutput,
+  validateRunner,
+} from "./client.mjs";
 
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
-const exits = { PASSED: 0, FAILED: 1, BLOCKED: 2 };
+
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const guard = fileURLToPath(new URL("./input-guard.mjs", import.meta.url));
 const reviewCondition = {
@@ -158,40 +164,35 @@ export async function prepareWorkflow(repository, root, args, checks) {
     JSON.stringify(inputs.review),
     { mode: 0o600, flag: "wx" },
   );
-  const request = {
-    schema: "conductor.request/v2",
-    working_directory: repository,
-    output_directory: directory,
-    commands: [
-      guarded(
-        "executor",
-        process.env.EXECUTOR_BIN ?? "executor",
-        ["apply", path.join(directory, "executor.json")],
+  const request = conductorRequest(repository, directory, [
+    guarded(
+      "executor",
+      process.env.EXECUTOR_BIN ?? "executor",
+      ["apply", path.join(directory, "executor.json")],
+      [
+        [
+          path.join(directory, "executor.json"),
+          JSON.stringify(inputs.execution),
+        ],
+      ],
+    ),
+    ...checks,
+    {
+      ...guarded(
+        "review",
+        process.env.REVIEW_CLI_BIN ?? "review-cli",
+        reviewArguments(args, path.join(directory, "review.json"), directory),
         [
           [
-            path.join(directory, "executor.json"),
-            JSON.stringify(inputs.execution),
+            path.join(directory, "review.json"),
+            JSON.stringify(inputs.review),
           ],
+          [inputs.review.requirements, inputs.requirements],
         ],
       ),
-      ...checks,
-      {
-        ...guarded(
-          "review",
-          process.env.REVIEW_CLI_BIN ?? "review-cli",
-          reviewArguments(args, path.join(directory, "review.json"), directory),
-          [
-            [
-              path.join(directory, "review.json"),
-              JSON.stringify(inputs.review),
-            ],
-            [inputs.review.requirements, inputs.requirements],
-          ],
-        ),
-        success_condition: reviewCondition,
-      },
-    ],
-  };
+      success_condition: reviewCondition,
+    },
+  ]);
   return { request, inputs };
 }
 
@@ -265,102 +266,6 @@ export function authenticateWorkflow(workflow, request, args, repository) {
     "Retained Executor/Review invocation mismatch",
   );
   return request.commands.slice(1, -1);
-}
-
-export function validateRunner(
-  request,
-  runner,
-  code,
-  expectedSchema = "conductor.result/v2",
-) {
-  requireValue(
-    runner?.schema === expectedSchema &&
-      Object.hasOwn(exits, runner.status) &&
-      exits[runner.status] === code &&
-      Array.isArray(runner.commands),
-    "Conductor schema/status/exit code mismatch",
-  );
-  const commands = runner.commands;
-  requireValue(
-    commands.length <= request.commands.length,
-    "Unexpected Conductor commands",
-  );
-  for (const [index, result] of commands.entries()) {
-    const expected = request.commands[index];
-    requireValue(
-      result.index === index &&
-        result.name === expected.name &&
-        result.program === expected.program &&
-        equal(result.args, expected.args) &&
-        Object.hasOwn(exits, result.status) &&
-        typeof result.stdout === "string" &&
-        typeof result.stderr === "string" &&
-        typeof result.stdout_truncated === "boolean" &&
-        typeof result.stderr_truncated === "boolean",
-      "Conductor command identity/output mismatch",
-    );
-    if (expected.success_condition) {
-      const c = result.condition;
-      requireValue(
-        (result.exit_code === null &&
-          c === undefined &&
-          result.status !== "PASSED") ||
-          (c?.program === expected.success_condition.program &&
-            equal(c.args, expected.success_condition.args) &&
-            c.status === result.status &&
-            typeof c.stdout === "string" &&
-            typeof c.stderr === "string" &&
-            typeof c.stdout_truncated === "boolean" &&
-            typeof c.stderr_truncated === "boolean" &&
-            (c.status === "PASSED"
-              ? c.exit_code === 0
-              : c.status === "FAILED"
-                ? c.exit_code !== 0
-                : true)),
-        "Conductor condition result mismatch",
-      );
-    } else
-      requireValue(
-        result.condition === undefined,
-        "Unexpected condition result",
-      );
-    if (index < commands.length - 1 || runner.status === "PASSED") {
-      requireValue(
-        result.status === "PASSED" &&
-          (expected.success_condition || result.exit_code === 0) &&
-          !result.error,
-        "Conductor continued after a failed command",
-      );
-    }
-  }
-  if (runner.status === "PASSED") {
-    requireValue(
-      runner.phase === "completed" &&
-        commands.length === request.commands.length &&
-        runner.failed_command_index === undefined &&
-        !runner.error,
-      "Incomplete Conductor success",
-    );
-  } else if (commands.length) {
-    const failed = commands.at(-1);
-    requireValue(
-      runner.phase === "commands" &&
-        runner.failed_command_index === commands.length - 1 &&
-        failed.status === runner.status &&
-        (request.commands.at(commands.length - 1).success_condition ||
-          runner.status !== "FAILED" ||
-          failed.exit_code === null ||
-          (Number.isInteger(failed.exit_code) && failed.exit_code !== 0)),
-      "Conductor failure location/status mismatch",
-    );
-  } else {
-    requireValue(
-      runner.status === "BLOCKED" &&
-        ["input", "output"].includes(runner.phase) &&
-        runner.failed_command_index === undefined,
-      "Missing Conductor failure record",
-    );
-  }
 }
 
 export function reviewResult(value, code) {
@@ -570,49 +475,8 @@ export function normalizeWorkflow(
   };
 }
 
-export async function toolOutput(request, runner, record) {
-  if (!record || record.exit_code == null) return undefined;
-  if (!record.stdout_path) {
-    requireValue(
-      !record.stdout_truncated,
-      "Complete tool output unavailable; upgrade Conductor for retained logs",
-    );
-    return record.stdout;
-  }
-  const file = record.stdout_path;
-  requireValue(
-    typeof file === "string" &&
-      path.isAbsolute(file) &&
-      typeof runner.output_directory === "string",
-    "Invalid command log path",
-  );
-  const root = await realpath(request.output_directory),
-    logs = await realpath(runner.output_directory);
-  const relative = path.relative(root, logs);
-  requireValue(
-    relative && !relative.startsWith("..") && !path.isAbsolute(relative),
-    "Command logs outside retained attempt",
-  );
-  const stat = await lstat(file);
-  requireValue(
-    stat.isFile() &&
-      !stat.isSymbolicLink() &&
-      (await realpath(file)) ===
-        path.join(logs, String(record.index).padStart(6, "0") + ".stdout"),
-    "Unsafe command log",
-  );
-  // Only structured Executor/Review output is loaded. Arbitrarily large check
-  // diagnostics stay in their complete log files, outside model context/receipts.
-  requireValue(
-    stat.size <= 16 * 1024 * 1024,
-    "Structured tool output exceeds 16 MiB; inspect retained logs",
-  );
-  return new TextDecoder("utf-8", { fatal: true }).decode(await readFile(file));
-}
-
 export async function decodeWorkflow(request, response, inputs) {
-  const runner = JSON.parse(response.stdout);
-  validateRunner(request, runner, response.code);
+  const runner = decodeRunner(request, response);
   const toolOutputs = {};
   const execution = await toolOutput(request, runner, runner.commands[0]);
   if (execution !== undefined) toolOutputs.execution = execution;
@@ -641,7 +505,7 @@ export function authenticNormalized(conductor) {
         conductor.request,
         conductor.runner,
         conductor.toolOutputs,
-        exits[conductor.runner.status],
+        runnerExitCodes[conductor.runner.status],
         schema,
         conductor.expectedOperations,
       ),

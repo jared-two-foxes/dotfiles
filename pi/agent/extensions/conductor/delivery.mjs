@@ -4,11 +4,11 @@ import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
-import { executeAndReview, hydrateContinuation, invoke, DEFAULT_TIMEOUT_MS } from './adapter.mjs';
+import { executeAndReview, hydrateContinuation } from './adapter.mjs';
 import { git } from './git-tree.mjs';
 import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
-import { validateRunner, toolOutput } from './protocol.mjs';
+import { conductorRequest, decodeRunner, runConductor, toolOutput } from './client.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { snapshot } from './evidence.mjs';
 import { runPipeline } from './pipeline.mjs';
@@ -43,16 +43,14 @@ export async function finalizeVerifiedTask(args, context = {}, options = {}) {
     directory = await realpath(await mkdtemp(path.join(root, 'attempt-')));
     const input = path.join(directory, 'checkpoint.json');
     await writeFile(input, JSON.stringify(args), { mode: 0o600, flag: 'wx' });
-    request = { schema: 'conductor.request/v2', working_directory: repository, output_directory: directory,
-      commands: [{ name: 'git commit verified task', program: process.execPath,
-        args: [fileURLToPath(new URL('./commit-task.mjs', import.meta.url)), input] }] };
+    request = conductorRequest(repository, directory, [
+      { name: 'git commit verified task', program: process.execPath,
+        args: [fileURLToPath(new URL('./commit-task.mjs', import.meta.url)), input] },
+    ]);
     await writeFile(path.join(directory, 'request.json'), JSON.stringify(request), { mode: 0o600, flag: 'wx' });
-    const response = await (options.invokeFinalization ?? (body => invoke(process.env.CONDUCTOR_BIN ?? 'conductor',
-      ['run', '--request', '-'], { cwd: repository, signal: context.abort, input: body,
-        timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS })))(JSON.stringify(request));
+    const response = await (options.invokeFinalization ?? (body => runConductor(body, { cwd: repository, signal: context.abort, timeoutMs: options.timeoutMs })))(JSON.stringify(request));
     await writeFile(path.join(directory, 'response.json'), JSON.stringify(response), { mode: 0o600, flag: 'wx' });
-    const runner = JSON.parse(response.stdout);
-    validateRunner(request, runner, response.code);
+    const runner = decodeRunner(request, response);
     const text = await toolOutput(request, runner, runner.commands[0]);
     const result = text === undefined ? null : JSON.parse(text);
     requireValue(runner.status === 'PASSED' && result?.schema === 'pi.task-finalization/v1' && result.ok === true &&

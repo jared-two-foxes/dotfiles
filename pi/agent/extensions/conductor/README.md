@@ -2,18 +2,24 @@
 > context from receipts and Scaffold; no exact requirements-string copy or lifetime
 > attempt allowance is required. Historical wire examples below remain compatible.
 
-# Pi Conductor integration
+# Pi delivery extension
 
-The native Pi extension in `extensions/conductor/` registers
-`execute_and_review` and sends a `conductor.request/v2` command list to the standalone
-Rust `conductor` binary. The adapter constructs the Executor → selected checks →
-Review sequence; Conductor runs those external programs and stops at the first
-failure. The agent never invokes executor or review-cli directly.
+`index.ts` registers `execute_and_review` and the delivery and recovery tools.
+The workflow in `delivery.mjs`, `adapter.mjs`, and `pipeline.mjs` owns task
+binding, continuation, verification policy, independent review, and checkpoint
+authorization. `protocol.mjs` prepares the Executor and Review inputs and
+authenticates their delivery evidence.
+
+`client.mjs` builds the Conductor v2 request envelope, invokes the standalone
+CLI, validates runner results, and reads retained command output. Other native
+workflows can import it and supply their own policy. Pi loads one extension and
+agents use the registered delivery tools. The extension stays at
+`extensions/conductor/` so installed script paths in retained receipts can
+still resolve.
 
 ## Native Pi installation
 
-Place the entire `conductor` directory (including `adapter.mjs` and
-`package.json`) at:
+Place the entire `conductor` directory at:
 
 ```
 ~/.pi/agent/extensions/conductor/

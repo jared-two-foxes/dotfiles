@@ -5,7 +5,7 @@ import { mkdtemp, writeFile, readFile, chmod, rm, readdir, symlink } from 'node:
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeAndCheckpoint, finalizeVerifiedTask } from '../pi/agent/extensions/conductor/delivery.mjs';
-import { invoke } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { invoke } from '../pi/agent/extensions/conductor/client.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
