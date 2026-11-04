@@ -270,7 +270,7 @@ export default function (pi: ExtensionAPI) {
         ...["annotate", "correct_assumption", "revise_design"].map(kind => Type.Object({
           kind: Type.Literal(kind), text: Type.String(), reason: Type.String() }, { additionalProperties: false })),
         Type.Object({ kind: Type.Literal("propose_addressed"), findingId: Type.String(), reason: Type.String() }, { additionalProperties: false }),
-        Type.Object({ kind: Type.Literal("repair_check"), checkId: Type.String(), command: Type.Array(Type.String(), { minItems: 1 }), reason: Type.String() }, { additionalProperties: false }),
+        Type.Object({ kind: Type.Literal("repair_check"), checkId: Type.String(), command: Type.Optional(Type.Array(Type.String(), { minItems: 1 })), useMeaningfulTestEvaluator: Type.Optional(Type.Literal(true)), reason: Type.String() }, { additionalProperties: false }),
         Type.Object({ kind: Type.Literal("add_check"), check: Type.Object({ name: Type.String(), command: Type.Array(Type.String(), { minItems: 1 }),
           successCondition: Type.Optional(Type.Array(Type.String(), { minItems: 1 })) }, { additionalProperties: false }), reason: Type.String() }, { additionalProperties: false }),
         Type.Object({ kind: Type.Literal("diagnose"), text: Type.String(), signature: Type.String(), reason: Type.String() }, { additionalProperties: false }),

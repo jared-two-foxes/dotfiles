@@ -133,6 +133,10 @@ Git/GitHub publishing follows SYSTEM.md and requires a user request. Never merge
 
 `contextUpdates` accepts add_obligation, annotate, correct_assumption, revise_design,
 propose_addressed, repair_check, add_check and diagnose. Supply a reason per update.
+After an approved redesign and authenticated issue resume, use
+`repair_check` with `checkId`, `useMeaningfulTestEvaluator: true` and `reason`
+to replace a malformed evaluator for a recognized test runner. Inherit the exact
+commands and check order. Conductor runs the repaired check before review.
 Original criteria remain immutable in the review context; material scope changes
 and obligation removal go through Design approval. Findings have stable IDs;
 propose_addressed is an author claim, never independent verification. Review must

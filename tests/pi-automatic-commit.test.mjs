@@ -15,6 +15,7 @@ import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
 import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/conductor/issue-context.mjs';
+import { suspendIssue, resumeIssue } from '../pi/agent/extensions/conductor/issue-recovery.mjs';
 import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE
@@ -270,6 +271,59 @@ test('a retained check condition can accept a nonzero command and authorize the 
   const record = await readEvidence(f.directory, result.evidence.reference);
   assert.equal(record.result.conductor.checks[0].exit_code, 7);
   assert.equal(record.result.conductor.checks[0].condition.status, 'PASSED');
+});
+
+test('a redesigned retained issue can replace a malformed Cargo evaluator without weakening the check', integration, async t => {
+  const f = await fixture(t);
+  const cargo = path.join(f.directory, '.git/bin/cargo');
+  await writeFile(cargo, [
+    '#!/usr/bin/env node',
+    'if (process.argv.slice(2).join(" ") !== "test --test cli_integration quote_activity") process.exit(2);',
+    'console.log(require("fs").readFileSync("source.txt", "utf8") === "corrected" ? "1 passed" : "0 passed; 6 filtered out");',
+  ].join('\n'), { mode: 0o755 });
+  const check = { name: 'CLI activity', command: ['cargo', 'test', '--test', 'cli_integration', 'quote_activity'],
+    successCondition: ['quote.created', 'quote.item_added'] };
+  const initial = await executeAndCheckpoint({ ...f.args, checks: [check] }, f.context);
+  assert.equal(initial.status, 'BLOCKED', JSON.stringify(initial));
+  assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), 'after');
+  const scope = { task: f.args.task, featureBaseRef: f.base, branch: 'feature/automatic',
+    defaultBranch: 'main', protectedBranches: [] };
+  const options = { authorize: async () => true };
+  const parked = await suspendIssue({ ...scope, previousAttempt: initial.evidence.reference,
+    reason: 'Replace the invalid evaluator with the meaningful-test validator' }, f.context, options);
+  assert.equal(parked.status, 'DESIGN', JSON.stringify(parked));
+  await f.call('design-record', { task_id: 'F', payload: {
+    summary: 'Preserve existing work and correct the validator',
+    verification: 'Run the same named Cargo regression and require a positive pass count',
+    approval: 'Corrected verification design approved', disposition: 'leaf',
+  } });
+  await f.call('design-finish');
+  const resumed = await resumeIssue({ ...scope, suspensionRef: parked.suspensionRef }, f.context, options);
+  assert.equal(resumed.status, 'READY', JSON.stringify(resumed));
+  await f.call('start', { task_id: 'F' });
+  const retry = { ...resumed.resume, checkpoint: f.args.checkpoint, input: '{"operations":[]}' };
+  const repair = { kind: 'repair_check', checkId: check.name, useMeaningfulTestEvaluator: true,
+    reason: 'The old evaluator used event labels as argv. Require a successful Cargo exit and positive test count.' };
+  const changedCommand = await executeAndCheckpoint({ ...retry, contextUpdates: [repair],
+    checks: [{ ...check, command: [...check.command.slice(0, -1), 'wrong_filter'] }] }, f.context);
+  assert.equal(changedCommand.status, 'BLOCKED');
+  assert.equal(changedCommand.evidence, undefined);
+  const empty = await executeAndCheckpoint({ ...retry, contextUpdates: [repair] }, f.context);
+  assert.equal(empty.evidence.attempt, 2, JSON.stringify(empty));
+  assert.equal(empty.status, 'NEEDS_DESIGN');
+  assert.equal(empty.conductor.review, null);
+  assert.equal(f.git('rev-parse', 'HEAD'), f.base);
+  process.env.EXPECTED_REVIEW_REQUIREMENTS = '*';
+  const correction = await executeAndCheckpoint({ task: f.args.task, checkpoint: f.args.checkpoint,
+    previousAttempt: empty.evidence.reference,
+    input: JSON.stringify({ operations: [{ type: 'edit_file', path: 'source.txt',
+      edits: [{ oldText: 'after', newText: 'corrected' }] }] }) }, f.context);
+  assert.equal(correction.status, 'PASSED', JSON.stringify(correction));
+  const chain = await authenticateAttemptChain(f.directory, correction.evidence.reference, f.args.task);
+  assert.deepEqual(chain.records.map(r => r.attempt), [1, 1, 2, 3]);
+  assert.deepEqual(chain.records[0].args.checks, [check]);
+  assert.deepEqual(chain.records[2].args.checks[0].command, check.command);
+  assert.match(chain.records[2].args.checks[0].successCondition[1], /meaningful-test-condition\.mjs$/);
 });
 
 test('a passing check that changes the reviewed source cannot authorize Review', integration, async t => {

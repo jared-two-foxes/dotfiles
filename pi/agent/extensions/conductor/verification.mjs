@@ -25,6 +25,10 @@ export function meaningfulChecks(checks) {
       : c;
   });
 }
+export function meaningfulTestEvaluator(command) {
+  return meaningfulChecks([{ command }])[0].successCondition;
+}
+
 export function verificationChecks(args) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("Verification arguments must be an object");
@@ -106,7 +110,7 @@ export function sameVerification(left, right) {
   );
 }
 
-// Repair command invocation without silently replacing the verification contract.
+// Repair a retained check without silently replacing the verification contract.
 // The original design still governs coverage; every command is rerun and Review
 // must approve the result. Both preflight and receipt authentication use this rule.
 export function correctionVerification(previous, args) {
@@ -119,10 +123,30 @@ export function correctionVerification(previous, args) {
       reason.includes("\0"))
   )
     return false;
-  if (sameVerification(previous.args, args)) return true;
+  const before = verificationChecks(previous.args);
+  const after = verificationChecks(args);
+  const evaluatorRepairs = Array.isArray(args.contextUpdates) ? args.contextUpdates.filter(u =>
+    u.kind === "repair_check" && u.useMeaningfulTestEvaluator === true) : [];
+  if (evaluatorRepairs.length) {
+    const oldDesign = previous.args.deliveryContext?.design?.reference;
+    const approvedDesign = previous.recovery?.feature?.tasks?.[previous.task?.taskId]?.designs?.at(-1)?.reference;
+    return !!args.deliveryContext && previous.kind === "issue-handoff" &&
+      previous.result.reason === "ISSUE_RECOVERY_READY" &&
+      !!oldDesign && !!approvedDesign && oldDesign !== approvedDesign &&
+      args.deliveryContext.design?.reference === approvedDesign &&
+      after.length === before.length &&
+      before.every((check, i) => {
+        const next = after[i];
+        if (check.name !== next.name || JSON.stringify(check.command) !== JSON.stringify(next.command)) return false;
+        if (JSON.stringify(check.successCondition) === JSON.stringify(next.successCondition)) return true;
+        const evaluator = meaningfulTestEvaluator(check.command);
+        return !!check.successCondition && !!evaluator &&
+          JSON.stringify(next.successCondition) === JSON.stringify(evaluator) &&
+          evaluatorRepairs.some(u => u.checkId === check.name && typeof u.reason === "string" && u.reason.trim());
+      });
+  }
+  if (JSON.stringify(before) === JSON.stringify(after)) return true;
   if (args.deliveryContext && Array.isArray(args.contextUpdates)) {
-    const before = verificationChecks(previous.args),
-      after = verificationChecks(args);
     const repairs = args.contextUpdates.filter(
       (u) => u.kind === "repair_check",
     );
@@ -147,8 +171,6 @@ export function correctionVerification(previous, args) {
   }
   if (!reason || !["BLOCKED", "NEEDS_DESIGN"].includes(previous.result.status))
     return false;
-  const before = verificationChecks(previous.args),
-    after = verificationChecks(args);
   return (
     before.length === after.length &&
     before.every(

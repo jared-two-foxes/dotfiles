@@ -40,8 +40,26 @@ local integrity checks, not protection against someone rewriting all local state
 
 Supported updates are add_obligation, annotate, correct_assumption, revise_design,
 propose_addressed, repair_check, add_check and diagnose. Each needs a reason. Changes
-append to history. The original contract cannot be replaced. repair_check preserves
-check names, order, semantic validators and coverage; add_check extends coverage.
+append to history. The original contract cannot be replaced. An invocation
+repair preserves check names, order, semantic validators and coverage.
+`add_check` extends coverage.
+
+To replace a malformed evaluator for a recognized test runner, suspend the
+issue, record the revised approved design, resume it and start the same issue.
+Continue from the resume handoff with a structured update such as:
+
+```json
+{"kind":"repair_check","checkId":"CLI activity","useMeaningfulTestEvaluator":true,"reason":"Replace event labels used as evaluator argv with the built-in positive test-count check"}
+```
+
+Omit `command` from that update and inherit the retained check plan. The adapter
+installs its built-in meaningful-test evaluator and keeps all check names,
+commands and ordering. The original definition stays in the failed receipt.
+Conductor reruns verification before review or checkpointing. For Cargo, a
+successful process that reports zero passing tests still fails this gate. If the
+filter itself selects no tests, repair the command separately and preserve the
+approved target coverage.
+
 Legacy verificationRepairReason remains compatible for invocation-only repairs.
 Material behavior/scope changes or removal/relaxation of obligations require
 approve_delivery_amendment: show the concrete original IDs, replacement and reason

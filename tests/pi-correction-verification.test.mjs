@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { correctionVerification } from '../pi/agent/extensions/conductor/verification.mjs';
+import { correctionVerification, meaningfulTestEvaluator } from '../pi/agent/extensions/conductor/verification.mjs';
 
 test('explicit invocation repair retains names/order and semantic conditions for every check', () => {
   const checks = [{ name: 'compile', command: ['cargo', 'check'] },
@@ -21,4 +21,33 @@ test('explicit invocation repair retains names/order and semantic conditions for
   }
   assert.equal(correctionVerification({ ...previous, result: { status: 'PASSED' } }, repair), false);
   assert.equal(correctionVerification({ ...previous, result: { status: 'NEEDS_DESIGN' } }, repair), true);
+});
+
+test('evaluator repair requires a redesigned issue handoff and the canonical validator for the same command', () => {
+  const command = ['cargo', 'test', '--test', 'cli', 'quote_activity'];
+  const check = { name: 'CLI', command, successCondition: ['quote.created', 'quote.item_added'] };
+  const previous = {
+    kind: 'issue-handoff', task: { taskId: 'cli' },
+    args: { checks: [check], deliveryContext: { design: { reference: 'old' } } },
+    result: { status: 'BLOCKED', reason: 'ISSUE_RECOVERY_READY' },
+    recovery: { feature: { tasks: { cli: { designs: [{ reference: 'approved' }] } } } },
+  };
+  const repaired = {
+    checks: [{ ...check, successCondition: meaningfulTestEvaluator(command) }],
+    deliveryContext: { design: { reference: 'approved' } },
+    contextUpdates: [{ kind: 'repair_check', checkId: 'CLI', useMeaningfulTestEvaluator: true, reason: 'Invalid evaluator argv' }],
+  };
+  assert.equal(correctionVerification(previous, repaired), true);
+  assert.equal(correctionVerification({ ...previous, kind: 'rebase-handoff' }, repaired), false);
+  assert.equal(correctionVerification(previous, { ...repaired, contextUpdates: [] }), false);
+  for (const alter of [
+    args => { args.deliveryContext.design.reference = 'old'; },
+    args => { args.checks[0].command = ['cargo', 'test']; },
+    args => { args.checks[0].successCondition = ['true']; },
+    args => { delete args.checks[0].successCondition; },
+  ]) {
+    const args = structuredClone(repaired);
+    alter(args);
+    assert.equal(correctionVerification(previous, args), false);
+  }
 });
