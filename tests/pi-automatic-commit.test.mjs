@@ -10,7 +10,7 @@ import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
 import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
 import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
-import { readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
+import { digest, readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
 import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
@@ -39,7 +39,7 @@ async function fixture(t) {
     'sys.path.insert(0, ' +
     JSON.stringify(path.join(process.env.SCAFFOLD_SOURCE, 'src')) + ')\nfrom scaffold_cli.cli import main\nmain()\n');
   await chmod(path.join(bin, 'scaffold'), 0o755);
-  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'REVIEW_FIXTURE_REASON', 'EXPECTED_REVIEW_REQUIREMENTS', 'REVIEW_FIXTURE_LOCK', 'REVIEW_FIXTURE_DRIFT', 'REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER', 'REVIEW_FIXTURE_TERMINAL_LOCK'].map(k => [k, process.env[k]]));
+  const saved = Object.fromEntries(['PATH', 'CONDUCTOR_BIN', 'EXECUTOR_BIN', 'REVIEW_CLI_BIN', 'REVIEW_FIXTURE_STATUS', 'REVIEW_FIXTURE_REASON', 'EXPECTED_REVIEW_REQUIREMENTS', 'REVIEW_FIXTURE_LOCK', 'REVIEW_FIXTURE_DRIFT', 'REVIEW_FIXTURE_MALFORMED', 'REVIEW_FIXTURE_TAMPER', 'REVIEW_FIXTURE_TERMINAL_LOCK', 'REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE'].map(k => [k, process.env[k]]));
   Object.assign(process.env, { PATH: bin + path.delimiter + process.env.PATH,
     CONDUCTOR_BIN: process.env.CONDUCTOR_TEST_BIN ?? path.join(bin, 'conductor'),
     EXECUTOR_BIN: path.join(bin, 'executor'), REVIEW_CLI_BIN: path.join(bin, 'review-cli'), REVIEW_FIXTURE_STATUS: 'APPROVED' });
@@ -80,6 +80,17 @@ test('successful review automatically completes the task and runs a verified com
   const expected = issueRequirements(issue, '');
   process.env.EXPECTED_REVIEW_REQUIREMENTS = expected;
   f.args.requirements = '';
+  process.env.REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE = '1';
+  const cargo = path.join(f.directory, '.git/bin/cargo');
+  await writeFile(cargo, [
+    '#!/usr/bin/env node',
+    'if (process.argv.slice(2).join(" ") !== "test --test targeted_regression") process.exit(2);',
+    'require("fs").appendFileSync(".git/trace", "check\\n");',
+    'console.log("secret fixture output");',
+    'console.log("x".repeat(100000));',
+    'console.log("test result: ok. 5 passed; 0 failed; 0 ignored");',
+  ].join('\n'), { mode: 0o755 });
+  f.args.checks[0].command = ['cargo', 'test', '--test', 'targeted_regression'];
   let calls = 0;
   const result = await executeAndCheckpoint(f.args, f.context, { invokeConductor: body => { calls++; return f.finalCommand(body); } });
   assert.equal(calls, 1, 'all stages including Git commit must use ONE Conductor call');
@@ -95,7 +106,14 @@ test('successful review automatically completes the task and runs a verified com
   assert.ok(record.args.requirements.includes(expected));
   assert.equal(record.after.head, f.base); assert.equal(record.result.status, 'PASSED');
   assert.equal(f.git('rev-parse', 'HEAD^{tree}'), record.after.tree);
-  const request = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'request.json'), 'utf8'));
+  const root = result.checkpoint.finalizationDirectory;
+  const handoff = await readFile(path.join(root, 'review-evidence.md'), 'utf8');
+  const evidence = JSON.parse(handoff.trimEnd().split('\n').at(-1));
+  assert.equal(evidence.tree, record.after.tree);
+  assert.deepEqual(evidence.checks[0].command, f.args.checks[0].command);
+  assert.ok(evidence.checks[0].testCounts.includes('5 passed'), 'summary survives truncated stdout');
+  assert.equal(await readFile(path.join(f.directory, '.git/trace'), 'utf8'), 'executor\ncheck\nreview\n');
+  const request = JSON.parse(await readFile(path.join(root, 'request.json'), 'utf8'));
   assert.deepEqual(request.commands.map(c => c.name), ['executor', 'targeted regression', 'review', 'git commit verified task']);
   assert.match(request.commands.at(-1).args[0], /commit-task\.mjs$/);
   const full = JSON.parse(await readFile(path.join(result.checkpoint.finalizationDirectory, 'response.json'), 'utf8'));
@@ -127,6 +145,14 @@ test('successful review automatically completes the task and runs a verified com
     const reference = await retainEvidence(f.directory, tampered);
     await assert.rejects(authenticateTaskEvidence(f.directory, reference, f.args.task));
   }
+  const forged = structuredClone(record);
+  const runner = forged.result.conductor.runner;
+  const reviewReceipt = runner.receipts.at(-1);
+  reviewReceipt.handoff.inputs[0].sha256 = '0'.repeat(64);
+  runner.conditionReceipts.at(-1).commandReceiptSha256 = digest(JSON.stringify(reviewReceipt));
+  forged.response.stdout = JSON.stringify(runner);
+  const forgedRef = await retainEvidence(f.directory, forged);
+  await assert.rejects(authenticateTaskEvidence(f.directory, forgedRef, f.args.task), /Retained review evidence mismatch/);
 });
 
 test('BLOCKED missing executable repairs forward with empty operations and authenticated commit', integration, async t => {
@@ -181,12 +207,31 @@ test('failed test patches current source with unchanged checks after lifecycle r
   const staged = await executeAndCheckpoint({ ...latest.continuation, input }, f.context);
   assert.equal(staged.status, 'BLOCKED'); assert.match(staged.message, /source\/index or HEAD/);
   f.git('restore', '--staged', 'source.txt');
+  process.env.REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE = '1';
   const delivered = await executeAndCheckpoint({ ...latest.continuation, input }, f.context);
   assert.equal(delivered.status, 'PASSED', JSON.stringify(delivered)); assert.equal(delivered.evidence.attempt, 2);
   assert.equal(await readFile(path.join(f.directory, 'source.txt'), 'utf8'), 'corrected');
   const record = await authenticateTaskEvidence(f.directory, delivered.evidence.reference, f.args.task);
   assert.deepEqual(record.args.checks, checks); assert.equal(record.args.baseRef, f.base);
+  const original = await readEvidence(f.directory, first.evidence.reference);
+  assert.equal(original.result.conductor.checks[0].exit_code, 1);
+  assert.equal(original.result.conductor.checks[0].status, 'FAILED');
+  const obligation = record.args.deliveryContext.obligations.find(o => o.id.startsWith('check-'));
+  assert.ok(obligation);
+  assert.equal(obligation.status, 'open', 'the original failure was retained for independent assessment');
+  assert.match(record.result.conductor.review.obligation_assessments.find(a => a.obligation_id === obligation.id).evidence,
+    /^Passing command receipt [a-f0-9]{64}$/);
+  assert.equal(record.args.previousAttempt, first.evidence.reference);
   assert.equal(f.confirmations(), 1);
+  process.env.EXPECTED_REVIEW_REQUIREMENTS = '*';
+  const finalArgs = { featureId: 'F', designRef: f.args.task.designRef, branch: 'feature/automatic',
+    featureBaseRef: f.base, headRef: delivered.nextBaseRef,
+    buildCommand: [process.execPath, '-e', 'console.log("full build passed")'],
+    testCommand: [process.execPath, '-e', 'console.log("30 tests passed")'], testSuccessPattern: '30 tests passed' };
+  const final = await validateFeature(finalArgs, f.context, { authorize: () => featureAuthorized(finalArgs, f.context) });
+  assert.equal(final.status, 'PASSED', JSON.stringify(final));
+  assert.deepEqual(final.checks.map(check => check.name), ['build', 'test']);
+  assert.deepEqual(final.review.obligation_assessments, [], 'final review does not re-prove resolved task checks');
 });
 
 test('BLOCKED review resumes from retained tree without reapplying successful operations', integration, async t => {
@@ -225,6 +270,16 @@ test('a retained check condition can accept a nonzero command and authorize the 
   const record = await readEvidence(f.directory, result.evidence.reference);
   assert.equal(record.result.conductor.checks[0].exit_code, 7);
   assert.equal(record.result.conductor.checks[0].condition.status, 'PASSED');
+});
+
+test('a passing check that changes the reviewed source cannot authorize Review', integration, async t => {
+  const f = await fixture(t);
+  f.args.checks = [{ name: 'mutating check', command: [process.execPath, '-e',
+    'require("fs").writeFileSync("source.txt","mutated");console.log("1 test passed")'] }];
+  const result = await executeAndCheckpoint(f.args, f.context);
+  assert.equal(result.status, 'BLOCKED', JSON.stringify(result));
+  assert.equal(await readFile(path.join(f.directory, '.git/trace'), 'utf8'), 'executor\n');
+  assert.equal(f.git('rev-parse', 'HEAD'), f.base);
 });
 
 test('a retained check condition rejects a zero-exit command before Review and commit', integration, async t => {

@@ -110,8 +110,9 @@ export function findingObligations(records) {
         text:
           "Resolve failed check " +
           c.name +
-          ": " +
-          String(c.stderr ?? c.problem ?? c.stdout ?? "").slice(0, 2000),
+          (r.result.conductor?.runner?.receipts?.[i + 1]?.sourceBefore
+            ? " (retained attempt " + r.attempt + ")"
+            : ": " + String(c.stderr ?? c.problem ?? c.stdout ?? "").slice(0, 2000)),
         source: "attempt:" + r.attempt + ":check:" + c.name,
         status: "open",
       });

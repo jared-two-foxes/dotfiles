@@ -93,7 +93,7 @@ export const reviewScope = (requirements, checks) => requirements +
   '\n\nActual full-project verification diagnostics:\n' + JSON.stringify(checks);
 
 
-export function authenticateFeatureRecord(record, binding, plan, tasks, requirements, schema = 'pi.feature-validation/v1') {
+export function authenticateFeatureRecord(record, binding, plan, tasks, requirements, schema = 'pi.feature-validation/v1', reviewTasks = tasks) {
   requireValue(record.result?.schema === schema && record.result.status === 'PASSED' &&
     equal(record.binding, binding) && binding.plan_digest === digest(JSON.stringify(plan)) &&
     record.requirements === requirements && equal(record.plan, plan) && equal(record.tasks, tasks) &&
@@ -102,7 +102,7 @@ export function authenticateFeatureRecord(record, binding, plan, tasks, requirem
       equal(c.definition, plan.checks[i]) && meaningful(c.definition, c) && c.meaningful === true),
   'Retained result is interrupted, stale or incomplete');
   validateReviewResult(record.review, 0);
-  requireValue(featureObligationsVerified(tasks, record.review), 'Unresolved feature obligations need independent assessments');
+  requireValue(featureObligationsVerified(reviewTasks, record.review), 'Unresolved feature obligations need independent assessments');
   requireValue(obligationsVerified({ deliveryContext: { obligations: record.obligations ?? [] } }, record.review),
     'Retained feature findings require explicit independent assessments');
   requireValue(record.review.status === 'APPROVED' && record.review.baseRef === binding.baseline &&
