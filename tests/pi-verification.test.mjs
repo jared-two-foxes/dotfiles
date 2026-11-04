@@ -9,9 +9,9 @@ import {
   inspectEvidence,
   readEvidence,
   retainEvidence,
-} from "../pi/agent/extensions/conductor/evidence.mjs";
-import { authenticateTaskEvidence } from "../pi/agent/extensions/conductor/checkpoint.mjs";
-import { verificationChecks } from "../pi/agent/extensions/conductor/verification.mjs";
+} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
+import { authenticateTaskEvidence } from "../pi/agent/extensions/execute-and-review/checkpoint.mjs";
+import { verificationChecks } from "../pi/agent/extensions/execute-and-review/verification.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-selected-verification-"));

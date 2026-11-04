@@ -283,7 +283,7 @@ For user-performed rebases use `reconcile_feature_rebase` between tasks or
 receipts, baseline, criteria and budget. Inspect retained evidence using the matching
 inspection tools; only an authenticated handoff changes the continuation baseline.
 The retained feature authority covers verification/recovery, not performing a rebase
-or arbitrary history rewriting. See extensions/conductor/README.md for exact inputs.
+or arbitrary history rewriting. See extensions/execute-and-review/README.md for exact inputs.
 
 ## Scoped context and persisted issue handoff
 

@@ -8,7 +8,7 @@ import { executeAndReview, hydrateContinuation } from './adapter.mjs';
 import { git } from './git-tree.mjs';
 import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
-import { conductorRequest, decodeRunner, runConductor, toolOutput } from './client.mjs';
+import { conductorRequest, decodeRunner, runConductor, toolOutput } from '../conductor/client.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { snapshot } from './evidence.mjs';
 import { runPipeline } from './pipeline.mjs';

@@ -126,7 +126,7 @@ Conflicts block with saved work intact. Rebase recovery uses its separate native
 verification and handoff tools. The retained direction covers these actions without
 new confirmations; it does not authorize doing a rebase or arbitrary history changes.
 
-See extensions/conductor/README.md for complete protocol/verification contracts.
+See extensions/execute-and-review/README.md for complete protocol/verification contracts.
 Git/GitHub publishing follows SYSTEM.md and requires a user request. Never merge PRs.
 
 ### Structured context and resumption
@@ -162,7 +162,7 @@ An existing v1 chain migrates on its original identity, baseline and receipt lin
 including a latest fifth attempt. Scaffold's journal and Git audit anchor prevent
 missing evidence from looking like a new run. A missing or contradictory anchor,
 in-flight intent or receipt requires explicit recovery; no reset or reapproval.
-See extensions/conductor/RECOVERY.md for runtime details and current limitations.
+See extensions/execute-and-review/RECOVERY.md for runtime details and current limitations.
 
 Material contract amendments use approve_delivery_amendment with the latest receipt,
 concrete original criterion/finding IDs, replacement and reason. Only that exceptional

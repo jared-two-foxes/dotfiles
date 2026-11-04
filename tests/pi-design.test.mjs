@@ -107,13 +107,13 @@ test('delegated issue designs remain explicit and final review remains mandatory
 });
 
 test('native checkpoints, recovery and validation reuse the same durable direction authority', () => {
-  const native = read('pi/agent/extensions/conductor/index.ts');
+  const native = read('pi/agent/extensions/execute-and-review/index.ts');
   assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 2, 'one routine direction confirmation and one explicit material-amendment confirmation');
   assert.match(native, /approveFeatureDirection/);
   assert.equal((native.match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
-  assert.match(read('pi/agent/extensions/conductor/delivery.mjs'), /requireFeatureAuthorization/);
-  assert.match(read('pi/agent/extensions/conductor/task-finalization.mjs'), /featureAuthorized/);
-  const adapter = read('pi/agent/extensions/conductor/adapter.mjs');
+  assert.match(read('pi/agent/extensions/execute-and-review/delivery.mjs'), /requireFeatureAuthorization/);
+  assert.match(read('pi/agent/extensions/execute-and-review/task-finalization.mjs'), /featureAuthorized/);
+  const adapter = read('pi/agent/extensions/execute-and-review/adapter.mjs');
   assert.match(adapter, /options.issueWorkflowOnly\)\s+await requireFeatureAuthorization/);
 });
 

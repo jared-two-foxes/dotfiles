@@ -16,7 +16,7 @@ import {
   runnerExitCodes,
   toolOutput,
   validateRunner,
-} from "./client.mjs";
+} from "../conductor/client.mjs";
 
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -28,12 +28,18 @@ const reviewCondition = {
   program: process.execPath,
   args: [fileURLToPath(new URL("./review-condition.mjs", import.meta.url))],
 };
-function guarded(name, program, args, files) {
+const legacyGuard = fileURLToPath(new URL("../conductor/input-guard.mjs", import.meta.url));
+const legacyReviewCondition = {
+  program: process.execPath,
+  args: [fileURLToPath(new URL("../conductor/review-condition.mjs", import.meta.url))],
+};
+
+function guarded(name, program, args, files, guardPath = guard) {
   return {
     name,
     program: process.execPath,
     args: [
-      guard,
+      guardPath,
       JSON.stringify({
         program,
         args,
@@ -221,6 +227,10 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   );
   const first = request.commands[0],
     last = request.commands.at(-1);
+  const guardPath = first.args[0];
+  requireValue((guardPath === guard || guardPath === legacyGuard) && last.args[0] === guardPath,
+    "Retained Executor/Review invocation mismatch");
+  const condition = guardPath === legacyGuard ? legacyReviewCondition : reviewCondition;
   const executorProgram = JSON.parse(first.args[1]).program;
   const reviewProgram = JSON.parse(last.args[1]).program;
   const reviewInvocation = guarded(
@@ -234,6 +244,7 @@ export function authenticateWorkflow(workflow, request, args, repository) {
       ],
       [workflow.inputs.review.requirements, workflow.inputs.requirements],
     ],
+    guardPath,
   );
   requireValue(
     [executorProgram, reviewProgram].every(
@@ -254,15 +265,14 @@ export function authenticateWorkflow(workflow, request, args, repository) {
               JSON.stringify(workflow.inputs.execution),
             ],
           ],
+          guardPath,
         ),
       ) &&
       (equal(last, {
         ...reviewInvocation,
-        success_condition: reviewCondition,
+        success_condition: condition,
       }) ||
-        equal(last, reviewInvocation)) && // Historical complete v2 receipts predate semantic Review conditions.
-      first.args[0] === guard &&
-      last.args[0] === guard,
+        equal(last, reviewInvocation)), // Historical complete v2 receipts predate semantic Review conditions.
     "Retained Executor/Review invocation mismatch",
   );
   return request.commands.slice(1, -1);

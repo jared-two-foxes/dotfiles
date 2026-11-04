@@ -4,18 +4,18 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/extensions/conductor/git-tree.mjs";
+import { git } from "../pi/agent/extensions/execute-and-review/git-tree.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import {
   readEvidence,
   retainEvidence,
   snapshot,
-} from "../pi/agent/extensions/conductor/evidence.mjs";
+} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
 import {
   checkpointVerifiedTask,
   checkpointAuthorization,
-} from "../pi/agent/extensions/conductor/checkpoint.mjs";
+} from "../pi/agent/extensions/execute-and-review/checkpoint.mjs";
 
 async function executeAndReview(args, context, options) {
   return executeTaskAttempt(args, context, {
@@ -342,7 +342,7 @@ test("interruption before commit and after ref update recovers without duplicate
     });
     assert.equal(result.ok, false);
     const fresh =
-      await import("../pi/agent/extensions/conductor/checkpoint.mjs?new-session");
+      await import("../pi/agent/extensions/execute-and-review/checkpoint.mjs?new-session");
     const recovered = await fresh.checkpointVerifiedTask(
       args,
       { directory: f.dir },

@@ -4,14 +4,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/extensions/conductor/git-tree.mjs";
+import { git } from "../pi/agent/extensions/execute-and-review/git-tree.mjs";
 import {
   snapshot,
   readFeatureEvidence,
   featureEvidenceReferences,
-} from "../pi/agent/extensions/conductor/evidence.mjs";
+} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/extensions/conductor/checkpoint.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/extensions/execute-and-review/checkpoint.mjs";
 import {
   scaffoldTasks,
   designReference,
@@ -19,21 +19,21 @@ import {
 import {
   validateFeature,
   inspectFeatureValidation,
-} from "../pi/agent/extensions/conductor/feature.mjs";
+} from "../pi/agent/extensions/execute-and-review/feature.mjs";
 import {
   reconcileFeature,
   inspectReconciliation,
   readReconciliation,
-} from "../pi/agent/extensions/conductor/reconciliation.mjs";
+} from "../pi/agent/extensions/execute-and-review/reconciliation.mjs";
 import {
   recoverInterruptedTaskRebase,
   inspectTaskRebaseRecovery,
-} from "../pi/agent/extensions/conductor/interrupted-rebase.mjs";
-import { readEvidence } from "../pi/agent/extensions/conductor/evidence.mjs";
-import { runCheck } from "../pi/agent/extensions/conductor/feature-process.mjs";
+} from "../pi/agent/extensions/execute-and-review/interrupted-rebase.mjs";
+import { readEvidence } from "../pi/agent/extensions/execute-and-review/evidence.mjs";
+import { runCheck } from "../pi/agent/extensions/execute-and-review/feature-process.mjs";
 
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
-import { checkpointHistory } from "../pi/agent/extensions/conductor/history.mjs";
+import { checkpointHistory } from "../pi/agent/extensions/execute-and-review/history.mjs";
 const fixtureScaffold = new Map();
 async function executeAndReview(args, context, options) {
   const scaffoldOptions = fixtureScaffold.get(context.directory);

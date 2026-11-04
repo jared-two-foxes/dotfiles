@@ -193,7 +193,7 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
     const repository = await realpath(git.stdout.trim());
     await checkStatePaths(repository);
     if (['design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation)) {
-      const { issueFeature } = await import('../conductor/issue-state.mjs');
+      const { issueFeature } = await import('../execute-and-review/issue-state.mjs');
       const feature = await issueFeature(repository, { featureId: params.feature_id,
         designRef: await featureDesignRef(repository, params.feature_id) }, { scaffoldOptions: options });
       if (feature) await authenticateIssueMutation(repository, feature, params);
@@ -227,26 +227,26 @@ async function featureDesignRef(repository, featureId) {
   catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
 }
 async function authenticateIssueMutation(repository, feature, params) {
-  const { snapshot, readEvidence } = await import('../conductor/evidence.mjs');
+  const { snapshot, readEvidence } = await import('../execute-and-review/evidence.mjs');
   const current = await snapshot(repository);
   const binding = { featureId: feature.id, taskId: params.task_id, designRef: feature.design_ref };
   if (params.operation === 'design-reopen') {
     requireValue(current.clean && !current.bookkeepingVisible, 'Park unfinished source with suspend_issue before reopening design');
     if (params.payload.reference) {
       const r = await readEvidence(repository, params.payload.reference);
-      const { git } = await import('../conductor/git-tree.mjs');
+      const { git } = await import('../execute-and-review/git-tree.mjs');
       requireValue(r.kind === 'issue-suspension' && isDeepStrictEqual(r.task, binding) &&
         r.before.head === current.head && git(repository, ['rev-parse', 'refs/pi-issue-suspensions/' + params.payload.reference.split(':').at(-1) + '^{tree}']) === r.before.tree,
       'Authenticated saved issue suspension required');
     }
   } else if (params.operation === 'issue-resume') {
-    const { readTaskHandoff } = await import('../conductor/task-chain.mjs');
+    const { readTaskHandoff } = await import('../execute-and-review/task-chain.mjs');
     const h = await readTaskHandoff(repository, params.payload.handoff, binding);
     requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
   } else {
-    const { authenticateTaskEvidence } = await import('../conductor/task-evidence.mjs');
-    const { checkpointProvenance } = await import('../conductor/history.mjs');
-    const { git } = await import('../conductor/git-tree.mjs');
+    const { authenticateTaskEvidence } = await import('../execute-and-review/task-evidence.mjs');
+    const { checkpointProvenance } = await import('../execute-and-review/history.mjs');
+    const { git } = await import('../execute-and-review/git-tree.mjs');
     const record = await authenticateTaskEvidence(repository, params.payload.reference, binding);
     const p = checkpointProvenance(repository, params.payload.commit);
     requireValue(p.evidenceRef === params.payload.reference && p.taskId === params.task_id && p.featureId === feature.id &&
