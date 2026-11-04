@@ -4,20 +4,56 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { executeAndReview } from "../pi/agent/extensions/conductor/adapter.mjs";
-import { authenticateTaskEvidence } from "../pi/agent/extensions/conductor/task-evidence.mjs";
+import { executeAndReview } from "../pi/agent/extensions/execute-and-review/adapter.mjs";
+import { authenticateTaskEvidence } from "../pi/agent/extensions/execute-and-review/task-evidence.mjs";
 import {
   readEvidence,
   retainEvidence,
   snapshot,
-} from "../pi/agent/extensions/conductor/evidence.mjs";
-import { executionSummary } from "../pi/agent/extensions/conductor/protocol.mjs";
+} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
+import { executionSummary } from "../pi/agent/extensions/execute-and-review/protocol.mjs";
 
 import {
   conductorFixture,
   executorFixture,
   reviewFixture,
 } from "./helpers/conductor-executables.mjs";
+
+test("standalone Conductor extension registers and runs a user command", {
+  skip: process.platform === "win32" ? "Executable Node fixture uses a POSIX shebang" : false,
+}, async t => {
+  const { default: register } = await import("../pi/agent/extensions/conductor/index.ts");
+  const directory = await mkdtemp(path.join(tmpdir(), "pi-standalone-conductor-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const bin = path.join(directory, "conductor.mjs");
+  await writeFile(bin, "#!/usr/bin/env node\n" + conductorFixture, { mode: 0o755 });
+  const previous = process.env.CONDUCTOR_BIN;
+  process.env.CONDUCTOR_BIN = bin;
+  t.after(() => {
+    if (previous === undefined) delete process.env.CONDUCTOR_BIN;
+    else process.env.CONDUCTOR_BIN = previous;
+  });
+  await writeFile(path.join(directory, "request with spaces.json"), JSON.stringify({
+    schema: "conductor.request/v2",
+    working_directory: directory,
+    output_directory: directory,
+    commands: [{ name: "probe", program: process.execPath, args: ["-e", "console.log('probe')"] }],
+  }));
+  let handler;
+  register({ registerCommand(name, command) {
+    assert.equal(name, "conductor");
+    handler = command.handler;
+  } });
+  const notifications = [];
+  await handler("request with spaces.json", {
+    cwd: directory, ui: { notify: (message, level) => notifications.push({ message, level }) },
+  });
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].level, "info");
+  const [status, logs] = notifications[0].message.split("\n");
+  assert.equal(status, "Conductor PASSED (completed)");
+  assert.equal(await readFile(path.join(logs, "000000.stdout"), "utf8"), "probe\n");
+});
 
 test(
   "real command sequence preserves full output, review boundary and immutable checkpoint evidence",

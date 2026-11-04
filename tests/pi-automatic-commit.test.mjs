@@ -4,19 +4,19 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, chmod, rm, readdir, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import { executeAndCheckpoint, finalizeVerifiedTask } from '../pi/agent/extensions/conductor/delivery.mjs';
-import { invoke } from '../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndCheckpoint, finalizeVerifiedTask } from '../pi/agent/extensions/execute-and-review/delivery.mjs';
+import { invoke } from '../pi/agent/extensions/conductor/client.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
-import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/conductor/feature-authorization.mjs';
-import { validateFeature } from '../pi/agent/extensions/conductor/feature.mjs';
-import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/conductor/issue-state.mjs';
-import { digest, readEvidence, retainEvidence } from '../pi/agent/extensions/conductor/evidence.mjs';
-import { authenticateTaskEvidence } from '../pi/agent/extensions/conductor/task-evidence.mjs';
+import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/execute-and-review/feature-authorization.mjs';
+import { validateFeature } from '../pi/agent/extensions/execute-and-review/feature.mjs';
+import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/execute-and-review/issue-state.mjs';
+import { digest, readEvidence, retainEvidence } from '../pi/agent/extensions/execute-and-review/evidence.mjs';
+import { authenticateTaskEvidence } from '../pi/agent/extensions/execute-and-review/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
-import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/conductor/issue-context.mjs';
-import { suspendIssue, resumeIssue } from '../pi/agent/extensions/conductor/issue-recovery.mjs';
-import { authenticateAttemptChain } from '../pi/agent/extensions/conductor/task-chain.mjs';
+import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/execute-and-review/issue-context.mjs';
+import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execute-and-review/issue-recovery.mjs';
+import { authenticateAttemptChain } from '../pi/agent/extensions/execute-and-review/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE
   ? 'Requires real Scaffold and POSIX executable fixtures' : false };
@@ -515,7 +515,7 @@ test('review circuit preserves edited source, then environment repair reuses val
 
 test('compilation failure, test failure and review finding advance to an authenticated correction and commit', integration, async t => {
   const f = await fixture(t);
-  const validateTests = [process.execPath, new URL('../pi/agent/extensions/conductor/meaningful-test-condition.mjs', import.meta.url).pathname];
+  const validateTests = [process.execPath, new URL('../pi/agent/extensions/execute-and-review/meaningful-test-condition.mjs', import.meta.url).pathname];
   const readModule = 'const fs=require("fs"), vm=require("vm"), assert=require("assert/strict"); const module={exports:{}}; new vm.Script(fs.readFileSync("source.txt","utf8")).runInNewContext({module});';
   f.args.checks = [
     { name: 'compile', command: [process.execPath, '-e', 'new (require("vm").Script)(require("fs").readFileSync("source.txt","utf8"))'] },

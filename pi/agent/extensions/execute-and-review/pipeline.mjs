@@ -5,8 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { open, readFile, writeFile, readdir, lstat, realpath, rm } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { invoke, DEFAULT_TIMEOUT_MS } from './adapter.mjs';
-import { validateRunner, normalizeWorkflow, toolOutput } from './protocol.mjs';
+import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from '../conductor/client.mjs';
+import { normalizeWorkflow } from './protocol.mjs';
 import { snapshot, retainEvidence, readEvidence, verifiedResult, taskEvidenceReferences } from './evidence.mjs';
 import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { assertLatestAttempt } from './task-chain.mjs';
@@ -212,8 +212,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
   await writeFile(path.join(root, 'request.json'), JSON.stringify(plan.deliveryRequest), { flag: 'wx', mode: 0o600 });
   let response, runner, problem, problemCode;
   try {
-    response = await (options.invokeConductor ?? ((body, timeoutMs) => invoke(process.env.CONDUCTOR_BIN ?? 'conductor',
-      ['run', '--request', '-'], { cwd: meta.repository, signal: context.abort, input: body, timeoutMs })))(
+    response = await (options.invokeConductor ?? ((body, timeoutMs) => runConductor(body, { cwd: meta.repository, signal: context.abort, timeoutMs })))(
       JSON.stringify(plan.deliveryRequest), meta.args.workflowTimeoutMs ?? DEFAULT_TIMEOUT_MS);
     await writeFile(path.join(root, 'response.json'), JSON.stringify(response), { flag: 'wx', mode: 0o600 });
     runner = JSON.parse(response.stdout);

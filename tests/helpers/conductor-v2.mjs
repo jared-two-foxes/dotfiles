@@ -1,7 +1,7 @@
 // Existing lifecycle scenarios describe domain outcomes. Translate ONLY their
 // injected fixtures to actual v2 transport, keeping those tests about task/rebase
 // semantics. Wire-contract tests import the production adapters directly.
-import { executeAndReview as pi } from '../../pi/agent/extensions/conductor/adapter.mjs';
+import { executeAndReview as pi } from '../../pi/agent/extensions/execute-and-review/adapter.mjs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';

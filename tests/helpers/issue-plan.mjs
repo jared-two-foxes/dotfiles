@@ -1,5 +1,5 @@
 // Real design/lifecycle API setup shared by integration scenarios.
-import { issueDesignRequirements } from '../../pi/agent/extensions/conductor/issue-state.mjs';
+import { issueDesignRequirements } from '../../pi/agent/extensions/execute-and-review/issue-state.mjs';
 export async function approveGraph(call) {
   if ((await call('list')).feature.workflow.phase !== 'design') return;
   for (;;) {
