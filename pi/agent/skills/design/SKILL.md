@@ -180,7 +180,7 @@ verification contracts require Design recovery retaining criteria, history and c
 
 Capture the current checkpoint HEAD once as the issue's baseRef and retain that
 baseline within its correction epoch. The adapter versions and assembles context. Preserve the check contract; explicit
-invocation repairs follow /skill:conductor. Start the explicit
+invocation repairs follow /skill:execute-and-review. Start the explicit
 Scaffold issue before execution. Supply task identity and the previousAttempt for
 corrections. Use `previousAttempt`, fresh `input` and structured `contextUpdates`; inspect
 `inspect_issue_attempt` for the authoritative context; inspect full logs
@@ -201,7 +201,7 @@ the review diff: bookkeeping must be ignored and untracked.
   exit hatch for additional issues. Never replay the original operations.
 - BLOCKED: stop the current command list, retain evidence and partial work, inspect
   the actual cause and continue an in-scope recoverable correction under the existing
-  approval. Follow /skill:conductor's recovery procedure. An environment failure is
+  approval. Follow /skill:execute-and-review's recovery procedure. An environment failure is
   not a code defect. Keep the prior after-tree; a checks-only retry uses an empty
   operations array. Stop only for a concrete unresolved blocker or loop limit.
 - Oversized task: suspend and decompose only the remaining unverified responsibilities.

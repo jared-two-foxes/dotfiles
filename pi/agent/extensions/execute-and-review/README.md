@@ -29,6 +29,7 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
+Copy-Item -Recurse -Force .\pi\agent\skills\execute-and-review "$HOME\.pi\agent\skills\execute-and-review"
 Copy-Item -Recurse -Force .\pi\agent\skills\design "$HOME\.pi\agent\skills\design"
 Copy-Item -Recurse -Force .\pi\agent\skills\executor "$HOME\.pi\agent\skills\executor"
 # If previously installed, remove the retired TDD skill:
@@ -51,7 +52,8 @@ v1 runner responses are rejected without fallback. Pi loads `/skill:design` when
 invoke it explicitly for the full collaborative design-first persona. It
 uses `/skill:executor` to author exact operations and the native
 `execute_and_review` tool to apply them under retained overall feature authority.
-`/skill:conductor` is the lower-level execution reference. The legacy
+`/skill:execute-and-review` covers task delivery and recovery.
+`/skill:conductor` covers the standalone runner protocol. The legacy
 `/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
 implementation strategy within Design.
 
