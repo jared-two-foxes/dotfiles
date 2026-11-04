@@ -330,6 +330,41 @@ rewriting. Fingerprints cover index/diff and nonignored untracked regular files;
 ignored build outputs and Scaffold state are outside the fingerprint. Git's diff
 output limit is 16 MiB; fingerprint failures block rather than weakening evidence.
 
+### Check evidence in independent review
+
+The task pipeline keeps full logs, requests, and content-addressed receipts in
+the existing worktree-specific Git metadata paths. It passes a bounded evidence
+summary through Review CLI's requirements-file input. Review CLI loads this
+input before starting the model, so the reviewer receives the evidence with the
+task criteria and uses its existing tools to inspect code. It needs no additional
+repository-tool access. Moving all artifacts to an ignored working-tree directory
+would expose raw diagnostics to working-tree reads and would not serve a review
+of a committed tree.
+
+The summary identifies the attempt intent receipt, reviewed tree and index
+fingerprint, check command, exit code, validator outcome, receipt and log digests,
+and recognizable test counts from bounded log excerpts. Each check must start
+and finish on the reviewed snapshot. Conductor checks the receipt/validator pair
+before invoking Review, guards the generated inputs during invocation, and
+reconstructs the handoff from the sealed result during checkpoint authentication.
+The existing receipt references and older authenticated receipts remain valid.
+
+A matching current pass gives Review evidence to resolve an earlier failed-check
+obligation by ID. Review still assesses each open obligation and can reject an
+inequivalent repair or a separate code finding. The task handoff covers targeted
+verification. Final feature validation uses the authenticated checkpoint to
+carry that resolution forward while running its separate full-project checks
+and cumulative review.
+
+Raw logs and private Git paths stay local. Only recognizable test counts are
+extracted from new task log output for review. Check names and command arguments
+are visible to Review, so use credential injection through the process environment
+and keep secrets out of commands, requirements and check names. The generated
+requirements and request files use the existing private attempt directory and
+follow its retention lifecycle. Preserve that directory if a receipt still
+depends on its logs for reuse, or if the original review input must remain
+available for audit.
+
 Keep receipts as long as Scaffold references them; preserve separately when moving
 a checkout because Git push/clone does not transfer them. Never claim that a
 structural PASSED check proves meaningful tests ran: inspect actual output.

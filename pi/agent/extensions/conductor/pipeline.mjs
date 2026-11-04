@@ -12,6 +12,7 @@ import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { assertLatestAttempt } from './task-chain.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 import { git } from './git-tree.mjs';
+import { reviewEvidence, reviewHandoff, testCounts } from './review-evidence.mjs';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
@@ -26,6 +27,8 @@ async function logDigest(file) {
 }
 
 async function preview(file) {
+  const info = await lstat(file);
+  requireValue(info.isFile() && !info.isSymbolicLink(), 'Unsafe retained log file');
   const handle = await open(file, 'r');
   try {
     const buffer = Buffer.alloc(4 * 16385);
@@ -36,7 +39,12 @@ async function preview(file) {
       length += bytesRead;
     }
     const chars = Array.from(buffer.subarray(0, length).toString('utf8'));
-    return [chars.slice(0, 16384).join(''), chars.length > 16384];
+    let tail = chars.slice(16384).join('');
+    if (info.size > length) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, Math.max(length, info.size - buffer.length));
+      tail += '\n' + buffer.subarray(0, bytesRead).toString('utf8');
+    }
+    return [chars.slice(0, 16384).join(''), chars.length > 16384, tail];
   } finally { await handle.close(); }
 }
 
@@ -51,23 +59,34 @@ async function logsFor(plan) {
   return dirs[0];
 }
 
-export async function commandResults(plan, rawRunner) {
+async function readStageReceipt(file) {
+  const info = await lstat(file);
+  requireValue(info.isFile() && !info.isSymbolicLink(), 'Unsafe stage receipt');
+  return readFile(file);
+}
+
+export async function stageResults(plan, attempted, rawRunner) {
   const commands = [], receipts = [], conditionReceipts = [], directory = await logsFor(plan);
   const specs = plan.workflow.request.commands;
-  const attempted = rawRunner ? Math.min(rawRunner.commands.length, specs.length) : specs.length;
   for (let index = 0; index < attempted; index++) {
     const spec = specs[index];
+    const root = plan.workflow.request.output_directory;
+    requireValue(plan.stages[index].receipt === path.join(root, `${index}.receipt.json`) &&
+      (!spec.success_condition || plan.stages[index].conditionReceipt === path.join(root, `${index}.condition.json`)),
+    'Stage receipt path is outside its assigned location');
     let receipt = null, receiptBytes;
-    try { receiptBytes = await readFile(plan.stages[index].receipt); receipt = JSON.parse(receiptBytes); } catch {}
+    try { receiptBytes = await readStageReceipt(plan.stages[index].receipt); receipt = JSON.parse(receiptBytes); } catch {}
     if (receipt) requireValue(receipt.schema === 'pi.command-receipt/v1' && receipt.index === index &&
-      receipt.name === spec.name && receipt.program === spec.program && equal(receipt.args, spec.args), 'Stage receipt identity mismatch');
+      receipt.name === spec.name && receipt.program === spec.program && equal(receipt.args, spec.args) &&
+      receipt.status === (receipt.error || receipt.signal || !Number.isInteger(receipt.exit_code)
+        ? 'BLOCKED' : receipt.exit_code === 0 ? 'PASSED' : 'FAILED'), 'Stage receipt identity mismatch');
     const stdout_path = path.join(directory, String(index).padStart(6, '0') + '.stdout');
     const stderr_path = path.join(directory, String(index).padStart(6, '0') + '.stderr');
-    const [stdout, stdout_truncated] = await preview(stdout_path);
-    const [stderr, stderr_truncated] = await preview(stderr_path);
+    const [stdout, stdout_truncated, stdoutTail] = await preview(stdout_path);
+    const [stderr, stderr_truncated, stderrTail] = await preview(stderr_path);
     let status = receipt?.status ?? 'BLOCKED', condition, proof = null;
     if (spec.success_condition) {
-      try { proof = JSON.parse(await readFile(plan.stages[index].conditionReceipt, 'utf8')); } catch {}
+      try { proof = JSON.parse(await readStageReceipt(plan.stages[index].conditionReceipt)); } catch {}
       if (proof) requireValue(receiptBytes && proof.schema === 'pi.condition-receipt/v1' && proof.index === index &&
         proof.program === spec.success_condition.program && equal(proof.args, spec.success_condition.args) &&
         proof.commandReceiptSha256 === createHash('sha256').update(receiptBytes).digest('hex') &&
@@ -87,12 +106,22 @@ export async function commandResults(plan, rawRunner) {
     commands.push({ ...spec, index, status, exit_code: receipt?.exit_code ?? null,
       stdout, stderr, stdout_truncated, stderr_truncated, stdout_path, stderr_path,
       stdout_sha256: await logDigest(stdout_path), stderr_sha256: await logDigest(stderr_path),
+      ...(index > 0 && index < specs.length - 1 ? {
+        testCounts: testCounts(stdout, stdoutTail, stderr, stderrTail),
+      } : {}),
       ...(condition ? { condition } : {}),
       ...(receipt?.error ? { error: receipt.error } : {}) });
     receipts.push(receipt);
     conditionReceipts.push(proof);
     if (status !== 'PASSED') break;
   }
+  return { commands, receipts, conditionReceipts, directory };
+}
+
+export async function commandResults(plan, rawRunner) {
+  const specs = plan.workflow.request.commands;
+  const attempted = rawRunner ? Math.min(rawRunner.commands.length, specs.length) : specs.length;
+  const { commands, receipts, conditionReceipts, directory } = await stageResults(plan, attempted, rawRunner);
   const status = commands.length === specs.length && commands.every(c => c.status === 'PASSED')
     ? 'PASSED' : commands.at(-1)?.status ?? 'BLOCKED';
   const observed = { schema: 'pi.command-results/v1', status, commands, receipts, conditionReceipts, output_directory: directory,
@@ -138,13 +167,16 @@ export async function sealVerification(plan) {
     requireValue(after.head === plan.before.head && reviewSnapshot.head === after.head &&
       reviewSnapshot.tree === after.tree && reviewSnapshot.digest === after.digest && !reviewSnapshot.bookkeepingVisible,
     'Source/index changed during review; commit prohibited');
+    const expectedReview = reviewHandoff(plan.workflow, reviewEvidence(plan, conductor.runner, reviewSnapshot));
+    requireValue(equal(conductor.runner.receipts.at(-1).handoff, expectedReview.identity),
+      'Review did not receive the authenticated check evidence');
     // Retain the actual process-receipt prefix, not a fabricated completed
     // Conductor response. The enclosing runner is still executing its final command.
     const response = { code: 0, stdout: JSON.stringify(conductor.runner), stderr: '' };
     const record = { repository: plan.repository, task: plan.args.task, attempt: plan.attempt, args: plan.args,
       before: plan.before, after, startedReference: plan.startedReference, workflow: plan.workflow,
       request: plan.workflow.request, response, reviewSnapshot, result: verified,
-      producer: 'pi.command-receipts/v1', deliveryRequest: plan.deliveryRequest };
+      producer: 'pi.command-receipts/v2', deliveryRequest: plan.deliveryRequest };
     const reference = await retainEvidence(plan.repository, record);
     await writeFile(path.join(plan.workflow.request.output_directory, 'verified.json'), JSON.stringify({ reference }), { flag: 'wx', mode: 0o600 });
     return { reference, record };
@@ -156,10 +188,13 @@ export async function runPipeline(meta, feature, context, options = {}) {
   const plan = { schema: 'pi.delivery-plan/v1', ...meta,
     feature: { branch: feature.branch, original_baseline: feature.original_baseline }, stages: [] };
   const commands = [];
+  const planPath = path.join(root, 'delivery.json');
   const reused = await reusePlan(meta.repository, meta.args, meta.before);
   for (const [index, command] of meta.workflow.request.commands.entries()) {
     const file = path.join(root, `${index}.stage.json`);
     const stage = { index, repository: meta.repository, command,
+      ...(index === meta.workflow.request.commands.length - 1 ? { reviewPlan: planPath }
+        : index > 0 ? { captureSource: true } : {}),
       ...(reused && index > 0 && index <= reused.count ? { reuse: { ...reused, index,
         boundaryPath: meta.boundaryPath, last: index === reused.count } } : {}), receipt: path.join(root, `${index}.receipt.json`),
       ...(command.success_condition ? { conditionReceipt: path.join(root, `${index}.condition.json`) } : {}) };
@@ -170,7 +205,6 @@ export async function runPipeline(meta, feature, context, options = {}) {
       ...(command.success_condition ? { success_condition: { program: process.execPath,
         args: [fileURLToPath(new URL('./condition-stage.mjs', import.meta.url)), file] } } : {}) });
   }
-  const planPath = path.join(root, 'delivery.json');
   commands.push({ name: 'git commit verified task', program: process.execPath,
     args: [fileURLToPath(new URL('./commit-task.mjs', import.meta.url)), planPath] });
   plan.deliveryRequest = { ...meta.workflow.request, commands };

@@ -4,6 +4,7 @@ import { authenticateAmendment } from './context-amendment.mjs';
 import { sameVerification } from './verification.mjs';
 import { authenticateAttemptChain } from './task-chain.mjs';
 import { readEvidence, verifiedResult } from './evidence.mjs';
+import { reviewEvidence, reviewHandoff } from './review-evidence.mjs';
 import { authenticateWorkflow } from './protocol.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import path from 'node:path';
@@ -21,7 +22,7 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   const modern = record.request?.schema === 'conductor.request/v2';
   if (record.result.conductor?.runner?.schema === 'pi.command-results/v1') {
     const delivery = record.deliveryRequest, prefix = record.request;
-    requireValue(record.producer === 'pi.command-receipts/v1' && delivery?.schema === 'conductor.request/v2' &&
+    requireValue(['pi.command-receipts/v1', 'pi.command-receipts/v2'].includes(record.producer) && delivery?.schema === 'conductor.request/v2' &&
       delivery.working_directory === repository && delivery.output_directory === prefix.output_directory &&
       delivery.commands.length === prefix.commands.length + 1 &&
       delivery.commands.slice(0, -1).every((c, i) => c.name === prefix.commands[i].name &&
@@ -54,7 +55,12 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
     record.reviewSnapshot?.digest === record.after.digest && !record.reviewSnapshot?.bookkeepingVisible &&
     record.response?.code === 0 &&
     (modern || verifiedResult({ status: 'PASSED', conductor: JSON.parse(record.response.stdout) }, record.args)), 'Missing successful task-bound verification or Git tree (legacy receipts require new verification)');
-  for (const receipt of record.result.conductor?.runner?.receipts ?? []) {
+  const runner = record.result.conductor?.runner;
+  if (record.producer === 'pi.command-receipts/v2' || runner?.receipts?.at(-1)?.handoff) {
+    const expected = reviewHandoff(record.workflow, reviewEvidence(record, runner, record.reviewSnapshot));
+    requireValue(equal(runner.receipts.at(-1).handoff, expected.identity), 'Retained review evidence mismatch');
+  }
+  for (const receipt of runner?.receipts ?? []) {
     if (receipt?.reusedFrom) await reusableCheck(repository, receipt.reusedFrom.reference,
       receipt.reusedFrom.index, record.args, record.before);
   }

@@ -56,13 +56,14 @@ console.log(JSON.stringify({ success: true, operations_applied: input.operations
 `;
 export const reviewFixture = `
 import fs from 'node:fs';
+import path from 'node:path';
 const args = process.argv.slice(2), value = flag => args[args.indexOf(flag) + 1];
 const request = JSON.parse(fs.readFileSync(value('--request'), 'utf8'));
 if (request.schema !== 'review.request/v1' || (request.head_ref !== ':working' && !/^[a-f0-9]{40}$/.test(request.head_ref)) ||
   (process.env.EXPECTED_REVIEW_REQUIREMENTS !== '*' && !fs.readFileSync(request.requirements, 'utf8').includes(
     process.env.EXPECTED_REVIEW_REQUIREMENTS ?? 'Complete immutable review requirements'))) throw Error('review contract');
 fs.appendFileSync('.git/trace', 'review\\n');
-if (process.env.REVIEW_FIXTURE_TERMINAL_LOCK) fs.writeFileSync(value('--request').slice(0, -'review.json'.length) + 'terminal.lock', 'owned claim');
+if (process.env.REVIEW_FIXTURE_TERMINAL_LOCK) fs.writeFileSync(path.join(path.dirname(value('--request')), 'terminal.lock'), 'owned claim');
 if (process.env.REVIEW_FIXTURE_LOCK) fs.writeFileSync('.git/index.lock', 'existing lock');
 if (process.env.REVIEW_FIXTURE_DRIFT) fs.writeFileSync('source.txt', 'unreviewed drift');
 const status = process.env.REVIEW_FIXTURE_STATUS;
@@ -70,11 +71,28 @@ const requirements = fs.readFileSync(request.requirements, 'utf8');
 const contextLine = requirements.split('\\n').find(l => l.startsWith('{"design":'));
 const context = contextLine ? JSON.parse(contextLine) : null;
 const obligations = context?.obligations ?? [];
+const taskEvidenceLine = requirements.split('\\n').find(l => l.startsWith('{"schema":"pi.task-review-evidence/v1"'));
+const taskEvidence = taskEvidenceLine ? JSON.parse(taskEvidenceLine) : null;
+if (process.env.REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE && request.head_ref === ':working') {
+  if (taskEvidence?.gate !== 'targeted-task' || !/^[a-f0-9]{40}$/.test(taskEvidence.tree) ||
+    taskEvidence.head !== request.base_ref || !/^pi-evidence:sha256:[a-f0-9]{64}$/.test(taskEvidence.startedReference) ||
+    !requirements.includes('full-workspace gate runs separately at final feature validation') ||
+    !taskEvidence.checks.some(c => c.exitCode === 0 && c.status === 'PASSED' &&
+      c.testCounts.some(count => count.endsWith(' passed')) && /^[a-f0-9]{64}$/.test(c.commandReceiptSha256)) ||
+    requirements.includes('secret fixture output')) throw Error('missing or unsafe authenticated check handoff');
+}
 const obligation_assessments = obligations.filter(o => o.status !== 'independently_verified')
-  .map(o => ({ obligation_id: o.id, disposition: 'verified', evidence: 'Independent fixture inspected source and regression output' }));
+  .map(o => {
+    if (process.env.REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE && o.id.startsWith('check-')) {
+      const check = taskEvidence?.checks.find(c => c.resolvesCheckObligations.includes(o.id));
+      return { obligation_id: o.id, disposition: check ? 'verified' : 'unresolved',
+        evidence: check ? 'Passing command receipt ' + check.commandReceiptSha256 : 'No passing retry evidence' };
+    }
+    return { obligation_id: o.id, disposition: 'verified', evidence: 'Independent fixture inspected source and regression output' };
+  });
 if (process.env.REVIEW_FIXTURE_MALFORMED) { console.log('{invalid JSON'); process.exit(0); }
 if (process.env.REVIEW_FIXTURE_TAMPER) {
-  const file = value('--request').slice(0, -'review.json'.length) + '0.receipt.json';
+  const file = path.join(path.dirname(value('--request')), '0.receipt.json');
   const receipt = JSON.parse(fs.readFileSync(file, 'utf8')); receipt.program = 'unverified-command'; fs.writeFileSync(file, JSON.stringify(receipt));
 }
 console.log(JSON.stringify({ schema: 'review.result/v1', status, review_id: 'external-review',
