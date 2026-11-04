@@ -7,6 +7,7 @@ import { authenticateAttemptChain } from "./task-chain.mjs";
 import {
   verificationChecks,
   meaningfulChecks,
+  meaningfulTestEvaluator,
   correctionVerification,
 } from "./verification.mjs";
 import { issueRequirements } from "./issue-state.mjs";
@@ -154,7 +155,7 @@ export function updateContext(
       correct_assumption: ["kind", "text", "reason"],
       revise_design: ["kind", "text", "reason"],
       propose_addressed: ["kind", "findingId", "reason"],
-      repair_check: ["kind", "checkId", "command", "reason"],
+      repair_check: ["kind", "checkId", "command", "useMeaningfulTestEvaluator", "reason"],
       add_check: ["kind", "check", "reason"],
       diagnose: ["kind", "text", "reason", "signature"],
       apply_amendment: ["kind", "reference", "reason"],
@@ -213,7 +214,16 @@ export function updateContext(
     if (raw.kind === "repair_check") {
       const c = plan.find((c) => c.name === raw.checkId);
       requireValue(c, "Unknown check identity");
-      c.command = raw.command;
+      if (raw.useMeaningfulTestEvaluator === true) {
+        requireValue(raw.command === undefined && c.successCondition,
+          "Evaluator repair requires a retained evaluator and preserves the exact test command");
+        const evaluator = meaningfulTestEvaluator(c.command);
+        requireValue(evaluator, "Evaluator repair requires a recognized test runner");
+        c.successCondition = evaluator;
+      } else {
+        requireValue(raw.useMeaningfulTestEvaluator === undefined, "Invalid evaluator repair flag");
+        c.command = raw.command;
+      }
     }
     if (raw.kind === "add_check") {
       requireValue(
@@ -435,6 +445,9 @@ export async function prepareDelivery(
       options,
     );
   const updates = args.contextUpdates ?? [];
+  requireValue(previous?.kind === "issue-handoff" ||
+    !updates.some(u => u.kind === "repair_check" && u.useMeaningfulTestEvaluator === true),
+    "Evaluator repair requires an authenticated issue handoff after approved redesign");
   const approved = new Map();
   for (const u of updates)
     if (u.kind === "apply_amendment")
@@ -473,7 +486,7 @@ export async function prepareDelivery(
     !previous ||
       previous.kind === "issue-zero-handoff" ||
       correctionVerification(previous, planned),
-    "Verification plan mismatch; use a structured repair or verificationRepairReason without weakening coverage",
+    "Verification plan mismatch; use a structured repair or verificationRepairReason without weakening coverage. Evaluator repair requires an authenticated redesign handoff and the same test command and check order",
   );
   requireValue(
     !previous ||

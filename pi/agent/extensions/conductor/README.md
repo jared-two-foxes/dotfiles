@@ -303,7 +303,10 @@ with the explicit measured-environment declaration described in RECOVERY.md. Thi
 `sh` command to be replaced with an equivalent native invocation, not a failing
 test to be bypassed. Semantic coverage remains a Pi/Review responsibility; a reason
 alone is not proof of equivalence. Contract or validator changes require Design
-recovery. Ordinary corrections preserve check identities and coverage; structured revisions are audited.
+recovery. For a malformed evaluator on a recognized test runner, use the
+`repair_check` update with `useMeaningfulTestEvaluator: true` after the approved
+redesign and authenticated resume. See [the recovery guide](RECOVERY.md).
+Ordinary corrections preserve check identities and coverage; structured revisions are audited.
 
 BLOCKED stops that command list. Pi diagnoses the result and continues recoverable,
 in-scope corrections under the existing feature authorization, subject to the same
