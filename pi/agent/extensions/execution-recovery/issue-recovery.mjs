@@ -9,7 +9,8 @@ import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, reb
 import { pinHandoff } from './interrupted-rebase.mjs';
 import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
 import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
-import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../../lib/delivery-state/issue-state.mjs';
+import { issueFeature } from '../../lib/scaffold/adapter.mjs';
+import { approvedIssue, issueDesignRequirements, issueMutation } from '../../lib/delivery-state/issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {

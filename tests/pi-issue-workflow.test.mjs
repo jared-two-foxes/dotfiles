@@ -21,6 +21,7 @@ import {
   designReference,
 } from "../pi/agent/lib/scaffold/adapter.mjs";
 import { issueDesignRequirements } from "../pi/agent/lib/delivery-state/issue-state.mjs";
+import { authorizedScaffoldTasks } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
 import {
   suspendIssue,
   resumeIssue,
@@ -83,7 +84,7 @@ async function fixture(t) {
     },
   };
   const call = async (operation, extra = {}) => {
-    const r = await scaffoldTasks(
+    const r = await authorizedScaffoldTasks(
       { operation, feature_id: "F", ...extra },
       { directory: dir },
       scaffoldOptions,
@@ -658,16 +659,24 @@ test(
     await f.call("design-finish");
     await f.call("start", { task_id: "F" });
     const before = await snapshot(f.dir);
-    const forged = await scaffoldTasks(
-      {
-        operation: "design-reopen",
-        feature_id: "F",
-        task_id: "F",
-        payload: {
-          reason: "Fake",
-          reference: "pi-evidence:sha256:" + "a".repeat(64),
-        },
+    const reopen = {
+      operation: "design-reopen",
+      feature_id: "F",
+      task_id: "F",
+      payload: {
+        reason: "Fake",
+        reference: "pi-evidence:sha256:" + "a".repeat(64),
       },
+    };
+    const unguarded = await scaffoldTasks(
+      reopen,
+      { directory: f.dir },
+      f.options.scaffoldOptions,
+    );
+    assert.equal(unguarded.ok, false);
+    assert.match(unguarded.message, /requires delivery authorization/);
+    const forged = await authorizedScaffoldTasks(
+      reopen,
       { directory: f.dir },
       f.options.scaffoldOptions,
     );
@@ -1174,7 +1183,7 @@ test(
       (await f.call("next")).task.id,
     );
     const { compactMutation } =
-      await import("../pi/agent/lib/scaffold/adapter.mjs");
+      await import("../pi/agent/extensions/scaffold/compact-mutation.mjs");
     const result = await scaffoldTasks(
       { operation: "start", feature_id: "F", task_id: "F" },
       { directory: f.dir },

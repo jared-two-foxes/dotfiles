@@ -6,8 +6,8 @@ import {
   reviewEnvironment,
 } from "./retry-policy.mjs";
 import { requireFeatureAuthorization } from "../../lib/delivery-state/feature-authorization.mjs";
+import { issueFeature } from "../../lib/scaffold/adapter.mjs";
 import {
-  issueFeature,
   approvedIssue,
   issueDesignRequirements,
   issueRequirements,

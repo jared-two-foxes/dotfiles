@@ -16,6 +16,7 @@ import {
   scaffoldTasks,
   designReference,
 } from "../pi/agent/lib/scaffold/adapter.mjs";
+import { authorizedScaffoldTasks } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
 import {
   validateFeature,
   inspectFeatureValidation,
@@ -109,7 +110,7 @@ async function fixture(t, legacy = false) {
   t.after(() => fixtureScaffold.delete(dir));
   const call = async (operation, extra = {}) => {
     if (operation === "start") await approveGraph(call);
-    const response = await scaffoldTasks(
+    const response = await authorizedScaffoldTasks(
       { operation, feature_id: "F5", ...extra },
       { directory: dir },
       scaffoldOptions,
