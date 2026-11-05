@@ -39,11 +39,13 @@ test('evaluator repair requires a redesigned issue handoff and the canonical val
     contextUpdates: [{ kind: 'repair_check', checkId: 'CLI', useMeaningfulTestEvaluator: true, reason: 'Invalid evaluator argv' }],
   };
   assert.equal(correctionVerification(previous, repaired), true);
-  const legacy = structuredClone(repaired);
-  legacy.checks[0].successCondition[1] = fileURLToPath(
-    new URL('../pi/agent/extensions/conductor/meaningful-test-condition.mjs', import.meta.url),
-  );
-  assert.equal(correctionVerification(previous, legacy), true);
+  for (const extension of ['conductor', 'execute-and-review']) {
+    const legacy = structuredClone(repaired);
+    legacy.checks[0].successCondition[1] = fileURLToPath(
+      new URL(`../pi/agent/extensions/${extension}/meaningful-test-condition.mjs`, import.meta.url),
+    );
+    assert.equal(correctionVerification(previous, legacy), true);
+  }
   assert.equal(correctionVerification({ ...previous, kind: 'rebase-handoff' }, repaired), false);
   assert.equal(correctionVerification(previous, { ...repaired, contextUpdates: [] }), false);
   for (const alter of [

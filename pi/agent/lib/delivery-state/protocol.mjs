@@ -26,16 +26,20 @@ const requireValue = (ok, message) => {
 };
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const guard = fileURLToPath(new URL("../../extensions/execute-and-review/input-guard.mjs", import.meta.url));
+const guard = fileURLToPath(new URL("./input-guard.mjs", import.meta.url));
 const reviewCondition = {
   program: process.execPath,
-  args: [fileURLToPath(new URL("../../extensions/execute-and-review/review-condition.mjs", import.meta.url))],
+  args: [fileURLToPath(new URL("./review-condition.mjs", import.meta.url))],
 };
-const legacyGuard = fileURLToPath(new URL("../../extensions/conductor/input-guard.mjs", import.meta.url));
-const legacyReviewCondition = {
-  program: process.execPath,
-  args: [fileURLToPath(new URL("../../extensions/conductor/review-condition.mjs", import.meta.url))],
-};
+// Historical paths are receipt identities only. New requests use the local helpers.
+const reviewConditionByGuard = new Map([[guard, reviewCondition]]);
+for (const extension of ["execute-and-review", "conductor"]) {
+  const directory = new URL(`../../extensions/${extension}/`, import.meta.url);
+  reviewConditionByGuard.set(fileURLToPath(new URL("input-guard.mjs", directory)), {
+    program: process.execPath,
+    args: [fileURLToPath(new URL("review-condition.mjs", directory))],
+  });
+}
 
 function guarded(name, program, args, files, guardPath = guard) {
   return {
@@ -133,9 +137,9 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   const first = request.commands[0],
     last = request.commands.at(-1);
   const guardPath = first.args[0];
-  requireValue((guardPath === guard || guardPath === legacyGuard) && last.args[0] === guardPath,
+  const condition = reviewConditionByGuard.get(guardPath);
+  requireValue(condition && last.args[0] === guardPath,
     "Retained Executor/Review invocation mismatch");
-  const condition = guardPath === legacyGuard ? legacyReviewCondition : reviewCondition;
   const executorProgram = JSON.parse(first.args[1]).program;
   const reviewProgram = JSON.parse(last.args[1]).program;
   const execution = executorStep(path.join(directory, "executor.json"), workflow.inputs.execution, executorProgram);

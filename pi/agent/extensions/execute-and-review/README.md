@@ -23,7 +23,9 @@ attempt-chain authentication, Git and Scaffold state, and verified checkpoint
 finalization.
 The library registers no Pi tools. Recovery and feature validation use it
 without loading the Execute and Review extension. Existing receipts retain
-their original command identities and verification rules.
+their original command identities and verification rules. New plans run the input
+guard and success evaluators from the shared library. Older evaluator paths
+forward to that library for inherited check plans.
 
 ## Native Pi installation
 

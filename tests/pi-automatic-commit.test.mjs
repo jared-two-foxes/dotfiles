@@ -516,7 +516,7 @@ test('review circuit preserves edited source, then environment repair reuses val
 
 test('compilation failure, test failure and review finding advance to an authenticated correction and commit', integration, async t => {
   const f = await fixture(t);
-  const validateTests = [process.execPath, new URL('../pi/agent/extensions/execute-and-review/meaningful-test-condition.mjs', import.meta.url).pathname];
+  const validateTests = [process.execPath, new URL('../pi/agent/lib/delivery-state/meaningful-test-condition.mjs', import.meta.url).pathname];
   const readModule = 'const fs=require("fs"), vm=require("vm"), assert=require("assert/strict"); const module={exports:{}}; new vm.Script(fs.readFileSync("source.txt","utf8")).runInNewContext({module});';
   f.args.checks = [
     { name: 'compile', command: [process.execPath, '-e', 'new (require("vm").Script)(require("fs").readFileSync("source.txt","utf8"))'] },

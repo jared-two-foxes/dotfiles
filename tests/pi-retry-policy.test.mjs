@@ -65,7 +65,7 @@ test('recognized Cargo test selection requires positive completed tests, includi
   t.after(() => rm(dir, { recursive: true, force: true }));
   const out = path.join(dir, 'stdout'), err = path.join(dir, 'stderr'); await writeFile(err, '');
   const { fileURLToPath } = await import('node:url');
-  const validator = new URL('../pi/agent/extensions/execute-and-review/meaningful-test-condition.mjs', import.meta.url);
+  const validator = new URL('../pi/agent/lib/delivery-state/meaningful-test-condition.mjs', import.meta.url);
   for (const [output, expected] of [['test result: ok. 0 passed; 0 failed', 1],
     ['running 2 tests', 1], ['test result: ok. 2 passed; 0 failed\ntest result: ok. 0 passed', 0]]) {
     await writeFile(out, output);

@@ -12,4 +12,4 @@ client and registers the agent-facing delivery tools. Use those tools for
 Scaffold-bound work that requires independent review and a verified checkpoint.
 
 The legacy `meaningful-test-condition.mjs` path forwards older retained plans
-to the validator in Execute and Review.
+to the validator in the shared delivery-state library.
