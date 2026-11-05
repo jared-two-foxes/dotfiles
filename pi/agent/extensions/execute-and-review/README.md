@@ -4,33 +4,43 @@
 
 # Pi delivery extension
 
-`index.ts` registers `execute_and_review` and the delivery and recovery tools.
+`index.ts` registers `execute_and_review` and delivery inspection and approval tools.
 The workflow in `delivery.mjs`, `adapter.mjs`, and `pipeline.mjs` owns task
-binding, continuation, verification policy, independent review, and checkpoint
-authorization. `protocol.mjs` prepares the Executor and Review inputs and
-authenticates their delivery evidence.
+binding, continuation, and one execution/check/review pass. `workflow.mjs`
+prepares Executor and Review inputs. Shared verification authenticates their results.
 
 The workflow uses the sibling [Conductor client](../conductor/README.md) to run
 the plan. The Executor and [Review](../review/README.md) clients describe their
 CLI invocations and validate their results. Execute and Review assembles those
-steps and owns authorization, evidence, and checkpointing.
+steps and consumes shared authorization, evidence, and verification contracts.
 
 The sibling `execution-recovery` extension registers handoff, suspension,
-restore, rebase, and checkpoint-recovery tools. `feature-validation` registers
-the final feature gate and its evidence inspection tool. All three import the
-shared library in `pi/agent/lib/delivery-state` for authorization, receipt and
-attempt-chain authentication, Git and Scaffold state, and verified checkpoint
-finalization.
-The library registers no Pi tools. Recovery and feature validation use it
-without loading the Execute and Review extension. Existing receipts retain
-their original command identities and verification rules. New plans run the input
-guard and success evaluators from the shared library. Older evaluator paths
-forward to that library for inherited check plans.
+restore, and rebase tools and implements commit recovery. The `checkpoint`
+extension owns task completion and Git checkpoint creation and registers
+`checkpoint_verified_task`. `feature-validation` registers the final feature
+gate and its evidence inspection tool.
+
+Shared modules have narrower responsibilities.
+
+| Library | Responsibility |
+|---|---|
+| `lib/scaffold` | Issue and feature types and structural request/response validation |
+| `lib/verification` | Check plans, meaningful results, review evidence, attempt chains, and checkpoint history |
+| `lib/evidence` | Immutable receipt retention, lookup, and reference integrity |
+| `lib/git` | Source snapshots, tree/index operations, and tracked-input monitoring |
+| `lib/authorization` | Feature approval and amendment authentication using supplied structures |
+| `lib/delivery-state` | Context transformations, journal anchors, bindings, and retained handoffs |
+
+The Scaffold extension owns CLI invocation and state reads. Execute and Review,
+Recovery, and Checkpoint supply fresh Scaffold data to the shared validators and
+own lifecycle writes. See [the library boundaries](../../lib/README.md).
+New plans run guards and evaluators from `lib/verification`. Historical evaluator
+paths forward to those implementations and remain valid receipt identities.
 
 ## Native Pi installation
 
 Copy `pi/agent/lib/` into the Pi agent home's `lib/` directory. It contains
-delivery state and the Conductor, Executor, Review, and Scaffold CLI integrations.
+shared contracts and the Conductor, Executor, and Review CLI integrations.
 Install the Pi entry points under `extensions/`.
 
 ```
@@ -39,6 +49,7 @@ Install the Pi entry points under `extensions/`.
 ~/.pi/agent/lib/delivery-state/
 ~/.pi/agent/extensions/execute-and-review/
 ~/.pi/agent/extensions/execution-recovery/
+~/.pi/agent/extensions/checkpoint/
 ~/.pi/agent/extensions/feature-validation/
 ~/.pi/agent/extensions/review/
 ~/.pi/agent/extensions/scaffold/
@@ -52,6 +63,7 @@ New-Item -ItemType Directory -Force "$HOME\.pi\agent\lib" | Out-Null
 Copy-Item -Recurse -Force .\pi\agent\lib\* "$HOME\.pi\agent\lib"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\checkpoint "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\scaffold "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\review "$HOME\.pi\agent\extensions"

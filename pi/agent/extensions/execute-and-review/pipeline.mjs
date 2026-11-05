@@ -1,4 +1,4 @@
-import { reusePlan } from "../../lib/delivery-state/stage-reuse.mjs";
+import { reusePlan } from "../../lib/verification/stage-reuse.mjs";
 // One Conductor request, including the final Git commit command. Process receipts
 // make the verified prefix available inside that list, before Conductor returns.
 import path from "node:path";
@@ -13,29 +13,16 @@ import {
   rm,
 } from "node:fs/promises";
 import { isDeepStrictEqual as equal } from "node:util";
-import {
-  validateRunner,
-  runConductor,
-  toolOutput,
-  DEFAULT_TIMEOUT_MS,
-} from "../../lib/conductor/client.mjs";
-import { normalizeWorkflow } from "../../lib/delivery-state/protocol.mjs";
-import {
-  snapshot,
-  retainEvidence,
-  readEvidence,
-  verifiedResult,
-  taskEvidenceReferences,
-} from "../../lib/delivery-state/evidence.mjs";
-import { requireFeatureAuthorization } from "../../lib/scaffold/feature-authorization.mjs";
-import { assertLatestAttempt } from "../../lib/delivery-state/task-chain.mjs";
-import { authenticateTaskEvidence } from "../../lib/delivery-state/task-evidence.mjs";
-import { git } from "../../lib/delivery-state/git-tree.mjs";
-import {
-  reviewEvidence,
-  reviewHandoff,
-  testCounts,
-} from "../../lib/delivery-state/review-evidence.mjs";
+import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
+import { normalizeWorkflow } from "../../lib/verification/workflow.mjs";
+import { snapshot } from "../../lib/git/snapshot.mjs";
+import { retainEvidence, readEvidence, taskEvidenceReferences } from "../../lib/evidence/store.mjs";
+import { verifiedResult } from "../../lib/verification/result.mjs";
+import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
+import { assertLatestAttempt } from "../../lib/verification/attempt-chain.mjs";
+import { authenticateTaskEvidence } from "../../lib/verification/task-evidence.mjs";
+import { git } from "../../lib/git/tree.mjs";
+import { reviewEvidence, reviewHandoff, testCounts } from "../../lib/verification/review-evidence.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 const requireValue = (ok, message) => {

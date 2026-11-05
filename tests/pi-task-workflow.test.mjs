@@ -12,16 +12,11 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
-import {
-  inspectEvidence,
-  digest,
-  snapshot,
-} from "../pi/agent/lib/delivery-state/evidence.mjs";
-import {
-  scaffoldTasks,
-  buildCommand,
-  designReference,
-} from "../pi/agent/lib/scaffold/adapter.mjs";
+import { inspectEvidence } from "../pi/agent/extensions/execute-and-review/inspect-evidence.mjs";
+import { digest } from "../pi/agent/lib/evidence/store.mjs";
+import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { scaffoldTasks, buildCommand } from "../pi/agent/extensions/scaffold/adapter.mjs";
+import { designReference } from "../pi/agent/lib/scaffold/contracts.mjs";
 
 async function executeAndReview(args, context, options) {
   return executeTaskAttempt(args, context, {
@@ -188,7 +183,7 @@ test("one task retains real request/raw response and exposes read-only recovery 
   assert.equal(result.status, "PASSED");
   assert.match(result.evidence.reference, /^pi-evidence:sha256:[a-f0-9]{64}$/);
   const fresh =
-    await import("../pi/agent/lib/delivery-state/evidence.mjs?fresh-session");
+    await import("../pi/agent/extensions/execute-and-review/inspect-evidence.mjs?fresh-session");
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
     directory: f.dir,
   });
@@ -500,7 +495,7 @@ test(
   async (t) => {
     const f = await fixture(t);
     const { invoke } =
-      await import("../pi/agent/lib/scaffold/adapter.mjs");
+      await import("../pi/agent/extensions/scaffold/adapter.mjs");
     const invokeScaffold = async (_program, args, options) =>
       invoke(
         "python3",
@@ -615,7 +610,7 @@ test("existing attempt evidence retains approved local design independently of i
   );
   assert.equal(result.status, "PASSED");
   const fresh =
-    await import("../pi/agent/lib/delivery-state/evidence.mjs?local-design-recovery");
+    await import("../pi/agent/extensions/execute-and-review/inspect-evidence.mjs?local-design-recovery");
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
     directory: f.dir,
   });
@@ -656,7 +651,7 @@ test(
     await chmod(path.join(bin, "scaffold"), 0o755);
     // Invoke the actual CLI explicitly through the existing adapter injection, without changing PATH.
     const { invoke } =
-      await import("../pi/agent/lib/scaffold/adapter.mjs");
+      await import("../pi/agent/extensions/scaffold/adapter.mjs");
     const call = (args) =>
       scaffoldTasks(
         { feature_id: "F3", ...args },
@@ -733,7 +728,7 @@ test(
     );
     // A fresh session has graph and architecture, but no invented task design approval.
     const fresh =
-      await import("../pi/agent/lib/scaffold/adapter.mjs?design-decomposition-recovery");
+      await import("../pi/agent/extensions/scaffold/adapter.mjs?design-decomposition-recovery");
     const recovered = await fresh.scaffoldTasks(
       { operation: "list", feature_id: "F3" },
       { directory: f.dir },

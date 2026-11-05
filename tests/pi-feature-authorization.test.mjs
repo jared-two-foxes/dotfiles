@@ -16,7 +16,7 @@ test(
     const unexpectedVerification = () =>
       assert.fail("Feature verification is outside authorization");
     suite.mock.module(
-      "../pi/agent/lib/delivery-state/feature-verification.mjs",
+      "../pi/agent/lib/verification/feature.mjs",
       {
         namedExports: {
           approvedDesign: (_repository, feature) => feature.context,
@@ -35,7 +35,7 @@ test(
       featureAuthorized,
       requireFeatureAuthorization,
     } =
-      await import("../pi/agent/lib/delivery-state/feature-authorization.mjs");
+      await import("../pi/agent/lib/authorization/feature.mjs");
 
     async function fixture(context) {
       const directory = await mkdtemp(

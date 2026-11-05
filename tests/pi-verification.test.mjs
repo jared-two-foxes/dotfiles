@@ -5,13 +5,10 @@ import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { executeAndReview } from "./helpers/conductor-v2.mjs";
-import {
-  inspectEvidence,
-  readEvidence,
-  retainEvidence,
-} from "../pi/agent/lib/delivery-state/evidence.mjs";
-import { authenticateTaskEvidence } from "../pi/agent/lib/delivery-state/checkpoint.mjs";
-import { verificationChecks } from "../pi/agent/lib/delivery-state/verification.mjs";
+import { inspectEvidence } from "../pi/agent/extensions/execute-and-review/inspect-evidence.mjs";
+import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { authenticateTaskEvidence } from "../pi/agent/extensions/checkpoint/commit.mjs";
+import { verificationChecks } from "../pi/agent/lib/verification/checks.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-selected-verification-"));
@@ -149,7 +146,7 @@ test("forwards named commands in order without build/test defaults or shell inte
       },
     },
   );
-  assert.equal(result.status, "NEEDS_DESIGN");
+  assert.equal(result.status, "NEEDS_DESIGN", JSON.stringify(result));
   assert.equal(calls, 1);
 });
 

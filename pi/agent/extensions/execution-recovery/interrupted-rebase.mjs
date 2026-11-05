@@ -1,26 +1,22 @@
-import { anchorHandoff } from "../../lib/scaffold/delivery-context.mjs";
+import { anchorHandoff } from "../execute-and-review/delivery-context.mjs";
 // Native, explicitly authorized recovery: preserve dirty task work and consumed attempts.
 import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
-import { git, assertNoGitOperation, currentIndexTree } from "../../lib/delivery-state/git-tree.mjs";
-import {
-  snapshot,
-  retainEvidence,
-  readEvidence,
-  validateBinding,
-} from "../../lib/delivery-state/evidence.mjs";
+import { git, assertNoGitOperation, currentIndexTree } from "../../lib/git/tree.mjs";
+import { snapshot } from "../../lib/git/snapshot.mjs";
+import { retainEvidence, readEvidence } from "../../lib/evidence/store.mjs";
+import { validateBinding } from "../../lib/delivery-state/binding.mjs";
 import {
   authenticateAttemptChain,
-  rebasedAttemptTree,
   carriedRequirements,
   readTaskHandoff,
-  recoveryCommitEnvironment,
   assertLatestAttempt,
-} from "../../lib/delivery-state/task-chain.mjs";
+} from "../../lib/verification/attempt-chain.mjs";
+import { rebasedAttemptTree, recoveryCommitEnvironment } from "../../lib/git/recovery-tree.mjs";
 import { reconcileFeature } from "./reconciliation.mjs";
-import { readReconciliation } from "../../lib/delivery-state/reconciliation-evidence.mjs";
-import { planFor } from "../../lib/delivery-state/feature-verification.mjs";
-import { scaffoldTasks } from "../../lib/scaffold/adapter.mjs";
+import { readReconciliation } from "../../lib/verification/reconciliation.mjs";
+import { planFor } from "../../lib/verification/feature.mjs";
+import { scaffoldTasks } from "../scaffold/adapter.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };

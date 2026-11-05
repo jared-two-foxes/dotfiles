@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/lib/scaffold/adapter.mjs';
+import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const feature = { id: 'F1', title: 'Feature', objective: 'Deliver feature', design_ref: 'approved-design@sha', acceptance_criteria: ['Feature works'], baseline: 'a'.repeat(40), branch: 'feature/test' };
@@ -195,7 +195,7 @@ test('requires a current repository and refuses state symlinks', async t => {
 });
 
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
-  const adapter = await readFile(path.join(root, 'pi/agent/lib/scaffold/adapter.mjs'), 'utf8');
+  const adapter = await readFile(path.join(root, 'pi/agent/extensions/scaffold/adapter.mjs'), 'utf8');
   const extension = await readFile(path.join(root, 'pi/agent/extensions/scaffold/index.ts'), 'utf8');
   assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|executeAndReview|invokeConductor|push-ticket|next-step/i);
   assert.match(adapter, /shell: false/);
@@ -233,7 +233,7 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   assert.equal((await call(params('next'))).task.id, 'T1');
   await call(params('start'));
   // Fresh module instance, no previous conversation or adapter memory.
-  const fresh = await import('../pi/agent/lib/scaffold/adapter.mjs?new-session');
+  const fresh = await import('../pi/agent/extensions/scaffold/adapter.mjs?new-session');
   const resumed = await fresh.scaffoldTasks(params('list'), { directory: dir });
   assert.equal(resumed.ok, true);
   assert.equal(resumed.data.feature.tasks.T1.status, 'in_progress');

@@ -1,17 +1,25 @@
-import { anchorHandoff } from '../../lib/scaffold/delivery-context.mjs';
+import { anchorHandoff } from '../execute-and-review/delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
 import { suspensionAnchor } from '../../lib/delivery-state/issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation, currentIndexTree } from '../../lib/delivery-state/git-tree.mjs';
-import { snapshot, readEvidence, retainEvidence, validateBinding } from '../../lib/delivery-state/evidence.mjs';
-import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../../lib/delivery-state/task-chain.mjs';
+import { git, assertNoGitOperation, currentIndexTree } from '../../lib/git/tree.mjs';
+import { snapshot } from '../../lib/git/snapshot.mjs';
+import { readEvidence, retainEvidence } from '../../lib/evidence/store.mjs';
+import { validateBinding } from '../../lib/delivery-state/binding.mjs';
+import {
+  authenticateAttemptChain,
+  assertLatestAttempt,
+  carriedRequirements,
+  readTaskHandoff,
+} from '../../lib/verification/attempt-chain.mjs';
+import { rebasedAttemptTree, recoveryCommitEnvironment } from "../../lib/git/recovery-tree.mjs";
 import { pinHandoff } from './interrupted-rebase.mjs';
-import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
-import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
-import { issueFeature, scaffoldTasks } from '../../lib/scaffold/adapter.mjs';
-import { authenticateIssueMutation } from '../../lib/delivery-state/issue-authorization.mjs';
-import { approvedIssue, issueDesignRequirements } from '../../lib/delivery-state/issue-state.mjs';
+import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
+import { issueFeature, scaffoldTasks } from '../scaffold/adapter.mjs';
+import { authenticateIssueMutation } from '../../lib/verification/issue-mutation.mjs';
+import { approvedIssue, issueDesignRequirements } from '../../lib/scaffold/contracts.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {

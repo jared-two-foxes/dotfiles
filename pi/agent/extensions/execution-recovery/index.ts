@@ -1,18 +1,10 @@
 import { Type } from "typebox";
-import { finalizeVerifiedTask } from "../../lib/scaffold/checkpoint-recovery.mjs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { featureAuthorized } from "../../lib/scaffold/feature-authorization.mjs";
+import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
-import {
-  recoverInterruptedTaskRebase,
-  inspectTaskRebaseRecovery,
-} from "./interrupted-rebase.mjs";
+import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
-import {
-  prepareIssueHandoff,
-  inspectIssueHandoff,
-  inspectIssueAttempt,
-} from "../../lib/scaffold/issue-context.mjs";
+import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
 
 export default function (pi: ExtensionAPI) {
   for (const operation of ["suspend", "resume"] as const)
@@ -306,52 +298,6 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const result = await inspectReconciliation(params, {
         directory: ctx.cwd,
-      });
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-        isError: !result.ok,
-        details: result,
-      };
-    },
-  });
-  pi.registerTool({
-    name: "checkpoint_verified_task",
-    label: "Checkpoint verified task",
-    description:
-      "Recover automatic finalization using a successful implementation receipt: record matching Scaffold completion if needed, then create or recover ONE commit of the exact reviewed tree through Conductor. Never reapply operations or rerun review to recover a failed commit. Uses retained feature authority.",
-    parameters: Type.Object({
-      task: Type.Object({
-        featureId: Type.String(),
-        taskId: Type.String(),
-        designRef: Type.String(),
-      }),
-      evidenceRef: Type.String(),
-      reconciliationRef: Type.Optional(
-        Type.String({
-          description:
-            "Latest successful rebase reconciliation evidence, if history was rewritten",
-        }),
-      ),
-      featureBaseRef: Type.String({
-        description:
-          "Original feature-start SHA, preserved across all task checkpoints",
-      }),
-      branch: Type.String({
-        description: "Explicit authorized feature branch",
-      }),
-      defaultBranch: Type.String({
-        description: "Known actual repository default branch",
-      }),
-      protectedBranches: Type.Array(Type.String(), {
-        description: "All additional known protected branches; [] if none",
-      }),
-    }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await finalizeVerifiedTask(params, {
-        directory: ctx.cwd,
-        abort: signal,
       });
       return {
         content: [
