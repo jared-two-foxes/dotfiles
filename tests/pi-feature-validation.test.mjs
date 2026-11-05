@@ -19,18 +19,18 @@ import {
 import {
   validateFeature,
   inspectFeatureValidation,
-} from "../pi/agent/extensions/execute-and-review/feature.mjs";
+} from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   reconcileFeature,
   inspectReconciliation,
-  readReconciliation,
-} from "../pi/agent/extensions/execute-and-review/recovery/reconciliation.mjs";
+} from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
+import { readReconciliation } from "../pi/agent/extensions/execute-and-review/reconciliation-evidence.mjs";
 import {
   recoverInterruptedTaskRebase,
   inspectTaskRebaseRecovery,
-} from "../pi/agent/extensions/execute-and-review/recovery/interrupted-rebase.mjs";
+} from "../pi/agent/extensions/execution-recovery/interrupted-rebase.mjs";
 import { readEvidence } from "../pi/agent/extensions/execute-and-review/evidence.mjs";
-import { runCheck } from "../pi/agent/extensions/execute-and-review/feature-process.mjs";
+import { runCheck } from "../pi/agent/extensions/feature-validation/feature-process.mjs";
 
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
 import { checkpointHistory } from "../pi/agent/extensions/execute-and-review/history.mjs";

@@ -15,11 +15,12 @@ the plan. The Executor and [Review](../review/README.md) clients describe their
 CLI invocations and validate their results. Execute and Review assembles those
 steps and owns authorization, evidence, and checkpointing.
 
-The `recovery/` module registers issue handoff, suspension, restore, and rebase
-recovery tools. It shares receipt and attempt-chain authentication with normal
-execution. Recovery preserves the consumed attempt number in its handoff.
-Execution verifies the handoff against the current tree before reserving the
-next attempt. Checkpoint-only recovery uses the shared finalization path.
+The sibling `execution-recovery` extension registers handoff, suspension,
+restore, rebase, and checkpoint-recovery tools. `feature-validation` registers
+the final feature gate and its evidence inspection tool. Both use the shared
+receipt, attempt-chain, and authorization helpers in this directory. Normal
+execution authenticates recovery receipts without importing the operations that
+created them.
 
 ## Native Pi installation
 
@@ -29,6 +30,8 @@ internal client module. Pi tool registration lives in the other extensions.
 ```
 ~/.pi/agent/extensions/conductor/
 ~/.pi/agent/extensions/execute-and-review/
+~/.pi/agent/extensions/execution-recovery/
+~/.pi/agent/extensions/feature-validation/
 ~/.pi/agent/extensions/executor/
 ~/.pi/agent/extensions/review/
 ```
@@ -38,6 +41,8 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\executor "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"

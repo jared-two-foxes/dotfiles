@@ -24,10 +24,10 @@ import { issueDesignRequirements } from "../pi/agent/extensions/execute-and-revi
 import {
   suspendIssue,
   resumeIssue,
-} from "../pi/agent/extensions/execute-and-review/recovery/issue-recovery.mjs";
+} from "../pi/agent/extensions/execution-recovery/issue-recovery.mjs";
 import { authenticateAttemptChain } from "../pi/agent/extensions/execute-and-review/task-chain.mjs";
-import { reconcileFeature } from "../pi/agent/extensions/execute-and-review/recovery/reconciliation.mjs";
-import { validateFeature } from "../pi/agent/extensions/execute-and-review/feature.mjs";
+import { reconcileFeature } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
+import { validateFeature } from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   prepareIssueHandoff,
   inspectIssueHandoff,
@@ -1294,7 +1294,7 @@ test(
     );
     f.g("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
     const { inspectFeatureValidation } =
-      await import("../pi/agent/extensions/execute-and-review/feature.mjs");
+      await import("../pi/agent/extensions/feature-validation/feature.mjs");
     const inspected = await inspectFeatureValidation({}, context, options);
     assert.equal(inspected.ok, true);
     assert.equal(inspected.results.length, 0); // approval is never validation evidence

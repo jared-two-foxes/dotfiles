@@ -54,7 +54,7 @@ export async function requireIssueBinding(directory) {
 
 export async function issueExecutionScope(repository, feature, args) {
   const { git } = await import('./git-tree.mjs');
-  const { readReconciliation } = await import('./recovery/reconciliation.mjs');
+  const { readReconciliation } = await import('./reconciliation-evidence.mjs');
   const { checkpointHistory } = await import('./history.mjs');
   const branch = feature.branch, baseline = feature.original_baseline;
   requireValue(git(repository, ['symbolic-ref', '--short', 'HEAD']) === branch && args.baseRef === git(repository, ['rev-parse', 'HEAD']), 'Issue branch/baseline changed');

@@ -8,14 +8,14 @@ import { executeAndCheckpoint, finalizeVerifiedTask } from '../pi/agent/extensio
 import { invoke } from '../pi/agent/extensions/conductor/client.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
 import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/execute-and-review/feature-authorization.mjs';
-import { validateFeature } from '../pi/agent/extensions/execute-and-review/feature.mjs';
+import { validateFeature } from '../pi/agent/extensions/feature-validation/feature.mjs';
 import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/execute-and-review/issue-state.mjs';
 import { digest, readEvidence, retainEvidence } from '../pi/agent/extensions/execute-and-review/evidence.mjs';
 import { authenticateTaskEvidence } from '../pi/agent/extensions/execute-and-review/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
 import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/execute-and-review/issue-context.mjs';
-import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execute-and-review/recovery/issue-recovery.mjs';
+import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execution-recovery/issue-recovery.mjs';
 import { authenticateAttemptChain } from '../pi/agent/extensions/execute-and-review/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE

@@ -3,15 +3,12 @@
  *
  * Sends the
  * conductor.request/v2 command-list protocol to the deterministic Rust Conductor CLI.
- * The feature gate reuses bounded Review without Executor or AI retry logic.
  */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { executeAndCheckpoint, finalizeVerifiedTask } from "./delivery.mjs";
+import { executeAndCheckpoint } from "./delivery.mjs";
 import { executionSummary } from "./protocol.mjs";
-import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
-import { registerRecoveryTools } from "./recovery/tools.ts";
-import { approveFeatureDirection, featureAuthorized } from "./feature-authorization.mjs";
+import { approveFeatureDirection } from "./feature-authorization.mjs";
 import { inspectEvidence } from "./evidence.mjs";
 import { approveDeliveryAmendment } from "./context-amendment.mjs";
 
@@ -39,67 +36,6 @@ export default function (pi: ExtensionAPI) {
           JSON.stringify(scope, null, 2) + "\nProceed with this feature through design, implementation, checks, independent review, local checkpoints and recovery without further routine confirmations? Stop for changes outside this approved direction. Publishing and merging are separate."),
       });
       return { content: [{ type: "text" as const, text: JSON.stringify(result) }], details: result, isError: !result.ok };
-    },
-  });
-  registerRecoveryTools(pi);
-  pi.registerTool({
-    name: "validate_feature",
-    label: "Validate complete feature",
-    description: "Verification-only final gate: authenticate all task checkpoints, run approved full-project checks, independently review the original baseline through final HEAD, retain evidence and record Scaffold validation. Uses the retained overall feature authorization. No implementation, commits, publishing, retries or task selection.",
-    parameters: Type.Object({
-      featureId: Type.String(), designRef: Type.String(), branch: Type.String(),
-      featureBaseRef: Type.String(), headRef: Type.String(),
-      reconciliationRef: Type.Optional(Type.String({ description: "Latest successful rebase reconciliation evidence, if history was rewritten" })),
-      buildCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testSuccessPattern: Type.String({ description: "Approved literal output marker demonstrating meaningful tests ran, e.g. '42 passed'. Never choose a generic exit message." }),
-      integrationChecks: Type.Optional(Type.Array(Type.Object({
-        name: Type.String(), command: Type.Array(Type.String(), { minItems: 1 }), successPattern: Type.String(),
-      }))),
-      checkTimeoutMs: Type.Optional(Type.Integer()),
-      review: Type.Optional(Type.Object({
-        model: Type.Optional(Type.String()), wallClockBudgetSecs: Type.Optional(Type.Integer()),
-        maxTurns: Type.Optional(Type.Integer()), maxCostUsd: Type.Optional(Type.Number()),
-        maxToolCalls: Type.Optional(Type.Integer()), maxRepeatedActions: Type.Optional(Type.Integer()),
-        maxCompletionAttempts: Type.Optional(Type.Integer()),
-      })),
-      resumeEvidenceRef: Type.Optional(Type.String({ description: "Authentic retained successful feature receipt to reconcile with Scaffold; unchanged revision and plan required" })),
-    }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await validateFeature(params, { directory: ctx.cwd, abort: signal }, {
-        authorize: async () => featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
-      });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        isError: result.status === "BLOCKED", details: result };
-    },
-  });
-  pi.registerTool({
-    name: "inspect_feature_validation",
-    label: "Inspect retained feature validation",
-    description: "Read retained feature attempts and authenticate their applicability against current Git, task graph and checkpoint evidence. Historical PASSED may be stale. No checks, reviews or lifecycle writes.",
-    parameters: Type.Object({ featureId: Type.Optional(Type.String()), reference: Type.Optional(Type.String()) }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const result = await inspectFeatureValidation(params, { directory: ctx.cwd });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }], isError: !result.ok, details: result };
-    },
-  });
-  pi.registerTool({
-    name: "checkpoint_verified_task",
-    label: "Checkpoint verified task",
-    description: "Recover automatic finalization using a successful implementation receipt: record matching Scaffold completion if needed, then create or recover ONE commit of the exact reviewed tree through Conductor. Never reapply operations or rerun review to recover a failed commit. Uses retained feature authority.",
-    parameters: Type.Object({
-      task: Type.Object({ featureId: Type.String(), taskId: Type.String(), designRef: Type.String() }),
-      evidenceRef: Type.String(),
-      reconciliationRef: Type.Optional(Type.String({ description: "Latest successful rebase reconciliation evidence, if history was rewritten" })),
-      featureBaseRef: Type.String({ description: "Original feature-start SHA, preserved across all task checkpoints" }),
-      branch: Type.String({ description: "Explicit authorized feature branch" }),
-      defaultBranch: Type.String({ description: "Known actual repository default branch" }),
-      protectedBranches: Type.Array(Type.String(), { description: "All additional known protected branches; [] if none" }),
-    }),
-    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const result = await finalizeVerifiedTask(params, { directory: ctx.cwd, abort: signal });
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-        isError: !result.ok, details: result };
     },
   });
   pi.registerTool({

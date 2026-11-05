@@ -1,15 +1,15 @@
-import { anchorHandoff } from '../delivery-context.mjs';
+import { anchorHandoff } from '../execute-and-review/delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
-import { suspensionAnchor } from './issue-anchors.mjs';
+import { suspensionAnchor } from '../execute-and-review/issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation, currentIndexTree } from '../git-tree.mjs';
-import { snapshot, readEvidence, retainEvidence, validateBinding } from '../evidence.mjs';
-import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../task-chain.mjs';
+import { git, assertNoGitOperation, currentIndexTree } from '../execute-and-review/git-tree.mjs';
+import { snapshot, readEvidence, retainEvidence, validateBinding } from '../execute-and-review/evidence.mjs';
+import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../execute-and-review/task-chain.mjs';
 import { pinHandoff } from './interrupted-rebase.mjs';
-import { checkpointHistory } from '../history.mjs';
-import { readReconciliation } from './reconciliation.mjs';
-import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../issue-state.mjs';
+import { checkpointHistory } from '../execute-and-review/history.mjs';
+import { readReconciliation } from '../execute-and-review/reconciliation-evidence.mjs';
+import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../execute-and-review/issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {

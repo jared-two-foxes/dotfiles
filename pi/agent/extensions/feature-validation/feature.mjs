@@ -2,17 +2,17 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation } from './git-tree.mjs';
-import { reviewEvidence } from './review-evidence.mjs';
-import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from './evidence.mjs';
-import { checkpointHistory } from './history.mjs';
-import { readReconciliation } from './recovery/reconciliation.mjs';
+import { git, assertNoGitOperation } from '../execute-and-review/git-tree.mjs';
+import { reviewEvidence } from '../execute-and-review/review-evidence.mjs';
+import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../execute-and-review/evidence.mjs';
+import { checkpointHistory } from '../execute-and-review/history.mjs';
+import { readReconciliation } from '../execute-and-review/reconciliation-evidence.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../review/adapter.mjs';
-import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from './feature-verification.mjs';
+import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from '../execute-and-review/feature-verification.mjs';
 import { runCheck } from './feature-process.mjs';
-import { obligationsVerified, findingObligations } from './delivery-context.mjs';
-import { authenticateAmendment } from './context-amendment.mjs';
+import { obligationsVerified, findingObligations } from '../execute-and-review/delivery-context.mjs';
+import { authenticateAmendment } from '../execute-and-review/context-amendment.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, fields = {}) => ({ schema: 'pi.feature-validation/v1', status, ...fields });

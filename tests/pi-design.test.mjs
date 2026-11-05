@@ -110,9 +110,12 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   const native = read('pi/agent/extensions/execute-and-review/index.ts');
   assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 2, 'one routine direction confirmation and one explicit material-amendment confirmation');
   assert.match(native, /approveFeatureDirection/);
-  assert.match(native, /registerRecoveryTools\(pi\)/);
-  const recovery = read('pi/agent/extensions/execute-and-review/recovery/tools.ts');
-  assert.equal(((native + recovery).match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
+  assert.doesNotMatch(native, /registerRecoveryTools|name: "(?:validate_feature|checkpoint_verified_task)"/);
+  const recovery = read('pi/agent/extensions/execution-recovery/index.ts');
+  const validation = read('pi/agent/extensions/feature-validation/index.ts');
+  assert.match(recovery, /name: "checkpoint_verified_task"/);
+  assert.match(validation, /name: "validate_feature"/);
+  assert.equal(((native + recovery + validation).match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
   assert.match(read('pi/agent/extensions/execute-and-review/delivery.mjs'), /requireFeatureAuthorization/);
   assert.match(read('pi/agent/extensions/execute-and-review/task-finalization.mjs'), /featureAuthorized/);
   const adapter = read('pi/agent/extensions/execute-and-review/adapter.mjs');
