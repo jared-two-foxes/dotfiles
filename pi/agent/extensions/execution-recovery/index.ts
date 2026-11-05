@@ -1,11 +1,11 @@
 import { Type } from "typebox";
-import { finalizeVerifiedTask } from "../execute-and-review/delivery.mjs";
+import { finalizeVerifiedTask } from "../delivery-state/checkpoint-recovery.mjs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { featureAuthorized } from "../execute-and-review/feature-authorization.mjs";
+import { featureAuthorized } from "../delivery-state/feature-authorization.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
-import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "../execute-and-review/issue-context.mjs";
+import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "../delivery-state/issue-context.mjs";
 
 export default function(pi: ExtensionAPI) {
   for (const operation of ["suspend", "resume"] as const) pi.registerTool({

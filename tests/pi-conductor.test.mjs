@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { authenticateWorkflow, prepareWorkflow } from '../pi/agent/extensions/execute-and-review/protocol.mjs';
+import { authenticateWorkflow, prepareWorkflow } from '../pi/agent/extensions/delivery-state/protocol.mjs';
 import { executeAndReview } from '../pi/agent/extensions/execute-and-review/adapter.mjs';
 import { contract } from './helpers/conductor-contract.mjs';
 contract('Pi', executeAndReview);

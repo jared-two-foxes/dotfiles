@@ -19,7 +19,7 @@ export function meaningfulChecks(checks) {
           successCondition: [
             process.execPath,
             fileURLToPath(
-              new URL("./meaningful-test-condition.mjs", import.meta.url),
+              new URL("../execute-and-review/meaningful-test-condition.mjs", import.meta.url),
             ),
           ],
         }

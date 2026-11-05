@@ -2,7 +2,7 @@
 // Seal their actual command receipts before completing/checkpointing the task.
 import { readFile } from 'node:fs/promises';
 import { sealVerification } from './pipeline.mjs';
-import { commitVerifiedTask } from './task-finalization.mjs';
+import { commitVerifiedTask } from '../delivery-state/task-finalization.mjs';
 let result;
 try {
   const input = JSON.parse(await readFile(process.argv[2], 'utf8'));

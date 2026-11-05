@@ -1,7 +1,7 @@
 import {
   approveFeatureDirection,
   featureAuthorized,
-} from "../pi/agent/extensions/execute-and-review/feature-authorization.mjs";
+} from "../pi/agent/extensions/delivery-state/feature-authorization.mjs";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,31 +9,31 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/extensions/execute-and-review/git-tree.mjs";
+import { git } from "../pi/agent/extensions/delivery-state/git-tree.mjs";
 import {
   snapshot,
   readEvidence,
-} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
+} from "../pi/agent/extensions/delivery-state/evidence.mjs";
 import { executeAndReview, requestView } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/extensions/execute-and-review/checkpoint.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/extensions/delivery-state/checkpoint.mjs";
 import {
   scaffoldTasks,
   designReference,
 } from "../pi/agent/extensions/scaffold/adapter.mjs";
-import { issueDesignRequirements } from "../pi/agent/extensions/execute-and-review/issue-state.mjs";
+import { issueDesignRequirements } from "../pi/agent/extensions/delivery-state/issue-state.mjs";
 import {
   suspendIssue,
   resumeIssue,
 } from "../pi/agent/extensions/execution-recovery/issue-recovery.mjs";
-import { authenticateAttemptChain } from "../pi/agent/extensions/execute-and-review/task-chain.mjs";
+import { authenticateAttemptChain } from "../pi/agent/extensions/delivery-state/task-chain.mjs";
 import { reconcileFeature } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
 import { validateFeature } from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   inspectIssueAttempt,
-} from "../pi/agent/extensions/execute-and-review/issue-context.mjs";
-import { checkpointHistory } from "../pi/agent/extensions/execute-and-review/history.mjs";
+} from "../pi/agent/extensions/delivery-state/issue-context.mjs";
+import { checkpointHistory } from "../pi/agent/extensions/delivery-state/history.mjs";
 const integration = {
   skip: !process.env.SCAFFOLD_SOURCE
     ? "Set SCAFFOLD_SOURCE to recursive-issues Scaffold checkout"
@@ -1058,7 +1058,7 @@ test(
       stateBefore,
     );
     const fresh =
-      await import("../pi/agent/extensions/execute-and-review/issue-context.mjs?fresh");
+      await import("../pi/agent/extensions/delivery-state/issue-context.mjs?fresh");
     assert.equal(
       (
         await fresh.inspectIssueHandoff(
@@ -1248,7 +1248,7 @@ test(
     );
     assert.equal(invocations, 1);
     const fresh =
-      await import("../pi/agent/extensions/execute-and-review/feature-authorization.mjs?fresh-session");
+      await import("../pi/agent/extensions/delivery-state/feature-authorization.mjs?fresh-session");
     assert.equal(
       await fresh.featureAuthorized(f.scope("F"), context, options),
       true,
@@ -1469,7 +1469,7 @@ test(
   integration,
   async (t) => {
     const { approveDeliveryAmendment } =
-      await import("../pi/agent/extensions/execute-and-review/context-amendment.mjs");
+      await import("../pi/agent/extensions/delivery-state/context-amendment.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");
@@ -1534,7 +1534,7 @@ test(
   integration,
   async (t) => {
     const { retainEvidence } =
-      await import("../pi/agent/extensions/execute-and-review/evidence.mjs");
+      await import("../pi/agent/extensions/delivery-state/evidence.mjs");
     for (const count of [5, 70]) {
       const f = await fixture(t);
       await f.approve("F");
@@ -1641,7 +1641,7 @@ test(
   integration,
   async (t) => {
     const { retainEvidence } =
-      await import("../pi/agent/extensions/execute-and-review/evidence.mjs");
+      await import("../pi/agent/extensions/delivery-state/evidence.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");

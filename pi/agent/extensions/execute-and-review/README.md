@@ -17,18 +17,21 @@ steps and owns authorization, evidence, and checkpointing.
 
 The sibling `execution-recovery` extension registers handoff, suspension,
 restore, rebase, and checkpoint-recovery tools. `feature-validation` registers
-the final feature gate and its evidence inspection tool. Both use the shared
-receipt, attempt-chain, and authorization helpers in this directory. Normal
-execution authenticates recovery receipts without importing the operations that
-created them.
+the final feature gate and its evidence inspection tool. All three import the
+sibling `delivery-state` library for authorization, receipt and attempt-chain
+authentication, Git and Scaffold state, and verified checkpoint finalization.
+The library registers no Pi tools. Recovery and feature validation use it
+without loading the Execute and Review extension. Existing receipts retain
+their original command identities and verification rules.
 
 ## Native Pi installation
 
 Install these directories as siblings. The Executor directory supplies an
-internal client module. Pi tool registration lives in the other extensions.
+internal client module. The delivery-state directory supplies shared code.
 
 ```
 ~/.pi/agent/extensions/conductor/
+~/.pi/agent/extensions/delivery-state/
 ~/.pi/agent/extensions/execute-and-review/
 ~/.pi/agent/extensions/execution-recovery/
 ~/.pi/agent/extensions/feature-validation/
@@ -40,6 +43,7 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\delivery-state "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { meaningful } from '../pi/agent/extensions/execute-and-review/feature-verification.mjs';
+import { meaningful } from '../pi/agent/extensions/delivery-state/feature-verification.mjs';
 
 const marker = 'test result: ok. 13 passed; 0 failed';
 const positive = marker + '; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s';

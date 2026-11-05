@@ -7,10 +7,10 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { executeAndCheckpoint } from "./delivery.mjs";
-import { executionSummary } from "./protocol.mjs";
-import { approveFeatureDirection } from "./feature-authorization.mjs";
-import { inspectEvidence } from "./evidence.mjs";
-import { approveDeliveryAmendment } from "./context-amendment.mjs";
+import { executionSummary } from "../delivery-state/protocol.mjs";
+import { approveFeatureDirection } from "../delivery-state/feature-authorization.mjs";
+import { inspectEvidence } from "../delivery-state/evidence.mjs";
+import { approveDeliveryAmendment } from "../delivery-state/context-amendment.mjs";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({

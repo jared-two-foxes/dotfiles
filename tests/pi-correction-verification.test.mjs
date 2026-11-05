@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { correctionVerification, meaningfulTestEvaluator } from '../pi/agent/extensions/execute-and-review/verification.mjs';
+import { correctionVerification, meaningfulTestEvaluator } from '../pi/agent/extensions/delivery-state/verification.mjs';
 
 test('explicit invocation repair retains names/order and semantic conditions for every check', () => {
   const checks = [{ name: 'compile', command: ['cargo', 'check'] },

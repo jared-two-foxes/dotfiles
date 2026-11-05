@@ -26,10 +26,10 @@ const requireValue = (ok, message) => {
 };
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const guard = fileURLToPath(new URL("./input-guard.mjs", import.meta.url));
+const guard = fileURLToPath(new URL("../execute-and-review/input-guard.mjs", import.meta.url));
 const reviewCondition = {
   program: process.execPath,
-  args: [fileURLToPath(new URL("./review-condition.mjs", import.meta.url))],
+  args: [fileURLToPath(new URL("../execute-and-review/review-condition.mjs", import.meta.url))],
 };
 const legacyGuard = fileURLToPath(new URL("../conductor/input-guard.mjs", import.meta.url));
 const legacyReviewCondition = {
