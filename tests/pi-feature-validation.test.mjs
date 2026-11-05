@@ -11,12 +11,12 @@ import {
   featureEvidenceReferences,
 } from "../pi/agent/lib/delivery-state/evidence.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoint.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/lib/scaffold/checkpoint.mjs";
 import {
   scaffoldTasks,
   designReference,
 } from "../pi/agent/lib/scaffold/adapter.mjs";
-import { authorizedScaffoldTasks } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
+import { authenticateIssueMutation } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
 import {
   validateFeature,
   inspectFeatureValidation,
@@ -110,10 +110,10 @@ async function fixture(t, legacy = false) {
   t.after(() => fixtureScaffold.delete(dir));
   const call = async (operation, extra = {}) => {
     if (operation === "start") await approveGraph(call);
-    const response = await authorizedScaffoldTasks(
+    const response = await scaffoldTasks(
       { operation, feature_id: "F5", ...extra },
       { directory: dir },
-      scaffoldOptions,
+      { ...scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation },
     );
     assert.equal(response.ok, true, JSON.stringify(response));
     return response.data;

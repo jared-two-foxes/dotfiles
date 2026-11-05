@@ -15,7 +15,7 @@ import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
 import {
   checkpointVerifiedTask,
   checkpointAuthorization,
-} from "../pi/agent/lib/delivery-state/checkpoint.mjs";
+} from "../pi/agent/lib/scaffold/checkpoint.mjs";
 
 async function executeAndReview(args, context, options) {
   return executeTaskAttempt(args, context, {
@@ -342,7 +342,7 @@ test("interruption before commit and after ref update recovers without duplicate
     });
     assert.equal(result.ok, false);
     const fresh =
-      await import("../pi/agent/lib/delivery-state/checkpoint.mjs?new-session");
+      await import("../pi/agent/lib/scaffold/checkpoint.mjs?new-session");
     const recovered = await fresh.checkpointVerifiedTask(
       args,
       { directory: f.dir },

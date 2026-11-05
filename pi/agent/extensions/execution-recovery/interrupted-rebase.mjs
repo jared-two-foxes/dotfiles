@@ -1,4 +1,4 @@
-import { anchorHandoff } from "../../lib/delivery-state/delivery-context.mjs";
+import { anchorHandoff } from "../../lib/scaffold/delivery-context.mjs";
 // Native, explicitly authorized recovery: preserve dirty task work and consumed attempts.
 import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";

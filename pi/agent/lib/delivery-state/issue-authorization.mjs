@@ -1,13 +1,8 @@
 import { isDeepStrictEqual } from 'node:util';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 
-export function authorizedScaffoldTasks(params, context, options) {
-  return scaffoldTasks(params, context, { ...options, authorizeIssueMutation: authenticateIssueMutation });
-}
-
-async function authenticateIssueMutation(repository, feature, params) {
+export async function authenticateIssueMutation(repository, feature, params) {
   const { snapshot, readEvidence } = await import('./evidence.mjs');
   const current = await snapshot(repository);
   const binding = { featureId: feature.id, taskId: params.task_id, designRef: feature.design_ref };

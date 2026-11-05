@@ -8,14 +8,23 @@ The extension peer dependencies match Pi's native `typebox` convention.
 The shared Scaffold adapter owns the CLI protocol and safe state reads. For an
 issue workflow, it requires a native authorization callback before reopening
 design, recording a checkpoint, or resuming an issue. The tool and internal
-delivery callers use the delivery-state wrapper, which authenticates the evidence.
+delivery callers call `scaffoldTasks` directly with the
+`authenticateIssueMutation` callback, which authenticates the evidence.
 The extension formats the acknowledgement shown to Pi.
 For copy-based installs, include the repository's `pi/agent/lib/` tree under
 the agent home's `lib/` directory.
 
-No application source edits, Conductor invocation, automatic decomposition,
-sequencing, retry loop or second state store live here. Completion evidence is
-caller supplied, not authenticated. See [the Scaffold skill](../../skills/scaffold/SKILL.md)
+`lib/delivery-state/` contains evidence, Git checkpoint and context logic, with no
+Scaffold runtime dependency. Its checkpoint API accepts `{ feature }`, and its
+handoff APIs accept `{ capsule }`; callers must obtain fresh task data. Runtime
+orchestration lives in `lib/scaffold/`: it reads task state, passes data into
+delivery-state functions, and performs lifecycle and journal mutations. Checkpoint
+recording, completion, recovery authorization and post-save handoff refreshes stay
+at that boundary.
+
+The tool itself never edits application source, invokes Conductor, automatically
+decomposes or sequences tasks, retries operations, or owns a second state store.
+Completion evidence is caller supplied, not authenticated. See [the Scaffold skill](../../skills/scaffold/SKILL.md)
 for the design and lifecycle operations, payloads, explicit lifecycle examples and resume guidance.
 The tool schema has an object root for provider compatibility; operation-specific
 required and forbidden arguments are validated again before launching Scaffold.
@@ -24,7 +33,13 @@ Run the mocked adapter tests and existing Conductor/Design regression tests from
 the dotfiles repository root:
 
 ```sh
-node --test tests/pi-scaffold.test.mjs tests/pi-conductor.test.mjs tests/pi-design.test.mjs
+node --test tests/pi-scaffold.test.mjs tests/pi-delivery-state.test.mjs tests/pi-conductor.test.mjs tests/pi-design.test.mjs
+```
+
+Include the isolated runtime-boundary and supplied-data authorization tests with:
+
+```sh
+node --experimental-test-module-mocks --test tests/pi-delivery-state.test.mjs tests/pi-feature-authorization.test.mjs
 ```
 
 Run the real CLI integration against an unmodified Scaffold checkout (Python 3.11+
