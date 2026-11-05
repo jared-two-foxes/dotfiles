@@ -2,7 +2,7 @@
 // the last approved verification command finishes, before Conductor can start its review.
 import { spawn } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
-import { snapshot } from './evidence.mjs';
+import { snapshot } from '../../lib/delivery-state/evidence.mjs';
 const { command, repository, output } = JSON.parse(process.argv[2]);
 try {
   const code = await new Promise((resolve, reject) => {

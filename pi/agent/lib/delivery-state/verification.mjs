@@ -1,6 +1,9 @@
 // Normalize the caller's verification plan; Conductor owns command execution.
 import { fileURLToPath } from "node:url";
-const legacyMeaningfulTestScript = fileURLToPath(new URL("../conductor/meaningful-test-condition.mjs", import.meta.url));
+// Older repair receipts can name either of the former evaluator entry points.
+const historicalTestScripts = ["conductor", "execute-and-review"].map(extension =>
+  fileURLToPath(new URL(`../../extensions/${extension}/meaningful-test-condition.mjs`, import.meta.url)));
+const meaningfulTestScript = fileURLToPath(new URL("./meaningful-test-condition.mjs", import.meta.url));
 export function meaningfulChecks(checks) {
   return checks.map((c) => {
     const runner = c.command[0]
@@ -16,12 +19,7 @@ export function meaningfulChecks(checks) {
     return recognized && !c.successCondition
       ? {
           ...c,
-          successCondition: [
-            process.execPath,
-            fileURLToPath(
-              new URL("./meaningful-test-condition.mjs", import.meta.url),
-            ),
-          ],
+          successCondition: [process.execPath, meaningfulTestScript],
         }
       : c;
   });
@@ -143,7 +141,8 @@ export function correctionVerification(previous, args) {
         const evaluator = meaningfulTestEvaluator(check.command);
         return !!check.successCondition && !!evaluator &&
           (JSON.stringify(next.successCondition) === JSON.stringify(evaluator) ||
-            JSON.stringify(next.successCondition) === JSON.stringify([evaluator[0], legacyMeaningfulTestScript])) &&
+            historicalTestScripts.some(script =>
+              JSON.stringify(next.successCondition) === JSON.stringify([evaluator[0], script]))) &&
           evaluatorRepairs.some(u => u.checkId === check.name && typeof u.reason === "string" && u.reason.trim());
       });
   }

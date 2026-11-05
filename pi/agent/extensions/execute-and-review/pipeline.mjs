@@ -1,18 +1,18 @@
-import { reusePlan } from './stage-reuse.mjs';
+import { reusePlan } from '../../lib/delivery-state/stage-reuse.mjs';
 // One Conductor request, including the final Git commit command. Process receipts
 // make the verified prefix available inside that list, before Conductor returns.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { open, readFile, writeFile, readdir, lstat, realpath, rm } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from '../conductor/client.mjs';
-import { normalizeWorkflow } from './protocol.mjs';
-import { snapshot, retainEvidence, readEvidence, verifiedResult, taskEvidenceReferences } from './evidence.mjs';
-import { requireFeatureAuthorization } from './feature-authorization.mjs';
-import { assertLatestAttempt } from './task-chain.mjs';
-import { authenticateTaskEvidence } from './task-evidence.mjs';
-import { git } from './git-tree.mjs';
-import { reviewEvidence, reviewHandoff, testCounts } from './review-evidence.mjs';
+import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from '../../lib/conductor/client.mjs';
+import { normalizeWorkflow } from '../../lib/delivery-state/protocol.mjs';
+import { snapshot, retainEvidence, readEvidence, verifiedResult, taskEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
+import { requireFeatureAuthorization } from '../../lib/delivery-state/feature-authorization.mjs';
+import { assertLatestAttempt } from '../../lib/delivery-state/task-chain.mjs';
+import { authenticateTaskEvidence } from '../../lib/delivery-state/task-evidence.mjs';
+import { git } from '../../lib/delivery-state/git-tree.mjs';
+import { reviewEvidence, reviewHandoff, testCounts } from '../../lib/delivery-state/review-evidence.mjs';
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };

@@ -1,7 +1,7 @@
 // Stateless adapter: Scaffold alone reads/writes task state. No execution or retries.
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, realpath } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 
@@ -9,6 +9,7 @@ export const OPERATIONS = ['init', 'add', 'list', 'next', 'start', 'complete', '
 const taskActions = new Set(['delivery-record', 'issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume']);
 const inputActions = new Set(['delivery-record', 'init', 'add', 'complete', 'decompose', 'design-record', 'design-reopen', 'checkpoint-record', 'issue-resume']);
 const reasonActions = new Set(['block', 'fail', 'retry']);
+const guardedActions = new Set(['design-reopen', 'checkpoint-record', 'issue-resume']);
 const statuses = new Set(['pending', 'in_progress', 'completed', 'blocked', 'failed', 'decomposed']);
 const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
 const text = x => typeof x === 'string' && !!x.trim() && !x.includes('\0');
@@ -177,6 +178,28 @@ export async function checkStatePaths(repository) {
   }
 }
 
+export async function readScaffoldState(repository) {
+  await checkStatePaths(repository);
+  try { return JSON.parse(await readFile(path.join(repository, '.scaffold', 'tasks.json'), 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+}
+
+async function loadIssueFeature(repository, featureId, designRef, options) {
+  const response = await scaffoldTasks({ operation: 'list', feature_id: featureId },
+    { directory: repository }, options);
+  requireValue(response.ok, 'Cannot inspect issue workflow: ' + response.message);
+  const feature = response.data.feature;
+  requireValue(feature.workflow.kind === 'recursive-issues/v1' && feature.design_ref === designRef,
+    'Issue workflow/design mismatch');
+  return feature;
+}
+
+export async function issueFeature(repository, binding, options = {}) {
+  const stored = await readScaffoldState(repository);
+  if (!stored?.features?.[binding.featureId]?.workflow) return null;
+  return loadIssueFeature(repository, binding.featureId, binding.designRef, options.scaffoldOptions);
+}
+
 /** One explicit lifecycle operation in Pi's current Git repository. Never auto-retry. */
 export async function scaffoldTasks(params, context = {}, options = {}) {
   let stage = 'validation';
@@ -192,11 +215,14 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
     requireValue(git.code === 0, 'Current directory must be inside the target Git repository');
     const repository = await realpath(git.stdout.trim());
     await checkStatePaths(repository);
-    if (['design-reopen', 'checkpoint-record', 'issue-resume'].includes(params.operation)) {
-      const { issueFeature } = await import('../execute-and-review/issue-state.mjs');
-      const feature = await issueFeature(repository, { featureId: params.feature_id,
-        designRef: await featureDesignRef(repository, params.feature_id) }, { scaffoldOptions: options });
-      if (feature) await authenticateIssueMutation(repository, feature, params);
+    if (guardedActions.has(params.operation)) {
+      const stored = await readScaffoldState(repository);
+      const storedFeature = stored?.features?.[params.feature_id];
+      if (storedFeature?.workflow) {
+        const feature = await loadIssueFeature(repository, params.feature_id, storedFeature.design_ref, options);
+        requireValue(typeof options.authorizeIssueMutation === 'function', 'Issue transition requires delivery authorization');
+        await options.authorizeIssueMutation(repository, feature, params);
+      }
     }
     stage = 'command';
     const response = await (options.invokeScaffold ?? invoke)('scaffold', command.args,
@@ -220,51 +246,4 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
       stage === 'response' ? 'INVALID_RESPONSE' : 'EXECUTION_ERROR',
     error.message + (stage === 'command' || stage === 'response' ? '; inspect persisted state before retrying' : ''));
   }
-}
-
-async function featureDesignRef(repository, featureId) {
-  try { return JSON.parse(await (await import('node:fs/promises')).readFile(path.join(repository, '.scaffold/tasks.json'), 'utf8')).features?.[featureId]?.design_ref; }
-  catch (error) { if (error.code === 'ENOENT') return undefined; throw error; }
-}
-async function authenticateIssueMutation(repository, feature, params) {
-  const { snapshot, readEvidence } = await import('../execute-and-review/evidence.mjs');
-  const current = await snapshot(repository);
-  const binding = { featureId: feature.id, taskId: params.task_id, designRef: feature.design_ref };
-  if (params.operation === 'design-reopen') {
-    requireValue(current.clean && !current.bookkeepingVisible, 'Park unfinished source with suspend_issue before reopening design');
-    if (params.payload.reference) {
-      const r = await readEvidence(repository, params.payload.reference);
-      const { git } = await import('../execute-and-review/git-tree.mjs');
-      requireValue(r.kind === 'issue-suspension' && isDeepStrictEqual(r.task, binding) &&
-        r.before.head === current.head && git(repository, ['rev-parse', 'refs/pi-issue-suspensions/' + params.payload.reference.split(':').at(-1) + '^{tree}']) === r.before.tree,
-      'Authenticated saved issue suspension required');
-    }
-  } else if (params.operation === 'issue-resume') {
-    const { readTaskHandoff } = await import('../execute-and-review/task-chain.mjs');
-    const h = await readTaskHandoff(repository, params.payload.handoff, binding);
-    requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
-  } else {
-    const { authenticateTaskEvidence } = await import('../execute-and-review/task-evidence.mjs');
-    const { checkpointProvenance } = await import('../execute-and-review/history.mjs');
-    const { git } = await import('../execute-and-review/git-tree.mjs');
-    const record = await authenticateTaskEvidence(repository, params.payload.reference, binding);
-    const p = checkpointProvenance(repository, params.payload.commit);
-    requireValue(p.evidenceRef === params.payload.reference && p.taskId === params.task_id && p.featureId === feature.id &&
-      p.designRef === feature.design_ref && p.tree === record.after.tree &&
-      git(repository, ['rev-parse', params.payload.commit + '^{tree}']) === record.after.tree &&
-      git(repository, ['show', '-s', '--format=%P', params.payload.commit]) === record.args.baseRef && current.head === params.payload.commit && current.clean,
-    'Authentic current verified checkpoint required');
-  }
-}
-
-// Full responses are validated above and retained by native callers. The model only
-// needs an acknowledgement after a mutation; full list is an explicit diagnostic query.
-export function compactMutation(result) {
-  if (!result.ok || ['list', 'next', 'design-next', 'summary', 'issue', 'select', 'design-select'].includes(result.operation)) return result;
-  const f = result.data.feature, t = result.data.task;
-  return { ok: true, operation: result.operation, feature_id: result.feature_id,
-    ...(result.task_id ? { task_id: result.task_id } : {}),
-    data: { schema_version: 2, phase: f?.workflow.phase,
-      task_revision: f?.task_revision, status: t?.status ?? f?.tasks?.[result.task_id]?.status,
-      next_query: { operation: 'summary', feature_id: result.feature_id } } };
 }

@@ -1,7 +1,7 @@
 // Versioned additive review context. Scaffold owns storage; receipts own execution proof.
 import { isDeepStrictEqual as equal } from "node:util";
 import { createHash } from "node:crypto";
-import { scaffoldTasks } from "../scaffold/adapter.mjs";
+import { issueFeature, scaffoldTasks } from "../scaffold/adapter.mjs";
 import { readEvidence } from "./evidence.mjs";
 import { authenticateAttemptChain } from "./task-chain.mjs";
 import {
@@ -529,7 +529,6 @@ export async function anchorHandoff(
   previous,
   options = {},
 ) {
-  const { issueFeature } = await import("./issue-state.mjs");
   const f = await issueFeature(repository, task, options),
     journal = f?.tasks[task.taskId]?.delivery;
   if (!journal || journal.head === reference) return;

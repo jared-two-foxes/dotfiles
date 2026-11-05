@@ -4,7 +4,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from './git-tree.mjs';
 import { readEvidence, validateBinding, taskEvidenceReferences } from './evidence.mjs';
 import { sameVerification, correctionVerification } from './verification.mjs';
-import { readReconciliation } from './recovery/reconciliation.mjs';
+import { readReconciliation } from './reconciliation-evidence.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -70,7 +70,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     ['PASSED', 'NEEDS_DESIGN', 'BLOCKED'].includes(record.result?.status), 'Invalid task correction receipt');
   if (record.kind === 'issue-zero-handoff') {
     const parked = await readEvidence(repository, record.recovery.suspensionRef);
-    const { suspensionAnchor } = await import('./recovery/issue-anchors.mjs');
+    const { suspensionAnchor } = await import('./issue-anchors.mjs');
     const { checkpointHistory } = await import('./history.mjs');
     requireValue(parked.kind === 'issue-suspension' && parked.attempt === 0 && !parked.args.previousAttempt &&
       parked.args.baseRef === parked.before.head && equal(parked.args.task, binding) &&
@@ -94,7 +94,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record, recovery = record.recovery;
     const parked = await readEvidence(repository, recovery.suspensionRef);
-    const { suspensionAnchor } = await import('./recovery/issue-anchors.mjs');
+    const { suspensionAnchor } = await import('./issue-anchors.mjs');
     await suspensionAnchor(repository, parked, recovery.feature, recovery);
     const { issueDesignRequirements } = await import('./issue-state.mjs');
     const { checkpointHistory } = await import('./history.mjs');

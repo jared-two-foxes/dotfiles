@@ -1,10 +1,9 @@
-import { readFile } from 'node:fs/promises';
 // Durable authority for one approved feature direction. Separate from verification evidence.
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from './git-tree.mjs';
 import { approvedDesign } from './feature-verification.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { readScaffoldState, scaffoldTasks } from '../scaffold/adapter.mjs';
 import { retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from './evidence.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const capabilities = ['design', 'implementation', 'checks', 'independent-review', 'local-checkpoints', 'issue-recovery', 'rebase-verification'];
@@ -48,8 +47,9 @@ export async function featureAuthorized(args, context = {}, options = {}) {
   try { return !!await existing(await scopeFor(args, context, options)); } catch { return false; }
 }
 async function requireRecoverableAuthority(scope) {
-  const state = JSON.parse(await readFile(path.join(scope.repository, '.scaffold/tasks.json'), 'utf8'));
-  requireValue(!Object.values(state.features[scope.featureId].tasks).some(t => t.delivery),
+  const state = await readScaffoldState(scope.repository);
+  const tasks = state?.features?.[scope.featureId]?.tasks;
+  requireValue(tasks && !Object.values(tasks).some(t => t.delivery),
     'EVIDENCE_RECOVERY_REQUIRED: original feature authorization is missing; restore evidence, never reapprove unchanged direction to reset execution history');
 }
 export async function requireFeatureAuthorization(args, context = {}, options = {}) {

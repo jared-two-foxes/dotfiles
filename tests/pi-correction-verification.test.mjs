@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { correctionVerification, meaningfulTestEvaluator } from '../pi/agent/extensions/execute-and-review/verification.mjs';
+import { correctionVerification, meaningfulTestEvaluator } from '../pi/agent/lib/delivery-state/verification.mjs';
 
 test('explicit invocation repair retains names/order and semantic conditions for every check', () => {
   const checks = [{ name: 'compile', command: ['cargo', 'check'] },
@@ -39,11 +39,13 @@ test('evaluator repair requires a redesigned issue handoff and the canonical val
     contextUpdates: [{ kind: 'repair_check', checkId: 'CLI', useMeaningfulTestEvaluator: true, reason: 'Invalid evaluator argv' }],
   };
   assert.equal(correctionVerification(previous, repaired), true);
-  const legacy = structuredClone(repaired);
-  legacy.checks[0].successCondition[1] = fileURLToPath(
-    new URL('../pi/agent/extensions/conductor/meaningful-test-condition.mjs', import.meta.url),
-  );
-  assert.equal(correctionVerification(previous, legacy), true);
+  for (const extension of ['conductor', 'execute-and-review']) {
+    const legacy = structuredClone(repaired);
+    legacy.checks[0].successCondition[1] = fileURLToPath(
+      new URL(`../pi/agent/extensions/${extension}/meaningful-test-condition.mjs`, import.meta.url),
+    );
+    assert.equal(correctionVerification(previous, legacy), true);
+  }
   assert.equal(correctionVerification({ ...previous, kind: 'rebase-handoff' }, repaired), false);
   assert.equal(correctionVerification(previous, { ...repaired, contextUpdates: [] }), false);
   for (const alter of [

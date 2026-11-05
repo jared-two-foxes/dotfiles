@@ -1,38 +1,38 @@
-import { checkEnvironment } from "./stage-reuse.mjs";
-import { prepareDelivery, deliveryEvent } from "./delivery-context.mjs";
+import { checkEnvironment } from "../../lib/delivery-state/stage-reuse.mjs";
+import { prepareDelivery, deliveryEvent } from "../../lib/delivery-state/delivery-context.mjs";
 import {
   stallDecision,
   infrastructureDecision,
   reviewEnvironment,
 } from "./retry-policy.mjs";
-import { requireFeatureAuthorization } from "./feature-authorization.mjs";
+import { requireFeatureAuthorization } from "../../lib/delivery-state/feature-authorization.mjs";
+import { issueFeature } from "../../lib/scaffold/adapter.mjs";
 import {
-  issueFeature,
   approvedIssue,
   issueDesignRequirements,
   issueRequirements,
   requireIssueBinding,
   issueExecutionScope,
-} from "./issue-state.mjs";
-import { verificationChecks, correctionVerification } from "./verification.mjs";
+} from "../../lib/delivery-state/issue-state.mjs";
+import { verificationChecks, correctionVerification } from "../../lib/delivery-state/verification.mjs";
 import {
   prepareWorkflow,
   decodeWorkflow,
   validateWorkflowPreparation,
-} from "./protocol.mjs";
-import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../conductor/client.mjs";
+} from "../../lib/delivery-state/protocol.mjs";
+import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
 import {
   validateBinding,
   snapshot,
   readEvidence,
   retainEvidence,
   verifiedResult,
-} from "./evidence.mjs";
+} from "../../lib/delivery-state/evidence.mjs";
 import {
   readTaskHandoff,
   assertLatestAttempt,
   authenticateAttemptChain,
-} from "./task-chain.mjs";
+} from "../../lib/delivery-state/task-chain.mjs";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";

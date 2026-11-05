@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { reviewChanges } from '../pi/agent/extensions/review/adapter.mjs';
+import { reviewChanges } from '../pi/agent/lib/review/adapter.mjs';
 import { createReviewTool } from '../pi/agent/extensions/review/tool.mjs';
 
 async function fixture(t, variant = 'APPROVED') {

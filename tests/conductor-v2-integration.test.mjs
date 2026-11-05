@@ -5,13 +5,13 @@ import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { executeAndReview } from "../pi/agent/extensions/execute-and-review/adapter.mjs";
-import { authenticateTaskEvidence } from "../pi/agent/extensions/execute-and-review/task-evidence.mjs";
+import { authenticateTaskEvidence } from "../pi/agent/lib/delivery-state/task-evidence.mjs";
 import {
   readEvidence,
   retainEvidence,
   snapshot,
-} from "../pi/agent/extensions/execute-and-review/evidence.mjs";
-import { executionSummary } from "../pi/agent/extensions/execute-and-review/protocol.mjs";
+} from "../pi/agent/lib/delivery-state/evidence.mjs";
+import { executionSummary } from "../pi/agent/lib/delivery-state/protocol.mjs";
 
 import {
   conductorFixture,

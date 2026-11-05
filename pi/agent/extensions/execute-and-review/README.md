@@ -15,30 +15,45 @@ the plan. The Executor and [Review](../review/README.md) clients describe their
 CLI invocations and validate their results. Execute and Review assembles those
 steps and owns authorization, evidence, and checkpointing.
 
-The `recovery/` module registers issue handoff, suspension, restore, and rebase
-recovery tools. It shares receipt and attempt-chain authentication with normal
-execution. Recovery preserves the consumed attempt number in its handoff.
-Execution verifies the handoff against the current tree before reserving the
-next attempt. Checkpoint-only recovery uses the shared finalization path.
+The sibling `execution-recovery` extension registers handoff, suspension,
+restore, rebase, and checkpoint-recovery tools. `feature-validation` registers
+the final feature gate and its evidence inspection tool. All three import the
+shared library in `pi/agent/lib/delivery-state` for authorization, receipt and
+attempt-chain authentication, Git and Scaffold state, and verified checkpoint
+finalization.
+The library registers no Pi tools. Recovery and feature validation use it
+without loading the Execute and Review extension. Existing receipts retain
+their original command identities and verification rules. New plans run the input
+guard and success evaluators from the shared library. Older evaluator paths
+forward to that library for inherited check plans.
 
 ## Native Pi installation
 
-Install these directories as siblings. The Executor directory supplies an
-internal client module. Pi tool registration lives in the other extensions.
+Copy `pi/agent/lib/` into the Pi agent home's `lib/` directory. It contains
+delivery state and the Conductor, Executor, Review, and Scaffold CLI integrations.
+Install the Pi entry points under `extensions/`.
 
 ```
 ~/.pi/agent/extensions/conductor/
+~/.pi/agent/lib/
+~/.pi/agent/lib/delivery-state/
 ~/.pi/agent/extensions/execute-and-review/
-~/.pi/agent/extensions/executor/
+~/.pi/agent/extensions/execution-recovery/
+~/.pi/agent/extensions/feature-validation/
 ~/.pi/agent/extensions/review/
+~/.pi/agent/extensions/scaffold/
 ```
 
 For a dotfiles checkout on Windows, a copy-based installation is:
 
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
+New-Item -ItemType Directory -Force "$HOME\.pi\agent\lib" | Out-Null
+Copy-Item -Recurse -Force .\pi\agent\lib\* "$HOME\.pi\agent\lib"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
-Copy-Item -Recurse -Force .\pi\agent\extensions\executor "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\scaffold "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
 Copy-Item -Recurse -Force .\pi\agent\skills\execute-and-review "$HOME\.pi\agent\skills\execute-and-review"

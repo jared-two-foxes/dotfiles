@@ -1,7 +1,8 @@
 /** Native task persistence only. Pi reasons; Scaffold validates; Conductor executes. */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { scaffoldTasks, compactMutation } from "./adapter.mjs";
+import { authorizedScaffoldTasks } from "../../lib/delivery-state/issue-authorization.mjs";
+import { compactMutation } from "./compact-mutation.mjs";
 
 const text = () => Type.String({ minLength: 1 });
 const definition = {
@@ -44,7 +45,7 @@ export default function (pi: ExtensionAPI) {
     parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const scopedParams = { ...params, operation: params.operation === "next" ? "select" : params.operation === "design-next" ? "design-select" : params.operation };
-      const result = await scaffoldTasks(scopedParams, { directory: ctx.cwd, abort: signal });
+      const result = await authorizedScaffoldTasks(scopedParams, { directory: ctx.cwd, abort: signal });
       return {
         content: [{ type: "text" as const, text: JSON.stringify(compactMutation(result), null, 2) }],
         isError: !result.ok,
