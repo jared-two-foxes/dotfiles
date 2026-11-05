@@ -29,17 +29,19 @@ forward to that library for inherited check plans.
 
 ## Native Pi installation
 
-Install the shared library under `lib/` and the extensions under
-`extensions/`. The Executor directory supplies an internal client module.
+Copy `pi/agent/lib/` into the Pi agent home's `lib/` directory. It contains
+delivery state and the Conductor, Executor, Review, and Scaffold CLI integrations.
+Install the Pi entry points under `extensions/`.
 
 ```
 ~/.pi/agent/extensions/conductor/
+~/.pi/agent/lib/
 ~/.pi/agent/lib/delivery-state/
 ~/.pi/agent/extensions/execute-and-review/
 ~/.pi/agent/extensions/execution-recovery/
 ~/.pi/agent/extensions/feature-validation/
-~/.pi/agent/extensions/executor/
 ~/.pi/agent/extensions/review/
+~/.pi/agent/extensions/scaffold/
 ```
 
 For a dotfiles checkout on Windows, a copy-based installation is:
@@ -47,11 +49,11 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
 New-Item -ItemType Directory -Force "$HOME\.pi\agent\lib" | Out-Null
-Copy-Item -Recurse -Force .\pi\agent\lib\delivery-state "$HOME\.pi\agent\lib"
+Copy-Item -Recurse -Force .\pi\agent\lib\* "$HOME\.pi\agent\lib"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"
-Copy-Item -Recurse -Force .\pi\agent\extensions\executor "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\scaffold "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
 Copy-Item -Recurse -Force .\pi\agent\skills\execute-and-review "$HOME\.pi\agent\skills\execute-and-review"

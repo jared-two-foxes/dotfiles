@@ -4,7 +4,7 @@ import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from './git-tree.mjs';
 import { approvedDesign } from './feature-verification.mjs';
-import { scaffoldTasks } from '../../extensions/scaffold/adapter.mjs';
+import { scaffoldTasks } from '../scaffold/adapter.mjs';
 import { retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from './evidence.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const capabilities = ['design', 'implementation', 'checks', 'independent-review', 'local-checkpoints', 'issue-recovery', 'rebase-verification'];

@@ -1,7 +1,7 @@
 /** Native task persistence only. Pi reasons; Scaffold validates; Conductor executes. */
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { scaffoldTasks, compactMutation } from "./adapter.mjs";
+import { scaffoldTasks, compactMutation } from "../../lib/scaffold/adapter.mjs";
 
 const text = () => Type.String({ minLength: 1 });
 const definition = {

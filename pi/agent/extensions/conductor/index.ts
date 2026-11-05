@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { decodeRunner, runConductor } from "./client.mjs";
+import { decodeRunner, runConductor } from "../../lib/conductor/client.mjs";
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("conductor", {

@@ -6,9 +6,9 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from '../../lib/delivery-state/git-tree.mjs';
 import { snapshot, digest, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
 import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { scaffoldTasks } from '../../lib/scaffold/adapter.mjs';
 import { planFor, meaningful, monitorTrackedInputs, reviewScope } from '../../lib/delivery-state/feature-verification.mjs';
-import { reviewChanges } from '../review/adapter.mjs';
+import { reviewChanges } from '../../lib/review/adapter.mjs';
 import { runCheck } from '../../lib/delivery-state/feature-process.mjs';
 import { completedTasks, mappedCheckpoints, reconciliationRequirements, readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
 

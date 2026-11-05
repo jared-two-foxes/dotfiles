@@ -19,7 +19,7 @@ import { checkpointVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoin
 import {
   scaffoldTasks,
   designReference,
-} from "../pi/agent/extensions/scaffold/adapter.mjs";
+} from "../pi/agent/lib/scaffold/adapter.mjs";
 import { issueDesignRequirements } from "../pi/agent/lib/delivery-state/issue-state.mjs";
 import {
   suspendIssue,
@@ -1174,7 +1174,7 @@ test(
       (await f.call("next")).task.id,
     );
     const { compactMutation } =
-      await import("../pi/agent/extensions/scaffold/adapter.mjs");
+      await import("../pi/agent/lib/scaffold/adapter.mjs");
     const result = await scaffoldTasks(
       { operation: "start", feature_id: "F", task_id: "F" },
       { directory: f.dir },

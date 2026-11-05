@@ -1,10 +1,12 @@
 # Pi Scaffold task adapter
 
-`index.ts` registers one `scaffold_tasks` tool. `adapter.mjs` validates requests,
+`index.ts` registers one `scaffold_tasks` tool. `pi/agent/lib/scaffold/adapter.mjs` validates requests,
 resolves Pi's current Git repository root, and invokes exactly one
 `scaffold tasks OPERATION` command with explicit arguments and JSON stdin. Install
 Scaffold with the schema-v2 issue graph API on Pi's PATH.
 The extension peer dependencies match Pi's native `typebox` convention.
+For copy-based installs, include the repository's `pi/agent/lib/` tree under
+the agent home's `lib/` directory.
 
 No application source edits, Conductor invocation, automatic decomposition,
 sequencing, retry loop or second state store live here. Completion evidence is

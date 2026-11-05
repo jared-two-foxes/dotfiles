@@ -634,7 +634,7 @@ test(
   },
   async (t) => {
     const { scaffoldTasks } =
-      await import("../pi/agent/extensions/scaffold/adapter.mjs");
+      await import("../pi/agent/lib/scaffold/adapter.mjs");
     const f = await fixture(t);
     f.options.scaffoldOptions = {
       invokeScaffold: async (_program, args, ctx) => {

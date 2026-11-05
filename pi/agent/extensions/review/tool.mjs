@@ -1,4 +1,4 @@
-import { reviewChanges } from './adapter.mjs';
+import { reviewChanges } from '../../lib/review/adapter.mjs';
 
 // Separate the tool definition from Pi's loader so it can be tested without Pi.
 export function createReviewTool(Type, reviewer = reviewChanges) {

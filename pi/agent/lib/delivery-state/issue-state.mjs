@@ -1,7 +1,7 @@
 // The native boundary enforces the persisted phase; the agent owns design decisions.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { scaffoldTasks, checkStatePaths } from '../../extensions/scaffold/adapter.mjs';
+import { scaffoldTasks, checkStatePaths } from '../scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 export async function issueFeature(repository, binding, options = {}) {
   await checkStatePaths(repository);

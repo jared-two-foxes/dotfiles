@@ -20,7 +20,7 @@ import {
   decodeWorkflow,
   validateWorkflowPreparation,
 } from "../../lib/delivery-state/protocol.mjs";
-import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../conductor/client.mjs";
+import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
 import {
   validateBinding,
   snapshot,

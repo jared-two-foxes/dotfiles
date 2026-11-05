@@ -1,5 +1,5 @@
 import { readFile, lstat } from 'node:fs/promises';
-import { validateReviewResult } from '../../extensions/review/client.mjs';
+import { validateReviewResult } from '../review/client.mjs';
 
 try {
   const code = Number(process.env.CONDUCTOR_COMMAND_EXIT_CODE);

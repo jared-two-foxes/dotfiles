@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { open, readFile, writeFile, readdir, lstat, realpath, rm } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from '../conductor/client.mjs';
+import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from '../../lib/conductor/client.mjs';
 import { normalizeWorkflow } from '../../lib/delivery-state/protocol.mjs';
 import { snapshot, retainEvidence, readEvidence, verifiedResult, taskEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
 import { requireFeatureAuthorization } from '../../lib/delivery-state/feature-authorization.mjs';

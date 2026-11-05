@@ -20,7 +20,7 @@ import {
 import { reconcileFeature } from "./reconciliation.mjs";
 import { readReconciliation } from "../../lib/delivery-state/reconciliation-evidence.mjs";
 import { planFor } from "../../lib/delivery-state/feature-verification.mjs";
-import { scaffoldTasks } from "../scaffold/adapter.mjs";
+import { scaffoldTasks } from "../../lib/scaffold/adapter.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };

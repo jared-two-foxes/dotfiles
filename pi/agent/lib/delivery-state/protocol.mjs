@@ -16,10 +16,10 @@ import {
   runnerExitCodes,
   toolOutput,
   validateRunner,
-} from "../../extensions/conductor/client.mjs";
+} from "../conductor/client.mjs";
 
-import { executorExecutable, executorInput, executorStep, validateExecutorResult } from "../../extensions/executor/client.mjs";
-import { deliveryReviewSettings, reviewExecutable, reviewRequest, reviewStep, validateReviewResult } from "../../extensions/review/client.mjs";
+import { executorExecutable, executorInput, executorStep, validateExecutorResult } from "../executor/client.mjs";
+import { deliveryReviewSettings, reviewExecutable, reviewRequest, reviewStep, validateReviewResult } from "../review/client.mjs";
 
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);

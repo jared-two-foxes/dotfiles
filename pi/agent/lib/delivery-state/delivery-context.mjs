@@ -1,7 +1,7 @@
 // Versioned additive review context. Scaffold owns storage; receipts own execution proof.
 import { isDeepStrictEqual as equal } from "node:util";
 import { createHash } from "node:crypto";
-import { scaffoldTasks } from "../../extensions/scaffold/adapter.mjs";
+import { scaffoldTasks } from "../scaffold/adapter.mjs";
 import { readEvidence } from "./evidence.mjs";
 import { authenticateAttemptChain } from "./task-chain.mjs";
 import {

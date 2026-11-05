@@ -15,7 +15,7 @@ import { checkpointVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoin
 import {
   scaffoldTasks,
   designReference,
-} from "../pi/agent/extensions/scaffold/adapter.mjs";
+} from "../pi/agent/lib/scaffold/adapter.mjs";
 import {
   validateFeature,
   inspectFeatureValidation,
