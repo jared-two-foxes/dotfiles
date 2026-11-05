@@ -64,14 +64,13 @@ interpret an absent review as approval.
 Use meaningful tests and inspect actual output. Offer full operations on request,
 not by default. Never invoke Conductor/executor/review-cli from Bash or make source edits.
 
-One call performs one attempt. Pi interprets NEEDS_DESIGN, authors corrections
-against the current tree and supplies the continuation reference. There is no per-issue attempt limit; preserve
-criteria/findings, baseline and invocation history. BLOCKED stops the current command
-list, not Pi's diagnosis or an authorized, evidence-bound correction.
-Maximum budgets and provider errors are never review approval. Inspect real receipts;
-PASSED requires successful execution, checks and APPROVED independent review.
-
 ### Recover a failed or blocked attempt
+
+One call performs one attempt. If the attempt returns `NEEDS_DESIGN` or
+`BLOCKED`, inspect the retained evidence and read
+[Retry policy](references/retry-policy.md) before deciding whether to continue.
+For an allowed correction, prepare new operations against the current tree and
+call `execute_and_review` with the continuation reference.
 
 Inspect the returned receipt with `inspect_issue_attempt`; use its minimal `continuation`
 receipt reference and supply new operations against the current source. The prior
@@ -102,13 +101,6 @@ or receipt prechecks, use the returned `prepare_issue_handoff` recovery action
 and inspect the latest attempt before retrying. After `resume_issue` and the
 required `start`, pass its execution receipt `handoffRef` as `previousAttempt`.
 
-Continue a diagnosed, in-scope correction under the existing direction approval.
-Stop for unavailable prerequisites/credentials, unresolved source/index drift,
-resource pauses, infrastructure circuits or evidence-backed DIAGNOSIS_REQUIRED;
-report the concrete blocker with retained evidence. Do not blindly retry unchanged
-commands. On a source/tree mismatch, preserve all work and use the appropriate
-recovery path; never force acceptance of an unrelated tree.
-
 On `stage: COMMITTED`, completion and the local checkpoint are already recorded.
 Automatic finalization follows the receipt ending the active verification/correction loop.
 Use `nextBaseRef` for the next issue; do not repeat completion or commit commands.
@@ -121,7 +113,7 @@ against the original baseline. Inspect actual meaningful checks and final review
 add in-scope corrective issues and revalidate without additional permission prompts.
 
 For missing prerequisites use suspend_issue, design/checkpoint new issues and
-resume_issue with its authenticated handoff. Three attempts mean attempt four next.
+resume_issue with its authenticated handoff.
 Conflicts block with saved work intact. Rebase recovery uses its separate native
 verification and handoff tools. The retained direction covers these actions without
 new confirmations; it does not authorize doing a rebase or arbitrary history changes.
@@ -142,14 +134,6 @@ and obligation removal go through Design approval. Findings have stable IDs;
 propose_addressed is an author claim, never independent verification. Review must
 explicitly assess every open obligation before checkpointing.
 
-Three equivalent substantive outcomes or source-state cycles trigger diagnosis.
-Compile → test → new review findings may demonstrate progress; changed wording,
-check labels or unrelated edits do not. Review infrastructure opens a circuit.
-Measured executable/credential-file repair permits continuation; transient network
-or provider failures permit one caller-driven probe after five minutes. There is
-no sleep loop or scheduler. A depleted invocation allowance pauses until a revised
-budget is supplied and records previous usage.
-
 Empty operations support verification-only continuation. Optional
 checkEnvironmentInputs declares non-secret files, variables and executables for
 pure deterministic checks. Reuse requires exact source/index/HEAD, unchanged
@@ -168,7 +152,4 @@ Material contract amendments use approve_delivery_amendment with the latest rece
 concrete original criterion/finding IDs, replacement and reason. Only that exceptional
 delta requests user confirmation. Apply its returned reference through
 contextUpdates.apply_amendment; originals and invocation history remain retained,
-and replacement behavior requires independent verification. For environment-only
-credential rotation use reviewProbe with empty operations; failed probes are bounded
-and throttled. Oversized review context can resume with an explicit
-reviewContextMaxBytes allowance increase without dropping obligations.
+and replacement behavior requires independent verification.
