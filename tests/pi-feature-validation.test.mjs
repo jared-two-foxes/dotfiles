@@ -24,11 +24,11 @@ import {
   reconcileFeature,
   inspectReconciliation,
   readReconciliation,
-} from "../pi/agent/extensions/execute-and-review/reconciliation.mjs";
+} from "../pi/agent/extensions/execute-and-review/recovery/reconciliation.mjs";
 import {
   recoverInterruptedTaskRebase,
   inspectTaskRebaseRecovery,
-} from "../pi/agent/extensions/execute-and-review/interrupted-rebase.mjs";
+} from "../pi/agent/extensions/execute-and-review/recovery/interrupted-rebase.mjs";
 import { readEvidence } from "../pi/agent/extensions/execute-and-review/evidence.mjs";
 import { runCheck } from "../pi/agent/extensions/execute-and-review/feature-process.mjs";
 

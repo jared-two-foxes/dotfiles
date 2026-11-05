@@ -1,14 +1,14 @@
-import { anchorHandoff } from "./delivery-context.mjs";
+import { anchorHandoff } from "../delivery-context.mjs";
 // Native, explicitly authorized recovery: preserve dirty task work and consumed attempts.
 import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
-import { git, assertNoGitOperation, currentIndexTree } from "./git-tree.mjs";
+import { git, assertNoGitOperation, currentIndexTree } from "../git-tree.mjs";
 import {
   snapshot,
   retainEvidence,
   readEvidence,
   validateBinding,
-} from "./evidence.mjs";
+} from "../evidence.mjs";
 import {
   authenticateAttemptChain,
   rebasedAttemptTree,
@@ -16,10 +16,10 @@ import {
   readTaskHandoff,
   recoveryCommitEnvironment,
   assertLatestAttempt,
-} from "./task-chain.mjs";
+} from "../task-chain.mjs";
 import { reconcileFeature, readReconciliation } from "./reconciliation.mjs";
-import { planFor } from "./feature-verification.mjs";
-import { scaffoldTasks } from "../scaffold/adapter.mjs";
+import { planFor } from "../feature-verification.mjs";
+import { scaffoldTasks } from "../../scaffold/adapter.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };

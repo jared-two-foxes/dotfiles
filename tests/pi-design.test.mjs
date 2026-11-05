@@ -110,7 +110,9 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   const native = read('pi/agent/extensions/execute-and-review/index.ts');
   assert.equal((native.match(/ui\.confirm\(/g) ?? []).length, 2, 'one routine direction confirmation and one explicit material-amendment confirmation');
   assert.match(native, /approveFeatureDirection/);
-  assert.equal((native.match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
+  assert.match(native, /registerRecoveryTools\(pi\)/);
+  const recovery = read('pi/agent/extensions/execute-and-review/recovery/tools.ts');
+  assert.equal(((native + recovery).match(/authorize: async \(\) => featureAuthorized/g) ?? []).length, 4);
   assert.match(read('pi/agent/extensions/execute-and-review/delivery.mjs'), /requireFeatureAuthorization/);
   assert.match(read('pi/agent/extensions/execute-and-review/task-finalization.mjs'), /featureAuthorized/);
   const adapter = read('pi/agent/extensions/execute-and-review/adapter.mjs');

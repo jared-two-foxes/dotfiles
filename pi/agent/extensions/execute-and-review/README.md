@@ -15,6 +15,12 @@ the plan. The Executor and [Review](../review/README.md) clients describe their
 CLI invocations and validate their results. Execute and Review assembles those
 steps and owns authorization, evidence, and checkpointing.
 
+The `recovery/` module registers issue handoff, suspension, restore, and rebase
+recovery tools. It shares receipt and attempt-chain authentication with normal
+execution. Recovery preserves the consumed attempt number in its handoff.
+Execution verifies the handoff against the current tree before reserving the
+next attempt. Checkpoint-only recovery uses the shared finalization path.
+
 ## Native Pi installation
 
 Install these directories as siblings. The Executor directory supplies an
