@@ -1,11 +1,11 @@
 # Pi Scaffold task adapter
 
-`index.ts` registers one `scaffold_tasks` tool. `pi/agent/lib/scaffold/adapter.mjs` validates requests,
+`index.ts` registers one `scaffold_tasks` tool. `pi/agent/extensions/scaffold/adapter.mjs` validates requests,
 resolves Pi's current Git repository root, and invokes the requested
 `scaffold tasks OPERATION` command with explicit arguments and JSON stdin. Install
 Scaffold with the schema-v2 issue graph API on Pi's PATH.
 The extension peer dependencies match Pi's native `typebox` convention.
-The shared Scaffold adapter owns the CLI protocol and safe state reads. For an
+The extension's Scaffold adapter owns the CLI protocol and safe state reads. For an
 issue workflow, it requires a native authorization callback before reopening
 design, recording a checkpoint, or resuming an issue. The tool and internal
 delivery callers call `scaffoldTasks` directly with the
@@ -14,13 +14,11 @@ The extension formats the acknowledgement shown to Pi.
 For copy-based installs, include the repository's `pi/agent/lib/` tree under
 the agent home's `lib/` directory.
 
-`lib/delivery-state/` contains evidence, Git checkpoint and context logic, with no
-Scaffold runtime dependency. Its checkpoint API accepts `{ feature }`, and its
-handoff APIs accept `{ capsule }`; callers must obtain fresh task data. Runtime
-orchestration lives in `lib/scaffold/`: it reads task state, passes data into
-delivery-state functions, and performs lifecycle and journal mutations. Checkpoint
-recording, completion, recovery authorization and post-save handoff refreshes stay
-at that boundary.
+`lib/scaffold/` contains shared types and structural contracts. It exposes no
+CLI, subprocess, or state-file access. The adapter consumes these validators.
+Delivery callers own Scaffold reads and writes and supply fresh structures to
+shared verification and authorization functions. Checkpoint creation lives in
+`extensions/checkpoint/`; handoff coordination lives in Execution Recovery.
 
 The tool itself never edits application source, invokes Conductor, automatically
 decomposes or sequences tasks, retries operations, or owns a second state store.

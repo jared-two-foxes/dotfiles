@@ -3,14 +3,26 @@ import path from 'node:path';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation } from '../../lib/delivery-state/git-tree.mjs';
-import { snapshot, digest, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
-import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
-import { scaffoldTasks } from '../../lib/scaffold/adapter.mjs';
-import { planFor, meaningful, monitorTrackedInputs, reviewScope } from '../../lib/delivery-state/feature-verification.mjs';
+import { git, assertNoGitOperation } from '../../lib/git/tree.mjs';
+import { snapshot } from '../../lib/git/snapshot.mjs';
+import {
+  digest,
+  retainFeatureEvidence,
+  readFeatureEvidence,
+  featureEvidenceReferences,
+} from '../../lib/evidence/store.mjs';
+import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { planFor, meaningful, reviewScope } from '../../lib/verification/feature.mjs';
+import { monitorTrackedInputs } from '../../lib/git/monitor.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
-import { runCheck } from '../../lib/delivery-state/feature-process.mjs';
-import { completedTasks, mappedCheckpoints, reconciliationRequirements, readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
+import { runCheck } from '../feature-validation/check-process.mjs';
+import {
+  completedTasks,
+  mappedCheckpoints,
+  reconciliationRequirements,
+  readReconciliation,
+} from '../../lib/verification/reconciliation.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');

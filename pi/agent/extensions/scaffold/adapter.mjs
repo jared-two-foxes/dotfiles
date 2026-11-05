@@ -1,0 +1,209 @@
+// Scaffold CLI adapter owned by the Scaffold extension.
+import { execFile } from "node:child_process";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import path from "node:path";
+import { validateRequest, validateResponse } from "../../lib/scaffold/contracts.mjs";
+export { OPERATIONS } from "../../lib/scaffold/contracts.mjs";
+
+const text = x => typeof x === "string" && !!x.trim() && !x.includes("\0");
+const object = x => x !== null && typeof x === "object" && !Array.isArray(x);
+const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
+const guardedActions = new Set(["design-reopen", "checkpoint-record", "issue-resume"]);
+
+/** @param {import("../../lib/scaffold/contracts.mjs").ScaffoldRequest} params */
+export function buildCommand(params) {
+  const { operation, feature_id, task_id, reason, payload } = validateRequest(params);
+  const args = ["tasks", operation, "--feature=" + feature_id];
+  if (task_id !== undefined) args.push("--task=" + task_id);
+  if (reason !== undefined) args.push("--reason=" + reason);
+  if (payload !== undefined) args.push("--input", "-");
+  return { args, input: payload === undefined ? "" : JSON.stringify(payload) };
+}
+export function invoke(program, args, { cwd, signal, input = "" }) {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      program,
+      args,
+      {
+        cwd,
+        signal,
+        shell: false,
+        windowsHide: true,
+        encoding: "utf8",
+        timeout: 30000,
+        maxBuffer: 8 * 1024 * 1024,
+      },
+      (error, stdout, stderr) => {
+        if (error && (typeof error.code !== "number" || error.killed))
+          reject(error);
+        else resolve({ code: error?.code ?? 0, stdout, stderr });
+      },
+    );
+    child.stdin.on("error", (error) => {
+      if (error.code !== "EPIPE") {
+        child.kill();
+        reject(error);
+      }
+    });
+    child.stdin.end(input);
+  });
+}
+
+
+// Reject state symlinks, so Scaffold cannot follow them into unrelated directories.
+export async function checkStatePaths(repository) {
+  for (const suffix of [
+    ".scaffold",
+    ".scaffold/tasks.json",
+    ".scaffold/.criteria-stack.lock",
+  ]) {
+    try {
+      const stat = await lstat(path.join(repository, suffix));
+      requireValue(
+        !stat.isSymbolicLink(),
+        "Scaffold state paths must not be symlinks",
+      );
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+}
+
+export async function readScaffoldState(repository) {
+  await checkStatePaths(repository);
+  try {
+    return JSON.parse(
+      await readFile(path.join(repository, ".scaffold", "tasks.json"), "utf8"),
+    );
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function loadIssueFeature(repository, featureId, designRef, options) {
+  const response = await scaffoldTasks(
+    { operation: "list", feature_id: featureId },
+    { directory: repository },
+    options,
+  );
+  requireValue(
+    response.ok,
+    "Cannot inspect issue workflow: " + response.message,
+  );
+  const feature = response.data.feature;
+  requireValue(
+    feature.workflow.kind === "recursive-issues/v1" &&
+      feature.design_ref === designRef,
+    "Issue workflow/design mismatch",
+  );
+  return feature;
+}
+
+export async function issueFeature(repository, binding, options = {}) {
+  const stored = await readScaffoldState(repository);
+  if (!stored?.features?.[binding.featureId]?.workflow) return null;
+  return loadIssueFeature(
+    repository,
+    binding.featureId,
+    binding.designRef,
+    options.scaffoldOptions,
+  );
+}
+
+/** One explicit lifecycle operation in Pi's current Git repository. Never auto-retry. */
+export async function scaffoldTasks(params, context = {}, options = {}) {
+  let stage = "validation";
+  const identity = {
+    operation: params?.operation,
+    feature_id: params?.feature_id,
+    ...(params?.task_id !== undefined ? { task_id: params.task_id } : {}),
+  };
+  const failure = (reason, message, extra = {}) => ({
+    ok: false,
+    ...identity,
+    reason,
+    message,
+    ...extra,
+  });
+  try {
+    const command = buildCommand(params);
+    stage = "repository";
+    requireValue(text(context.directory), "Pi current directory is required");
+    const cwd = await realpath(context.directory);
+    const git = await invoke("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      signal: context.abort,
+    });
+    requireValue(
+      git.code === 0,
+      "Current directory must be inside the target Git repository",
+    );
+    const repository = await realpath(git.stdout.trim());
+    await checkStatePaths(repository);
+    if (guardedActions.has(params.operation)) {
+      const stored = await readScaffoldState(repository);
+      const storedFeature = stored?.features?.[params.feature_id];
+      if (storedFeature?.workflow) {
+        const feature = await loadIssueFeature(
+          repository,
+          params.feature_id,
+          storedFeature.design_ref,
+          options,
+        );
+        requireValue(
+          typeof options.authorizeIssueMutation === "function",
+          "Issue transition requires delivery authorization",
+        );
+        await options.authorizeIssueMutation(repository, feature, params);
+      }
+    }
+    stage = "command";
+    const response = await (options.invokeScaffold ?? invoke)(
+      "scaffold",
+      command.args,
+      { cwd: repository, signal: context.abort, input: command.input },
+    );
+    if (response.code !== 0) {
+      let error;
+      try {
+        error = JSON.parse(response.stderr);
+      } catch {}
+      return failure(
+        "COMMAND_FAILED",
+        "Scaffold command failed; inspect persisted state before retrying",
+        {
+          exit_code: response.code,
+          stderr: response.stderr?.slice(0, 4000),
+          ...(object(error) ? { scaffold_error: error } : {}),
+        },
+      );
+    }
+    stage = "response";
+    let data;
+    try {
+      data = JSON.parse(response.stdout);
+    } catch {
+      return failure(
+        "INVALID_JSON",
+        "Scaffold returned invalid JSON; inspect persisted state before retrying",
+      );
+    }
+    validateResponse(data, params);
+    return { ok: true, ...identity, exit_code: 0, data };
+  } catch (error) {
+    return failure(
+      stage === "validation"
+        ? "INVALID_ARGUMENTS"
+        : error.code === "ENOENT"
+          ? "EXECUTABLE_NOT_FOUND"
+          : stage === "response"
+            ? "INVALID_RESPONSE"
+            : "EXECUTION_ERROR",
+      error.message +
+        (stage === "command" || stage === "response"
+          ? "; inspect persisted state before retrying"
+          : ""),
+    );
+  }
+}

@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { git } from "../pi/agent/lib/delivery-state/git-tree.mjs";
-import { authenticateIssueMutation } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
+import { git } from "../pi/agent/lib/git/tree.mjs";
+import { authenticateIssueMutation } from "../pi/agent/lib/verification/issue-mutation.mjs";
 import {
   prepareIssueHandoff,
   inspectIssueHandoff,
@@ -45,7 +45,7 @@ test("delivery-state has no direct or transitive Scaffold runtime dependency", a
   async function visit(file) {
     if (visited.has(file)) return;
     visited.add(file);
-    assert.equal(file.startsWith(scaffold), false, "Runtime dependency: " + file);
+    assert.equal(file.startsWith(scaffold) && file !== path.join(scaffold, "contracts.mjs"), false, "Runtime dependency: " + file);
     const source = await readFile(file, "utf8");
     const imports = source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)["'](\.[^"']+)["']/g);
     for (const [, specifier] of imports)
@@ -53,7 +53,7 @@ test("delivery-state has no direct or transitive Scaffold runtime dependency", a
   }
   for (const name of await readdir(directory))
     if (name.endsWith(".mjs")) await visit(path.join(directory, name));
-  const issueState = await import("../pi/agent/lib/delivery-state/issue-state.mjs");
+  const issueState = await import("../pi/agent/lib/scaffold/contracts.mjs");
   assert.equal(Object.hasOwn(issueState, "issueMutation"), false);
 });
 
@@ -125,14 +125,14 @@ test("Scaffold callers own reads, writes and post-save freshness checks", {
     "Requires --experimental-test-module-mocks for runtime boundary isolation",
 }, async (suite) => {
   let invoke;
-  suite.mock.module("../pi/agent/lib/scaffold/adapter.mjs", {
+  suite.mock.module("../pi/agent/extensions/scaffold/adapter.mjs", {
     namedExports: {
       scaffoldTasks: (...args) => invoke(...args),
       issueFeature: () => assert.fail("Unexpected full feature lookup"),
     },
   });
-  const runtime = await import("../pi/agent/lib/scaffold/issue-context.mjs");
-  const journalRuntime = await import("../pi/agent/lib/scaffold/delivery-context.mjs");
+  const runtime = await import("../pi/agent/extensions/execution-recovery/issue-context.mjs");
+  const journalRuntime = await import("../pi/agent/extensions/execute-and-review/delivery-context.mjs");
 
   await suite.test("handoff preparation fetches fresh data again after saving", async (t) => {
     const f = await fixture(t);
@@ -191,7 +191,7 @@ test("Scaffold callers own reads, writes and post-save freshness checks", {
     const feature = { id: "F", tasks: { T: { status: "completed" } } };
     const args = { task: { featureId: "F", taskId: "T", designRef: "approved-design" }, evidenceRef: "receipt" };
     let result = { ok: true, commit: "a".repeat(40) };
-    suite.mock.module("../pi/agent/lib/delivery-state/checkpoint.mjs", {
+    suite.mock.module("../pi/agent/extensions/checkpoint/commit.mjs", {
       namedExports: {
         checkpointAuthorization: () => assert.fail("Unexpected authorization factory"),
         checkpointVerifiedTask: async (actualArgs, data, actualContext) => {
@@ -202,7 +202,7 @@ test("Scaffold callers own reads, writes and post-save freshness checks", {
         },
       },
     });
-    const { checkpointVerifiedTask } = await import("../pi/agent/lib/scaffold/checkpoint.mjs");
+    const { checkpointVerifiedTask } = await import("../pi/agent/extensions/checkpoint/scaffold.mjs");
     const calls = [];
     let recordFails = false;
     invoke = async (params, _context, options) => {

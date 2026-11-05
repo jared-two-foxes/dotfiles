@@ -1,50 +1,22 @@
-import { checkEnvironment } from "../../lib/delivery-state/stage-reuse.mjs";
-import {
-  prepareDelivery,
-  deliveryEvent,
-} from "../../lib/scaffold/delivery-context.mjs";
-import {
-  stallDecision,
-  infrastructureDecision,
-  reviewEnvironment,
-} from "./retry-policy.mjs";
-import { requireFeatureAuthorization } from "../../lib/scaffold/feature-authorization.mjs";
-import {
-  issueFeature,
-  readScaffoldState,
-} from "../../lib/scaffold/adapter.mjs";
-import {
-  approvedIssue,
-  issueDesignRequirements,
-  issueRequirements,
-  issueExecutionScope,
-} from "../../lib/delivery-state/issue-state.mjs";
-import {
-  verificationChecks,
-  correctionVerification,
-} from "../../lib/delivery-state/verification.mjs";
-import {
-  prepareWorkflow,
-  decodeWorkflow,
-  validateWorkflowPreparation,
-} from "../../lib/delivery-state/protocol.mjs";
-import {
-  invoke,
-  runConductor,
-  DEFAULT_TIMEOUT_MS,
-} from "../../lib/conductor/client.mjs";
-import {
-  validateBinding,
-  snapshot,
-  readEvidence,
-  retainEvidence,
-  verifiedResult,
-} from "../../lib/delivery-state/evidence.mjs";
+import { checkEnvironment } from "../../lib/verification/stage-reuse.mjs";
+import { prepareDelivery, deliveryEvent } from "./delivery-context.mjs";
+import { stallDecision, infrastructureDecision, reviewEnvironment } from "./retry-policy.mjs";
+import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
+import { issueFeature, readScaffoldState } from "../scaffold/adapter.mjs";
+import { approvedIssue, issueDesignRequirements, issueRequirements } from "../../lib/scaffold/contracts.mjs";
+import { issueExecutionScope } from "../../lib/verification/issue-scope.mjs";
+import { verificationChecks, correctionVerification } from "../../lib/verification/checks.mjs";
+import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from "./workflow.mjs";
+import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
+import { validateBinding } from "../../lib/delivery-state/binding.mjs";
+import { snapshot } from "../../lib/git/snapshot.mjs";
+import { readEvidence, retainEvidence } from "../../lib/evidence/store.mjs";
+import { verifiedResult } from "../../lib/verification/result.mjs";
 import {
   readTaskHandoff,
   assertLatestAttempt,
   authenticateAttemptChain,
-} from "../../lib/delivery-state/task-chain.mjs";
+} from "../../lib/verification/attempt-chain.mjs";
 import { randomUUID } from "node:crypto";
 import { readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -100,14 +72,15 @@ async function git(repository, args, signal) {
 
 async function requireIssueBinding(directory) {
   const state = await readScaffoldState(directory);
-  requireValue(
-    !Object.values(state?.features ?? {}).some(
+  if (
+    Object.values(state?.features ?? {}).some(
       (f) =>
         f.workflow?.kind === "recursive-issues/v1" &&
         f.validation?.status !== "verified",
-    ),
-    "An unfinished issue workflow requires explicit feature/issue binding; complete its design graph first",
-  );
+    )
+  ) {
+    throw new Error("An unfinished issue workflow requires explicit feature/issue binding; complete its design graph first");
+  }
 }
 
 /**

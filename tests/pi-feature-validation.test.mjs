@@ -4,19 +4,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/lib/delivery-state/git-tree.mjs";
-import {
-  snapshot,
-  readFeatureEvidence,
-  featureEvidenceReferences,
-} from "../pi/agent/lib/delivery-state/evidence.mjs";
+import { git } from "../pi/agent/lib/git/tree.mjs";
+import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { readFeatureEvidence, featureEvidenceReferences } from "../pi/agent/lib/evidence/store.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/lib/scaffold/checkpoint.mjs";
-import {
-  scaffoldTasks,
-  designReference,
-} from "../pi/agent/lib/scaffold/adapter.mjs";
-import { authenticateIssueMutation } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
+import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
+import { designReference } from "../pi/agent/lib/scaffold/contracts.mjs";
+import { authenticateIssueMutation } from "../pi/agent/lib/verification/issue-mutation.mjs";
 import {
   validateFeature,
   inspectFeatureValidation,
@@ -25,16 +20,16 @@ import {
   reconcileFeature,
   inspectReconciliation,
 } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
-import { readReconciliation } from "../pi/agent/lib/delivery-state/reconciliation-evidence.mjs";
+import { readReconciliation } from "../pi/agent/lib/verification/reconciliation.mjs";
 import {
   recoverInterruptedTaskRebase,
   inspectTaskRebaseRecovery,
 } from "../pi/agent/extensions/execution-recovery/interrupted-rebase.mjs";
-import { readEvidence } from "../pi/agent/lib/delivery-state/evidence.mjs";
-import { runCheck } from "../pi/agent/lib/delivery-state/feature-process.mjs";
+import { readEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { runCheck } from "../pi/agent/extensions/feature-validation/check-process.mjs";
 
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
-import { checkpointHistory } from "../pi/agent/lib/delivery-state/history.mjs";
+import { checkpointHistory } from "../pi/agent/lib/verification/checkpoint-history.mjs";
 const fixtureScaffold = new Map();
 async function executeAndReview(args, context, options) {
   const scaffoldOptions = fixtureScaffold.get(context.directory);

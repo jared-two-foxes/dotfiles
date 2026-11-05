@@ -1,7 +1,7 @@
 import {
   approveFeatureDirection,
   featureAuthorized,
-} from "../pi/agent/lib/scaffold/feature-authorization.mjs";
+} from "../pi/agent/extensions/scaffold/feature-authorization.mjs";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,32 +9,25 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/lib/delivery-state/git-tree.mjs";
-import {
-  snapshot,
-  readEvidence,
-} from "../pi/agent/lib/delivery-state/evidence.mjs";
+import { git } from "../pi/agent/lib/git/tree.mjs";
+import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { readEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { executeAndReview, requestView } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/lib/scaffold/checkpoint.mjs";
-import {
-  scaffoldTasks,
-  designReference,
-} from "../pi/agent/lib/scaffold/adapter.mjs";
-import { issueDesignRequirements } from "../pi/agent/lib/delivery-state/issue-state.mjs";
-import { authenticateIssueMutation } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
-import {
-  suspendIssue,
-  resumeIssue,
-} from "../pi/agent/extensions/execution-recovery/issue-recovery.mjs";
-import { authenticateAttemptChain } from "../pi/agent/lib/delivery-state/task-chain.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
+import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
+import { designReference } from "../pi/agent/lib/scaffold/contracts.mjs";
+import { issueDesignRequirements } from "../pi/agent/lib/scaffold/contracts.mjs";
+import { authenticateIssueMutation } from "../pi/agent/lib/verification/issue-mutation.mjs";
+import { suspendIssue, resumeIssue } from "../pi/agent/extensions/execution-recovery/issue-recovery.mjs";
+import { authenticateAttemptChain } from "../pi/agent/lib/verification/attempt-chain.mjs";
 import { reconcileFeature } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
 import { validateFeature } from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   inspectIssueAttempt,
-} from "../pi/agent/lib/scaffold/issue-context.mjs";
-import { checkpointHistory } from "../pi/agent/lib/delivery-state/history.mjs";
+} from "../pi/agent/extensions/execution-recovery/issue-context.mjs";
+import { checkpointHistory } from "../pi/agent/lib/verification/checkpoint-history.mjs";
 const integration = {
   skip: !process.env.SCAFFOLD_SOURCE
     ? "Set SCAFFOLD_SOURCE to recursive-issues Scaffold checkout"
@@ -1070,7 +1063,7 @@ test(
       stateBefore,
     );
     const fresh =
-      await import("../pi/agent/lib/scaffold/issue-context.mjs?fresh");
+      await import("../pi/agent/extensions/execution-recovery/issue-context.mjs?fresh");
     assert.equal(
       (
         await fresh.inspectIssueHandoff(
@@ -1260,7 +1253,7 @@ test(
     );
     assert.equal(invocations, 1);
     const fresh =
-      await import("../pi/agent/lib/scaffold/feature-authorization.mjs?fresh-session");
+      await import("../pi/agent/extensions/scaffold/feature-authorization.mjs?fresh-session");
     assert.equal(
       await fresh.featureAuthorized(f.scope("F"), context, options),
       true,
@@ -1481,7 +1474,7 @@ test(
   integration,
   async (t) => {
     const { approveDeliveryAmendment } =
-      await import("../pi/agent/lib/scaffold/context-amendment.mjs");
+      await import("../pi/agent/extensions/execute-and-review/context-amendment.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");
@@ -1546,7 +1539,7 @@ test(
   integration,
   async (t) => {
     const { retainEvidence } =
-      await import("../pi/agent/lib/delivery-state/evidence.mjs");
+      await import("../pi/agent/lib/evidence/store.mjs");
     for (const count of [5, 70]) {
       const f = await fixture(t);
       await f.approve("F");
@@ -1653,7 +1646,7 @@ test(
   integration,
   async (t) => {
     const { retainEvidence } =
-      await import("../pi/agent/lib/delivery-state/evidence.mjs");
+      await import("../pi/agent/lib/evidence/store.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");

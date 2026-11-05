@@ -5,19 +5,12 @@ import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { executeAndReview } from "../pi/agent/extensions/execute-and-review/adapter.mjs";
-import { authenticateTaskEvidence } from "../pi/agent/lib/delivery-state/task-evidence.mjs";
-import {
-  readEvidence,
-  retainEvidence,
-  snapshot,
-} from "../pi/agent/lib/delivery-state/evidence.mjs";
-import { executionSummary } from "../pi/agent/lib/delivery-state/protocol.mjs";
+import { authenticateTaskEvidence } from "../pi/agent/lib/verification/task-evidence.mjs";
+import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { executionSummary } from "../pi/agent/extensions/execute-and-review/workflow.mjs";
 
-import {
-  conductorFixture,
-  executorFixture,
-  reviewFixture,
-} from "./helpers/conductor-executables.mjs";
+import { conductorFixture, executorFixture, reviewFixture } from "./helpers/conductor-executables.mjs";
 
 test("standalone Conductor extension registers and runs a user command", {
   skip: process.platform === "win32" ? "Executable Node fixture uses a POSIX shebang" : false,

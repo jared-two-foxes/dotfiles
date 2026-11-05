@@ -2,9 +2,10 @@
 import path from 'node:path';
 import { lstat, mkdir, readFile, writeFile, realpath, readdir } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation } from './git-tree.mjs';
-import { digest, snapshot, readEvidence, taskEvidenceReferences } from './evidence.mjs';
-import { authenticateAttemptChain, assertLatestAttempt } from './task-chain.mjs';
+import { git, assertNoGitOperation } from '../git/tree.mjs';
+import { digest, readEvidence, taskEvidenceReferences } from '../evidence/store.mjs';
+import { snapshot } from '../git/snapshot.mjs';
+import { authenticateAttemptChain, assertLatestAttempt } from '../verification/attempt-chain.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 async function directory(repository, create = false) {
   const dir = path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'pi-issue-context']));

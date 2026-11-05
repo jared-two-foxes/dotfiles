@@ -2,17 +2,33 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation } from '../../lib/delivery-state/git-tree.mjs';
-import { reviewEvidence } from '../../lib/delivery-state/review-evidence.mjs';
-import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
-import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
-import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
-import { scaffoldTasks, invoke, checkStatePaths } from '../../lib/scaffold/adapter.mjs';
+import { git, assertNoGitOperation } from '../../lib/git/tree.mjs';
+import { reviewEvidence } from '../../lib/verification/review-evidence.mjs';
+import {
+  digest,
+  readEvidence,
+  retainFeatureEvidence,
+  readFeatureEvidence,
+  featureEvidenceReferences,
+} from '../../lib/evidence/store.mjs';
+import { snapshot } from '../../lib/git/snapshot.mjs';
+import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
+import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
-import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from '../../lib/delivery-state/feature-verification.mjs';
-import { runCheck } from '../../lib/delivery-state/feature-process.mjs';
-import { obligationsVerified, findingObligations } from '../../lib/delivery-state/delivery-context.mjs';
-import { authenticateAmendment } from '../../lib/delivery-state/context-amendment.mjs';
+import {
+  planFor,
+  meaningful,
+  approvedDesign,
+  featureRequirements,
+  reviewScope,
+  authenticateFeatureRecord,
+  featureObligationsVerified,
+} from '../../lib/verification/feature.mjs';
+import { monitorTrackedInputs } from '../../lib/git/monitor.mjs';
+import { runCheck } from './check-process.mjs';
+import { obligationsVerified, findingObligations } from '../../lib/verification/obligations.mjs';
+import { authenticateAmendment } from '../../lib/authorization/amendment.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, fields = {}) => ({ schema: 'pi.feature-validation/v1', status, ...fields });

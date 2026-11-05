@@ -1,5 +1,5 @@
 // An issue may stay parked across further authenticated rebases.
-import { readReconciliation } from './reconciliation-evidence.mjs';
+import { readReconciliation } from '../verification/reconciliation.mjs';
 export async function suspensionAnchor(repository, parked, feature, args) {
   const saved = parked.suspension.reconciliationRef ?? null;
   let reference = args.reconciliationRef ?? null;
