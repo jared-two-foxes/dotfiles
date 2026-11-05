@@ -6,6 +6,9 @@ or working-tree changes. It neither applies fixes nor runs builds or tests.
 Implementation still uses Design and `execute_and_review`; standalone approval
 is not evidence of passing tests and cannot replace Conductor verification.
 
+`client.mjs` provides the request, command, and verdict contract used by both
+`review_changes` and the review stage in `execute_and_review`.
+
 ## Native installation
 
 Place the entire `review` directory (including all `.mjs` files and
