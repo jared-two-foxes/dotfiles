@@ -2,7 +2,7 @@ import { checkEnvironment } from "../../lib/delivery-state/stage-reuse.mjs";
 import {
   prepareDelivery,
   deliveryEvent,
-} from "../../lib/delivery-state/delivery-context.mjs";
+} from "../../lib/scaffold/delivery-context.mjs";
 import {
   stallDecision,
   infrastructureDecision,

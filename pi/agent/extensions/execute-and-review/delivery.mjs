@@ -6,9 +6,9 @@ import { executeAndReview, hydrateContinuation } from "./adapter.mjs";
 import { git } from "../../lib/delivery-state/git-tree.mjs";
 import { requireFeatureAuthorization } from "../../lib/scaffold/feature-authorization.mjs";
 import { scaffoldTasks } from "../../lib/scaffold/adapter.mjs";
-import { validateCheckpoint } from "../../lib/delivery-state/checkpoint-recovery.mjs";
+import { validateCheckpoint } from "../../lib/scaffold/checkpoint-recovery.mjs";
 import { runPipeline } from "./pipeline.mjs";
-import { inspectIssueHandoff } from "../../lib/delivery-state/issue-context.mjs";
+import { inspectIssueHandoff } from "../../lib/scaffold/issue-context.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };

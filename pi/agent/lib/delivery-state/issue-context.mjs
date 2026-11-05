@@ -5,18 +5,12 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from './git-tree.mjs';
 import { digest, snapshot, readEvidence, taskEvidenceReferences } from './evidence.mjs';
 import { authenticateAttemptChain, assertLatestAttempt } from './task-chain.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 async function directory(repository, create = false) {
   const dir = path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'pi-issue-context']));
   try { const s = await lstat(dir); requireValue(s.isDirectory() && !s.isSymbolicLink(), 'Unsafe issue handoff directory'); }
   catch (e) { if (e.code !== 'ENOENT' || !create) throw e; await mkdir(dir, { mode: 0o700 }); }
   return dir;
-}
-async function scoped(repository, featureId, taskId, options) {
-  const r = await scaffoldTasks({ operation: 'issue', feature_id: featureId, task_id: taskId },
-    { directory: repository }, options.scaffoldOptions);
-  requireValue(r.ok, r.message ?? 'Cannot inspect issue'); return r.data.context;
 }
 async function attempt(repository, binding) {
   const receipts = [];
@@ -52,12 +46,13 @@ function notes(value = {}) {
     (Array.isArray(value[k]) && value[k].length <= 32 && value[k].every(x => typeof x === 'string' && x.length <= 1000)), 'Invalid handoff notes');
   requireValue(JSON.stringify(value).length <= 12000, 'Handoff notes exceed 12000 characters'); return value;
 }
-export async function prepareIssueHandoff(args, context = {}, options = {}) {
+export async function prepareIssueHandoff(args, { capsule } = {}, context = {}) {
   let reference;
   try {
     const repository = await realpath(git(context.directory, ['rev-parse', '--show-toplevel']));
     await assertNoGitOperation(repository); context.abort?.throwIfAborted();
-    const capsule = await scoped(repository, args.featureId, args.taskId, options);
+    requireValue(capsule?.feature?.id === args.featureId && capsule.issue?.id === args.taskId,
+      'Matching scoped issue context required');
     const branch = git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
     requireValue(branch === capsule.feature.branch, 'Current branch differs from this feature; inspect before preparing context');
     const before = await snapshot(repository);
@@ -70,49 +65,52 @@ export async function prepareIssueHandoff(args, context = {}, options = {}) {
     const bytes = JSON.stringify(record), hash = digest(bytes);
     await writeFile(path.join(await directory(repository, true), hash + '.json'), bytes, { flag: 'wx', mode: 0o600 });
     reference = 'pi-issue-context:sha256:' + hash;
-    const result = await inspectIssueHandoff({ reference }, context, options);
-    requireValue(result.ok && result.applicable, result.message ?? result.reason ?? 'Context changed while saving handoff');
-    return result;
+    return { ok: true, reference };
   } catch (e) { return { ok: false, reference, message: e.message }; }
 }
-export async function inspectIssueHandoff(args, context = {}, options = {}) {
-  try {
-    const repository = await realpath(git(context.directory, ['rev-parse', '--show-toplevel']));
-    if (!args.reference) {
-      requireValue(typeof args.featureId === 'string' && typeof args.taskId === 'string', 'Supply a reference or explicit featureId/taskId');
-      const dir = await directory(repository), candidates = [];
-      for (const name of await readdir(dir)) {
-        if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
-        const file = path.join(dir, name), stat = await lstat(file);
-        requireValue(stat.isFile() && !stat.isSymbolicLink(), 'Unsafe issue handoff file');
-        const bytes = await readFile(file, 'utf8');
-        requireValue(digest(bytes) === name.slice(0, -5), 'Issue handoff digest mismatch');
-        const r = JSON.parse(bytes);
-        if (r.binding?.featureId === args.featureId && r.binding?.taskId === args.taskId)
-          candidates.push({ reference: 'pi-issue-context:sha256:' + name.slice(0, -5), time: r.recorded_at });
-      }
-      requireValue(candidates.length, 'No saved issue handoff; prepare one from current state');
-      candidates.sort((a, b) => b.time.localeCompare(a.time) || b.reference.localeCompare(a.reference));
-      return inspectIssueHandoff({ reference: candidates[0].reference }, context, options);
+export async function readIssueHandoff(args, context = {}) {
+  const repository = await realpath(git(context.directory, ['rev-parse', '--show-toplevel']));
+  if (!args.reference) {
+    requireValue(typeof args.featureId === 'string' && typeof args.taskId === 'string', 'Supply a reference or explicit featureId/taskId');
+    const dir = await directory(repository), candidates = [];
+    for (const name of await readdir(dir)) {
+      if (!/^[a-f0-9]{64}\.json$/.test(name)) continue;
+      const file = path.join(dir, name), stat = await lstat(file);
+      requireValue(stat.isFile() && !stat.isSymbolicLink(), 'Unsafe issue handoff file');
+      const bytes = await readFile(file, 'utf8');
+      requireValue(digest(bytes) === name.slice(0, -5), 'Issue handoff digest mismatch');
+      const r = JSON.parse(bytes);
+      if (r.binding?.featureId === args.featureId && r.binding?.taskId === args.taskId)
+        candidates.push({ reference: 'pi-issue-context:sha256:' + name.slice(0, -5), time: r.recorded_at });
     }
-    const match = /^pi-issue-context:sha256:([a-f0-9]{64})$/.exec(args.reference ?? '');
-    requireValue(match, 'Invalid issue handoff reference');
-    const file = path.join(await directory(repository), match[1] + '.json');
-    const stat = await lstat(file); requireValue(stat.isFile() && !stat.isSymbolicLink(), 'Unsafe issue handoff file');
-    const bytes = await readFile(file, 'utf8'); requireValue(digest(bytes) === match[1], 'Issue handoff digest mismatch');
-    const record = JSON.parse(bytes);
-    requireValue(record.schema === 'pi.issue-context/v1' && record.repository === repository, 'Issue handoff repository/schema mismatch');
+    requireValue(candidates.length, 'No saved issue handoff; prepare one from current state');
+    candidates.sort((a, b) => b.time.localeCompare(a.time) || b.reference.localeCompare(a.reference));
+    return readIssueHandoff({ reference: candidates[0].reference }, context);
+  }
+  const match = /^pi-issue-context:sha256:([a-f0-9]{64})$/.exec(args.reference ?? '');
+  requireValue(match, 'Invalid issue handoff reference');
+  const file = path.join(await directory(repository), match[1] + '.json');
+  const stat = await lstat(file); requireValue(stat.isFile() && !stat.isSymbolicLink(), 'Unsafe issue handoff file');
+  const bytes = await readFile(file, 'utf8'); requireValue(digest(bytes) === match[1], 'Issue handoff digest mismatch');
+  const record = JSON.parse(bytes);
+  requireValue(record.schema === 'pi.issue-context/v1' && record.repository === repository, 'Issue handoff repository/schema mismatch');
+  return { reference: args.reference, record };
+}
+export async function inspectIssueHandoff(args, { capsule } = {}, context = {}) {
+  try {
+    const { reference, record } = await readIssueHandoff(args, context);
+    const repository = record.repository;
     try {
       await assertNoGitOperation(repository); context.abort?.throwIfAborted();
-      const current = await scoped(repository, record.binding.featureId, record.binding.taskId, options);
-      requireValue(equal(current, record.capsule), 'Graph/design/lifecycle changed; prepare a fresh issue handoff');
+      requireValue(capsule, 'Current scoped issue context required');
+      requireValue(equal(capsule, record.capsule), 'Graph/design/lifecycle changed; prepare a fresh issue handoff');
       requireValue(git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']) === record.git_branch, 'Feature branch changed; prepare a fresh issue handoff');
       requireValue(equal(await snapshot(repository), record.git), 'Git source, index or HEAD changed; prepare a fresh issue handoff');
       requireValue(equal(await attempt(repository, record.binding), record.attempt), 'Attempt chain changed; prepare a fresh issue handoff');
-      return { ok: true, applicable: true, reference: args.reference, handoff: record };
+      return { ok: true, applicable: true, reference, handoff: record };
     } catch (e) {
       // Stale records are inspectable by reference, but are not fed back as current context.
-      return { ok: true, applicable: false, reference: args.reference, reason: e.message,
+      return { ok: true, applicable: false, reference, reason: e.message,
         refresh: { tool: 'prepare_issue_handoff', featureId: record.binding.featureId, taskId: record.binding.taskId } };
     }
   } catch (e) { return { ok: false, message: e.message }; }

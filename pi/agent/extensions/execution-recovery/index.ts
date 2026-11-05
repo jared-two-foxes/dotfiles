@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { finalizeVerifiedTask } from "../../lib/delivery-state/checkpoint-recovery.mjs";
+import { finalizeVerifiedTask } from "../../lib/scaffold/checkpoint-recovery.mjs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../../lib/scaffold/feature-authorization.mjs";
 import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
@@ -12,7 +12,7 @@ import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   inspectIssueAttempt,
-} from "../../lib/delivery-state/issue-context.mjs";
+} from "../../lib/scaffold/issue-context.mjs";
 
 export default function (pi: ExtensionAPI) {
   for (const operation of ["suspend", "resume"] as const)

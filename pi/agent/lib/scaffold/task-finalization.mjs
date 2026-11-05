@@ -1,20 +1,19 @@
 // Conductor's post-review Git commit command. It consumes an immutable successful
 // receipt; never applies source changes or reruns implementation/review.
-import { authenticateTaskEvidence } from "./task-evidence.mjs";
+import { authenticateTaskEvidence } from "../delivery-state/task-evidence.mjs";
 import {
   requireFeatureAuthorization,
   featureAuthorized,
-} from "../scaffold/feature-authorization.mjs";
+} from "./feature-authorization.mjs";
 import { checkpointVerifiedTask } from "./checkpoint.mjs";
-import { snapshot } from "./evidence.mjs";
-import { assertLatestAttempt } from "./task-chain.mjs";
+import { snapshot } from "../delivery-state/evidence.mjs";
+import { assertLatestAttempt } from "../delivery-state/task-chain.mjs";
 import {
-  issueMutation,
   issueExecutionScope,
   issueDesignRequirements,
-} from "./issue-state.mjs";
-import { scaffoldTasks } from "../scaffold/adapter.mjs";
-import { git, assertNoGitOperation } from "./git-tree.mjs";
+} from "../delivery-state/issue-state.mjs";
+import { scaffoldTasks } from "./adapter.mjs";
+import { git, assertNoGitOperation } from "../delivery-state/git-tree.mjs";
 import path from "node:path";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -87,21 +86,25 @@ export async function commitVerifiedTask(args, context = {}, options = {}) {
         "Source changed after review; task not completed",
       );
       await issueExecutionScope(repository, feature, record.args);
-      await issueMutation(
-        repository,
-        args.task,
-        "complete",
+      const completed = await scaffoldTasks(
         {
+          operation: "complete",
           feature_id: args.task.featureId,
           task_id: args.task.taskId,
-          result: "PASSED",
-          source: "conductor",
-          reference: args.evidenceRef,
-          summary:
-            "Requested checks and independent review passed; automatic verified checkpoint follows",
+          payload: {
+            feature_id: args.task.featureId,
+            task_id: args.task.taskId,
+            result: "PASSED",
+            source: "conductor",
+            reference: args.evidenceRef,
+            summary:
+              "Requested checks and independent review passed; automatic verified checkpoint follows",
+          },
         },
-        options,
+        { ...context, directory: repository },
+        options.scaffoldOptions,
       );
+      requireValue(completed.ok, completed.message ?? "Issue completion failed");
     }
     const checkpoint = await checkpointVerifiedTask(
       { ...args, authorizationMode: "feature" },

@@ -13,7 +13,7 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
-import { finalizeVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoint-recovery.mjs";
+import { finalizeVerifiedTask } from "../pi/agent/lib/scaffold/checkpoint-recovery.mjs";
 import { invoke } from "../pi/agent/lib/conductor/client.mjs";
 import {
   scaffoldTasks,
@@ -43,7 +43,7 @@ import { approveGraph } from "./helpers/issue-plan.mjs";
 import {
   inspectIssueAttempt,
   prepareIssueHandoff,
-} from "../pi/agent/lib/delivery-state/issue-context.mjs";
+} from "../pi/agent/lib/scaffold/issue-context.mjs";
 import {
   suspendIssue,
   resumeIssue,

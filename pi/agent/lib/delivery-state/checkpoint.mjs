@@ -1,4 +1,3 @@
-import { issueMutation } from './issue-state.mjs';
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 export { authenticateTaskEvidence } from './task-evidence.mjs';
@@ -8,7 +7,6 @@ import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { git, implementationTree, withTreeIndex, currentIndexTree, assertNoGitOperation } from './git-tree.mjs';
 import { validateBinding, snapshot } from './evidence.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -44,7 +42,7 @@ function verifiedIndex(repository, baseline, index, verified) {
     git(repository, ['ls-tree', '-z', verified, '--', name]));
 }
 
-export async function checkpointVerifiedTask(args, context = {}, options = {}) {
+export async function checkpointVerifiedTask(args, { feature } = {}, context = {}, options = {}) {
   let lock, lockPath, repository;
   try {
     context.abort?.throwIfAborted();
@@ -64,10 +62,8 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
-    const state = await scaffoldTasks({ operation: 'list', feature_id: args.task.featureId }, { directory: repository }, options.scaffoldOptions);
-    const feature = state.data?.feature;
     const task = feature?.tasks?.[args.task.taskId];
-    requireValue(state.ok && feature.design_ref === args.task.designRef && task?.status === 'completed' &&
+    requireValue(feature?.id === args.task.featureId && feature.design_ref === args.task.designRef && task?.status === 'completed' &&
       task.history.some(h => h.evidence?.reference === args.evidenceRef && h.evidence?.source === 'conductor' &&
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
@@ -173,7 +169,6 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
       git(repository, ['update-ref', '-d', pendingRef, commit]);
       git(repository, ['update-ref', '-d', pendingIndexRef]);
     }
-    await issueMutation(repository, args.task, 'checkpoint-record', { commit, reference: args.evidenceRef }, options);
     return { ok: true, ...provenance, commit, recovered, nextBaseRef: commit };
   } catch (error) {
     return { ok: false, reason: 'CHECKPOINT_BLOCKED', message: error.message,

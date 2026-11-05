@@ -1,5 +1,4 @@
 // The native boundary enforces the persisted phase; the agent owns design decisions.
-import { authorizedScaffoldTasks } from "./issue-authorization.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
@@ -38,27 +37,6 @@ export function issueRequirements(task, additional) {
   ].filter((text) => !additional.includes(text));
   return additional + (missing.length ? "\n\n" + missing.join("\n") : "");
 }
-export async function issueMutation(
-  repository,
-  binding,
-  operation,
-  payload,
-  options = {},
-) {
-  const response = await authorizedScaffoldTasks(
-    {
-      operation,
-      feature_id: binding.featureId,
-      task_id: binding.taskId,
-      payload,
-    },
-    { directory: repository },
-    options.scaffoldOptions,
-  );
-  requireValue(response.ok, response.message ?? "Issue transition failed");
-  return response.data.feature;
-}
-
 export async function issueExecutionScope(repository, feature, args) {
   const { git } = await import("./git-tree.mjs");
   const { readReconciliation } = await import("./reconciliation-evidence.mjs");

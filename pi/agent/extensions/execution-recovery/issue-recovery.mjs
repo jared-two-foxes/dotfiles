@@ -1,4 +1,4 @@
-import { anchorHandoff } from '../../lib/delivery-state/delivery-context.mjs';
+import { anchorHandoff } from '../../lib/scaffold/delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
 import { suspensionAnchor } from '../../lib/delivery-state/issue-anchors.mjs';
 import path from 'node:path';
@@ -9,8 +9,9 @@ import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, reb
 import { pinHandoff } from './interrupted-rebase.mjs';
 import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
 import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
-import { issueFeature } from '../../lib/scaffold/adapter.mjs';
-import { approvedIssue, issueDesignRequirements, issueMutation } from '../../lib/delivery-state/issue-state.mjs';
+import { issueFeature, scaffoldTasks } from '../../lib/scaffold/adapter.mjs';
+import { authenticateIssueMutation } from '../../lib/delivery-state/issue-authorization.mjs';
+import { approvedIssue, issueDesignRequirements } from '../../lib/delivery-state/issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {
@@ -113,7 +114,11 @@ export async function suspendIssue(args, context = {}, options = {}) {
       git(repository, ['update-ref', stashRef, existing, '0'.repeat(40)]);
     }
     requireValue((await snapshot(repository)).clean && git(repository, ['rev-parse', 'HEAD']) === record.before.head, 'Parking did not leave a clean baseline');
-    await issueMutation(repository, args.task, 'design-reopen', { reason: saved.reason, reference: suspensionRef }, options);
+    const reopened = await scaffoldTasks({
+      operation: 'design-reopen', feature_id: args.task.featureId, task_id: args.task.taskId,
+      payload: { reason: saved.reason, reference: suspensionRef },
+    }, { ...context, directory: repository }, { ...options.scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation });
+    requireValue(reopened.ok, reopened.message ?? 'Issue design transition failed');
     return { status: 'DESIGN', suspensionRef, consumedAttempts: record.attempt,
       message: 'Issue changes retained; design the new issues and approve the graph before implementation' };
   } catch (error) { return { status: 'BLOCKED', message: error.message, suspensionRef, repository }; }
@@ -150,7 +155,11 @@ export async function resumeIssue(args, context = {}, options = {}) {
       const h = await readTaskHandoff(repository, handoffRef, args.task);
       requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === args.suspensionRef &&
         (h.recovery.reconciliationRef ?? null) === (args.reconciliationRef ?? null) && equal(await snapshot(repository), h.after), 'Stale issue handoff');
-      await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
+      const resumed = await scaffoldTasks({
+        operation: 'issue-resume', feature_id: args.task.featureId, task_id: args.task.taskId,
+        payload: { reference: args.suspensionRef, handoff: handoffRef },
+      }, { ...context, directory: repository }, { ...options.scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation });
+      requireValue(resumed.ok, resumed.message ?? 'Issue restore transition failed');
       await anchorHandoff(repository, args.task, handoffRef, parked.args.previousAttempt, options);
       const { input, ...resume } = h.args;
       return { status: 'READY', handoffRef, consumedAttempts: h.attempt, resume: { ...resume, previousAttempt: handoffRef } };
@@ -181,7 +190,11 @@ export async function resumeIssue(args, context = {}, options = {}) {
     await options.interrupt?.('afterHandoffRetention');
     await pinHandoff(repository, handoffRef, h);
     await readTaskHandoff(repository, handoffRef, args.task);
-    await issueMutation(repository, args.task, 'issue-resume', { reference: args.suspensionRef, handoff: handoffRef }, options);
+    const resumed = await scaffoldTasks({
+      operation: 'issue-resume', feature_id: args.task.featureId, task_id: args.task.taskId,
+      payload: { reference: args.suspensionRef, handoff: handoffRef },
+    }, { ...context, directory: repository }, { ...options.scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation });
+    requireValue(resumed.ok, resumed.message ?? 'Issue restore transition failed');
     await anchorHandoff(repository, args.task, handoffRef, parked.args.previousAttempt, options);
     const { input, ...resume } = h.args;
     return { status: 'READY', handoffRef, consumedAttempts: previous.attempt,

@@ -8,10 +8,10 @@ import {
   runConductor,
   toolOutput,
 } from "../conductor/client.mjs";
-import { git } from "./git-tree.mjs";
-import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
-import { authenticateTaskEvidence } from "./task-evidence.mjs";
-import { snapshot } from "./evidence.mjs";
+import { git } from "../delivery-state/git-tree.mjs";
+import { requireFeatureAuthorization } from "./feature-authorization.mjs";
+import { authenticateTaskEvidence } from "../delivery-state/task-evidence.mjs";
+import { snapshot } from "../delivery-state/evidence.mjs";
 
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);

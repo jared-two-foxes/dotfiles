@@ -15,13 +15,13 @@ import {
   readEvidence,
 } from "../pi/agent/lib/delivery-state/evidence.mjs";
 import { executeAndReview, requestView } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoint.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/lib/scaffold/checkpoint.mjs";
 import {
   scaffoldTasks,
   designReference,
 } from "../pi/agent/lib/scaffold/adapter.mjs";
 import { issueDesignRequirements } from "../pi/agent/lib/delivery-state/issue-state.mjs";
-import { authorizedScaffoldTasks } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
+import { authenticateIssueMutation } from "../pi/agent/lib/delivery-state/issue-authorization.mjs";
 import {
   suspendIssue,
   resumeIssue,
@@ -33,7 +33,7 @@ import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   inspectIssueAttempt,
-} from "../pi/agent/lib/delivery-state/issue-context.mjs";
+} from "../pi/agent/lib/scaffold/issue-context.mjs";
 import { checkpointHistory } from "../pi/agent/lib/delivery-state/history.mjs";
 const integration = {
   skip: !process.env.SCAFFOLD_SOURCE
@@ -84,10 +84,10 @@ async function fixture(t) {
     },
   };
   const call = async (operation, extra = {}) => {
-    const r = await authorizedScaffoldTasks(
+    const r = await scaffoldTasks(
       { operation, feature_id: "F", ...extra },
       { directory: dir },
-      scaffoldOptions,
+      { ...scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation },
     );
     assert.equal(r.ok, true, JSON.stringify(r));
     return r.data;
@@ -675,10 +675,13 @@ test(
     );
     assert.equal(unguarded.ok, false);
     assert.match(unguarded.message, /requires delivery authorization/);
-    const forged = await authorizedScaffoldTasks(
+    const forged = await scaffoldTasks(
       reopen,
       { directory: f.dir },
-      f.options.scaffoldOptions,
+      {
+        ...f.options.scaffoldOptions,
+        authorizeIssueMutation: authenticateIssueMutation,
+      },
     );
     assert.equal(forged.ok, false);
     assert.deepEqual(await snapshot(f.dir), before);
@@ -1067,7 +1070,7 @@ test(
       stateBefore,
     );
     const fresh =
-      await import("../pi/agent/lib/delivery-state/issue-context.mjs?fresh");
+      await import("../pi/agent/lib/scaffold/issue-context.mjs?fresh");
     assert.equal(
       (
         await fresh.inspectIssueHandoff(
@@ -1478,7 +1481,7 @@ test(
   integration,
   async (t) => {
     const { approveDeliveryAmendment } =
-      await import("../pi/agent/lib/delivery-state/context-amendment.mjs");
+      await import("../pi/agent/lib/scaffold/context-amendment.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");

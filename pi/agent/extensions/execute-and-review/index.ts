@@ -10,7 +10,7 @@ import { executeAndCheckpoint } from "./delivery.mjs";
 import { executionSummary } from "../../lib/delivery-state/protocol.mjs";
 import { approveFeatureDirection } from "../../lib/scaffold/feature-authorization.mjs";
 import { inspectEvidence } from "../../lib/delivery-state/evidence.mjs";
-import { approveDeliveryAmendment } from "../../lib/delivery-state/context-amendment.mjs";
+import { approveDeliveryAmendment } from "../../lib/scaffold/context-amendment.mjs";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({

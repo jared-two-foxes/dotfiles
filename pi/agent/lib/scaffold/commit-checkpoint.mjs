@@ -1,4 +1,4 @@
-// Commit an already verified attempt without loading the execution pipeline.
+// Commit an already verified attempt through the Scaffold orchestration boundary.
 import { readFile } from 'node:fs/promises';
 import { commitVerifiedTask } from './task-finalization.mjs';
 
