@@ -1,7 +1,7 @@
 import {
   approveFeatureDirection,
   featureAuthorized,
-} from "../pi/agent/lib/delivery-state/feature-authorization.mjs";
+} from "../pi/agent/lib/scaffold/feature-authorization.mjs";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -1257,7 +1257,7 @@ test(
     );
     assert.equal(invocations, 1);
     const fresh =
-      await import("../pi/agent/lib/delivery-state/feature-authorization.mjs?fresh-session");
+      await import("../pi/agent/lib/scaffold/feature-authorization.mjs?fresh-session");
     assert.equal(
       await fresh.featureAuthorized(f.scope("F"), context, options),
       true,

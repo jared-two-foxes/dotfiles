@@ -1,26 +1,38 @@
 import { checkEnvironment } from "../../lib/delivery-state/stage-reuse.mjs";
-import { prepareDelivery, deliveryEvent } from "../../lib/delivery-state/delivery-context.mjs";
+import {
+  prepareDelivery,
+  deliveryEvent,
+} from "../../lib/delivery-state/delivery-context.mjs";
 import {
   stallDecision,
   infrastructureDecision,
   reviewEnvironment,
 } from "./retry-policy.mjs";
-import { requireFeatureAuthorization } from "../../lib/delivery-state/feature-authorization.mjs";
-import { issueFeature } from "../../lib/scaffold/adapter.mjs";
+import { requireFeatureAuthorization } from "../../lib/scaffold/feature-authorization.mjs";
+import {
+  issueFeature,
+  readScaffoldState,
+} from "../../lib/scaffold/adapter.mjs";
 import {
   approvedIssue,
   issueDesignRequirements,
   issueRequirements,
-  requireIssueBinding,
   issueExecutionScope,
 } from "../../lib/delivery-state/issue-state.mjs";
-import { verificationChecks, correctionVerification } from "../../lib/delivery-state/verification.mjs";
+import {
+  verificationChecks,
+  correctionVerification,
+} from "../../lib/delivery-state/verification.mjs";
 import {
   prepareWorkflow,
   decodeWorkflow,
   validateWorkflowPreparation,
 } from "../../lib/delivery-state/protocol.mjs";
-import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
+import {
+  invoke,
+  runConductor,
+  DEFAULT_TIMEOUT_MS,
+} from "../../lib/conductor/client.mjs";
 import {
   validateBinding,
   snapshot,
@@ -84,6 +96,18 @@ async function git(repository, args, signal) {
   });
   if (result.code !== 0) throw new Error("Git preflight failed: " + args[0]);
   return result.stdout.trim();
+}
+
+async function requireIssueBinding(directory) {
+  const state = await readScaffoldState(directory);
+  requireValue(
+    !Object.values(state?.features ?? {}).some(
+      (f) =>
+        f.workflow?.kind === "recursive-issues/v1" &&
+        f.validation?.status !== "verified",
+    ),
+    "An unfinished issue workflow requires explicit feature/issue binding; complete its design graph first",
+  );
 }
 
 /**
@@ -288,9 +312,14 @@ export async function hydrateContinuation(args, context) {
       (k) => args.task[k] !== previous.task[k],
     )
   )
-    throw Object.assign(new Error("Continuation task mismatch"), { code: "CONTINUATION_TASK_MISMATCH" });
+    throw Object.assign(new Error("Continuation task mismatch"), {
+      code: "CONTINUATION_TASK_MISMATCH",
+    });
   if (args.baseRef && args.baseRef !== previous.args.baseRef)
-    throw Object.assign(new Error("Continuation baseline mismatch"), { code: "CONTINUATION_RECEIPT_INAPPLICABLE", consumedAttempts: previous.attempt });
+    throw Object.assign(new Error("Continuation baseline mismatch"), {
+      code: "CONTINUATION_RECEIPT_INAPPLICABLE",
+      consumedAttempts: previous.attempt,
+    });
 
   const callerPlan = args.checks !== undefined;
   // A zero-attempt handoff has no previous verification plan to inherit.
@@ -523,9 +552,15 @@ export async function executeAndReview(args, context = {}, options = {}) {
         before.digest !== previous.after.digest ||
         before.tree !== previous.after.tree
       )
-        throw Object.assign(new Error(
-          "Current source/index or HEAD differs from the previous attempt after snapshot; preserve changes and reconcile before continuing",
-        ), { code: "CONTINUATION_RECEIPT_INAPPLICABLE", consumedAttempts: previous.attempt });
+        throw Object.assign(
+          new Error(
+            "Current source/index or HEAD differs from the previous attempt after snapshot; preserve changes and reconcile before continuing",
+          ),
+          {
+            code: "CONTINUATION_RECEIPT_INAPPLICABLE",
+            consumedAttempts: previous.attempt,
+          },
+        );
       attempt = previous.attempt + 1;
       if (!Number.isSafeInteger(attempt))
         throw new Error("Invalid invocation sequence");
@@ -721,7 +756,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
   } catch (error) {
     return outcome("BLOCKED", "PRECHECK_OR_EVIDENCE", {
       ...(repository ? { repository } : {}),
-      reason: error.code?.startsWith("CONTINUATION_") ? error.code : "TASK_CONTEXT_INVALID",
+      reason: error.code?.startsWith("CONTINUATION_")
+        ? error.code
+        : "TASK_CONTEXT_INVALID",
       consumedAttempts: error.consumedAttempts,
       message:
         error.message +
