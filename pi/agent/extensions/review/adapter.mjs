@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, writeFile, rm, lstat, readlink } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import path from 'node:path';
+import { reviewRequest, reviewStep, validateReviewResult } from './client.mjs';
+export { validateReviewResult } from './client.mjs';
 
 const OUTPUT_LIMIT = 4 * 1024 * 1024;
 const DEFAULT_MODEL = 'opencode/gpt-6.1-sol';
@@ -87,34 +89,6 @@ async function snapshot(repository, base, signal) {
   }
   return hash.digest('hex');
 }
-export function validateReviewResult(result, code) {
-  const exits = { APPROVED: 0, CHANGES_REQUESTED: 1, INDETERMINATE: 3 };
-  if (result?.schema !== 'review.result/v1' || !Object.hasOwn(exits, result.status) ||
-      exits[result.status] !== code || !Array.isArray(result.findings) ||
-      typeof result.reason !== 'string' || !result.reason.trim() ||
-      typeof result.review_id !== 'string' || !result.review_id.trim() ||
-      typeof result.completed_at !== 'string' || !result.completed_at.trim()) {
-    throw new Error('Review result schema/status/exit code mismatch');
-  }
-  if (result.status !== 'INDETERMINATE' && result.reason !== 'REVIEW_COMPLETED') {
-    throw new Error('An incomplete review cannot approve or reject a change');
-  }
-  for (const f of result.findings) {
-    if (!f || typeof f !== 'object' || Array.isArray(f) || typeof f.blocking !== 'boolean' ||
-        typeof f.message !== 'string' || !f.message.trim() ||
-        !['high', 'medium', 'low'].includes(f.severity) ||
-        (f.path != null && typeof f.path !== 'string') ||
-        (f.line != null && (!Number.isInteger(f.line) || f.line < 0)) ||
-        (f.recommendation != null && typeof f.recommendation !== 'string')) {
-      throw new Error('Invalid review finding');
-    }
-  }
-  const blocking = result.findings.some(f => f.blocking);
-  if ((result.status === 'APPROVED' && blocking) || (result.status === 'CHANGES_REQUESTED' && !blocking)) {
-    throw new Error('Review verdict contradicts blocking findings');
-  }
-  return result;
-}
 async function reviewEnvironment() {
   const env = { ...process.env };
   if (!env.OPENCODE_API_KEY) {
@@ -147,7 +121,8 @@ export async function reviewChanges(args, context = {}, options = {}) {
   let temp, outcome;
   try {
     text(args?.requirements, 'Review scope');
-    const { budget, turns, limits, model } = reviewSettings(args);
+    const settings = reviewSettings(args);
+    const { budget, model } = settings;
     const directory = path.resolve(args.repository ?? context.worktree ?? context.directory ?? '.');
     const repository = (await git(directory, ['rev-parse', '--show-toplevel'], context.abort)).trim();
     const base = await commit(repository, args.baseRef, context.abort);
@@ -157,13 +132,11 @@ export async function reviewChanges(args, context = {}, options = {}) {
     temp = await mkdtemp(path.join(tmpdir(), 'pi-review-'));
     const requirementsPath = path.join(temp, 'requirements.md');
     const requestPath = path.join(temp, 'request.json');
-    await writeFile(requirementsPath, args.requirements, { mode: 0o600 });
-    await writeFile(requestPath, JSON.stringify({ schema: 'review.request/v1', repository_path: repository,
-      base_ref: base, head_ref: head, requirements: requirementsPath }), { mode: 0o600 });
-    const executable = options.executable ?? process.env.REVIEW_CLI_BIN ?? 'review-cli';
-    const argv = [...(options.prefixArgs ?? []), 'run', '--request', requestPath, '--format', 'json',
-      '--model', model, '--max-turns', String(turns), '--wall-clock-budget-secs', String(budget), ...limits];
-    const output = await run(executable, argv, { cwd: repository, signal: context.abort,
+    const request = reviewRequest(repository, base, head, requirementsPath);
+    const step = reviewStep(requestPath, request, args.requirements, settings,
+      { program: options.executable ?? undefined, prefixArgs: options.prefixArgs ?? [] });
+    for (const [file, contents] of step.files) await writeFile(file, contents, { mode: 0o600 });
+    const output = await run(step.program, step.args, { cwd: repository, signal: context.abort,
       timeout: options.timeoutMs ?? (budget + 10) * 1000, env: await reviewEnvironment() });
     const result = validateReviewResult(JSON.parse(output.stdout), output.code);
     if (await snapshot(repository, base, context.abort) !== before) {

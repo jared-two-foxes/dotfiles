@@ -10,17 +10,21 @@ binding, continuation, verification policy, independent review, and checkpoint
 authorization. `protocol.mjs` prepares the Executor and Review inputs and
 authenticates their delivery evidence.
 
-The workflow imports the CLI client from the sibling [Conductor extension](../conductor/README.md).
-Pi discovers each directory through its own `index.ts`. The tool names for
-delivery, recovery, and checkpointing stay the same.
+The workflow uses the sibling [Conductor client](../conductor/README.md) to run
+the plan. The Executor and [Review](../review/README.md) clients describe their
+CLI invocations and validate their results. Execute and Review assembles those
+steps and owns authorization, evidence, and checkpointing.
 
 ## Native Pi installation
 
-Install both extension directories as siblings:
+Install these directories as siblings. The Executor directory supplies an
+internal client module. Pi tool registration lives in the other extensions.
 
 ```
 ~/.pi/agent/extensions/conductor/
 ~/.pi/agent/extensions/execute-and-review/
+~/.pi/agent/extensions/executor/
+~/.pi/agent/extensions/review/
 ```
 
 For a dotfiles checkout on Windows, a copy-based installation is:
@@ -28,6 +32,8 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\executor "$HOME\.pi\agent\extensions"
+Copy-Item -Recurse -Force .\pi\agent\extensions\review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\skills\conductor "$HOME\.pi\agent\skills\conductor"
 Copy-Item -Recurse -Force .\pi\agent\skills\execute-and-review "$HOME\.pi\agent\skills\execute-and-review"
 Copy-Item -Recurse -Force .\pi\agent\skills\design "$HOME\.pi\agent\skills\design"
@@ -38,7 +44,7 @@ Remove-Item -Recurse -Force "$HOME\.pi\agent\skills\tdd" -ErrorAction SilentlyCo
 
 If Pi already uses this dotfiles directory as its agent home, no copy is
 necessary. When upgrading a copy-based installation, stop Pi and replace the old
-`extensions/conductor` copy with the two directories above before restarting.
+`extensions/conductor` copy with the directories above before restarting.
 Retained receipts from the old layout remain valid in the same Pi agent home.
 Keep the Conductor directory alongside this one so inherited test plans can
 resolve the legacy evaluator entry point.

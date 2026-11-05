@@ -18,6 +18,9 @@ import {
   validateRunner,
 } from "../conductor/client.mjs";
 
+import { executorExecutable, executorInput, executorStep, validateExecutorResult } from "../executor/client.mjs";
+import { deliveryReviewSettings, reviewExecutable, reviewRequest, reviewStep, validateReviewResult } from "../review/client.mjs";
+
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
@@ -53,73 +56,13 @@ function guarded(name, program, args, files, guardPath = guard) {
 }
 
 export function validateWorkflowPreparation(args) {
-  reviewArguments(args, "review.json", ".");
-  for (const program of [
-    process.env.EXECUTOR_BIN ?? "executor",
-    process.env.REVIEW_CLI_BIN ?? "review-cli",
-  ])
+  deliveryReviewSettings(args);
+  for (const program of [executorExecutable(), reviewExecutable()])
     requireValue(
       typeof program === "string" && program.trim() && !program.includes("\0"),
       "Invalid tool executable",
     );
-  requireValue(
-    Array.isArray(JSON.parse(args.input).operations),
-    "Invalid Executor operations",
-  );
-}
-
-function reviewArguments(args, requestPath, directory) {
-  const model = args.reviewModel ?? "opencode/gpt-6.1-sol";
-  requireValue(
-    typeof model === "string" &&
-      model.trim() &&
-      !model.includes("\0") &&
-      model.length <= 512,
-    "Invalid review model",
-  );
-  for (const field of [
-    "reviewWallClockBudgetSecs",
-    "reviewMaxTurns",
-    "reviewMaxToolCalls",
-    "reviewMaxRepeatedActions",
-    "reviewMaxCompletionAttempts",
-  ]) {
-    requireValue(
-      args[field] == null ||
-        (Number.isSafeInteger(args[field]) && args[field] > 0),
-      "Invalid " + field,
-    );
-  }
-  requireValue(
-    args.reviewMaxCostUsd == null ||
-      (typeof args.reviewMaxCostUsd === "number" &&
-        Number.isFinite(args.reviewMaxCostUsd) &&
-        args.reviewMaxCostUsd >= 0),
-    "Invalid reviewMaxCostUsd",
-  );
-  const result = [
-    "run",
-    "--request",
-    requestPath,
-    "--format",
-    "json",
-    "--model",
-    model,
-    "--wall-clock-budget-secs",
-    String(args.reviewWallClockBudgetSecs ?? 180),
-    "--max-turns",
-    String(args.reviewMaxTurns ?? 20),
-    "--ledger",
-    path.join(directory, "review-ledger.jsonl"),
-  ];
-  for (const [field, flag] of [
-    ["reviewMaxCostUsd", "--max-cost-usd"],
-    ["reviewMaxToolCalls", "--max-tool-calls"],
-    ["reviewMaxRepeatedActions", "--max-repeated-actions"],
-    ["reviewMaxCompletionAttempts", "--max-completion-attempts"],
-  ])
-    if (args[field] != null) result.push(flag, String(args[field]));
-  return result;
+  executorInput(args.input);
 }
 
 function reviewRequirements(args) {
@@ -146,60 +89,26 @@ export async function prepareWorkflow(repository, root, args, checks) {
   );
   const directory = await realpath(await mkdtemp(path.join(root, "attempt-")));
   const inputs = {
-    execution: JSON.parse(args.input),
+    execution: executorInput(args.input),
     requirements: reviewRequirements(args),
-    review: {
-      schema: "review.request/v1",
-      repository_path: repository,
-      base_ref: args.baseRef,
-      head_ref: ":working",
-      requirements: path.join(directory, "requirements.md"),
-    },
+    review: reviewRequest(repository, args.baseRef, ":working", path.join(directory, "requirements.md")),
   };
-  await writeFile(
-    path.join(directory, "executor.json"),
-    JSON.stringify(inputs.execution),
-    { mode: 0o600, flag: "wx" },
-  );
-  await writeFile(inputs.review.requirements, inputs.requirements, {
-    mode: 0o600,
-    flag: "wx",
-  });
-  await writeFile(
-    path.join(directory, "review.json"),
-    JSON.stringify(inputs.review),
-    { mode: 0o600, flag: "wx" },
-  );
+  const execution = executorStep(path.join(directory, "executor.json"), inputs.execution);
+  const review = deliveryReviewStep(directory, args, inputs);
+  for (const [file, contents] of [...execution.files, ...review.files])
+    await writeFile(file, contents, { mode: 0o600, flag: "wx" });
+
   const request = conductorRequest(repository, directory, [
-    guarded(
-      "executor",
-      process.env.EXECUTOR_BIN ?? "executor",
-      ["apply", path.join(directory, "executor.json")],
-      [
-        [
-          path.join(directory, "executor.json"),
-          JSON.stringify(inputs.execution),
-        ],
-      ],
-    ),
+    guarded("executor", execution.program, execution.args, execution.files),
     ...checks,
-    {
-      ...guarded(
-        "review",
-        process.env.REVIEW_CLI_BIN ?? "review-cli",
-        reviewArguments(args, path.join(directory, "review.json"), directory),
-        [
-          [
-            path.join(directory, "review.json"),
-            JSON.stringify(inputs.review),
-          ],
-          [inputs.review.requirements, inputs.requirements],
-        ],
-      ),
-      success_condition: reviewCondition,
-    },
+    { ...guarded("review", review.program, review.args, review.files), success_condition: reviewCondition },
   ]);
   return { request, inputs };
+}
+
+function deliveryReviewStep(directory, args, inputs, program) {
+  return reviewStep(path.join(directory, "review.json"), inputs.review, inputs.requirements,
+    deliveryReviewSettings(args), { program, ledgerPath: path.join(directory, "review-ledger.jsonl") });
 }
 
 // Authenticate retained request contents without depending on mutable request/log
@@ -214,15 +123,11 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   );
   const directory = request.output_directory;
   requireValue(
-    equal(workflow.inputs.execution, JSON.parse(args.input)) &&
+    equal(workflow.inputs.execution, executorInput(args.input)) &&
       workflow.inputs.requirements === reviewRequirements(args) &&
-      equal(workflow.inputs.review, {
-        schema: "review.request/v1",
-        repository_path: repository,
-        base_ref: args.baseRef,
-        head_ref: ":working",
-        requirements: path.join(directory, "requirements.md"),
-      }),
+      equal(workflow.inputs.review, reviewRequest(
+        repository, args.baseRef, ":working", path.join(directory, "requirements.md"),
+      )),
     "Retained tool input mismatch",
   );
   const first = request.commands[0],
@@ -233,19 +138,9 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   const condition = guardPath === legacyGuard ? legacyReviewCondition : reviewCondition;
   const executorProgram = JSON.parse(first.args[1]).program;
   const reviewProgram = JSON.parse(last.args[1]).program;
-  const reviewInvocation = guarded(
-    "review",
-    reviewProgram,
-    reviewArguments(args, path.join(directory, "review.json"), directory),
-    [
-      [
-        path.join(directory, "review.json"),
-        JSON.stringify(workflow.inputs.review),
-      ],
-      [workflow.inputs.review.requirements, workflow.inputs.requirements],
-    ],
-    guardPath,
-  );
+  const execution = executorStep(path.join(directory, "executor.json"), workflow.inputs.execution, executorProgram);
+  const review = deliveryReviewStep(directory, args, workflow.inputs, reviewProgram);
+  const reviewInvocation = guarded("review", review.program, review.args, review.files, guardPath);
   requireValue(
     [executorProgram, reviewProgram].every(
       (program) =>
@@ -253,21 +148,7 @@ export function authenticateWorkflow(workflow, request, args, repository) {
         program.trim() &&
         !program.includes("\0"),
     ) &&
-      equal(
-        first,
-        guarded(
-          "executor",
-          executorProgram,
-          ["apply", path.join(directory, "executor.json")],
-          [
-            [
-              path.join(directory, "executor.json"),
-              JSON.stringify(workflow.inputs.execution),
-            ],
-          ],
-          guardPath,
-        ),
-      ) &&
+      equal(first, guarded("executor", execution.program, execution.args, execution.files, guardPath)) &&
       (equal(last, {
         ...reviewInvocation,
         success_condition: condition,
@@ -276,68 +157,6 @@ export function authenticateWorkflow(workflow, request, args, repository) {
     "Retained Executor/Review invocation mismatch",
   );
   return request.commands.slice(1, -1);
-}
-
-export function reviewResult(value, code) {
-  const expected = { APPROVED: 0, CHANGES_REQUESTED: 1, INDETERMINATE: 3 };
-  requireValue(
-    value?.schema === "review.result/v1" &&
-      Object.hasOwn(expected, value.status) &&
-      expected[value.status] === code &&
-      Array.isArray(value.findings) &&
-      typeof value.reason === "string" &&
-      value.reason.trim() &&
-      typeof value.review_id === "string" &&
-      value.review_id.trim() &&
-      typeof value.completed_at === "string" &&
-      value.completed_at.trim(),
-    "Review schema/status/exit code mismatch",
-  );
-  requireValue(
-    value.status === "INDETERMINATE" || value.reason === "REVIEW_COMPLETED",
-    "Review did not complete",
-  );
-  for (const finding of value.findings)
-    requireValue(
-      finding &&
-        typeof finding.blocking === "boolean" &&
-        typeof finding.message === "string" &&
-        finding.message.trim() &&
-        ["high", "medium", "low"].includes(finding.severity) &&
-        (finding.path == null || typeof finding.path === "string") &&
-        (finding.line == null ||
-          (Number.isInteger(finding.line) && finding.line >= 0)) &&
-        (finding.recommendation == null ||
-          typeof finding.recommendation === "string"),
-      "Invalid Review finding",
-    );
-  if (value.obligation_assessments !== undefined) {
-    const assessments = value.obligation_assessments;
-    requireValue(
-      Array.isArray(assessments) &&
-        new Set(assessments.map((a) => a.obligation_id)).size ===
-          assessments.length &&
-        assessments.every(
-          (a) =>
-            a &&
-            typeof a.obligation_id === "string" &&
-            a.obligation_id.trim() &&
-            ["verified", "unresolved", "not_applicable"].includes(
-              a.disposition,
-            ) &&
-            typeof a.evidence === "string" &&
-            a.evidence.trim(),
-        ),
-      "Invalid independent obligation assessments",
-    );
-  }
-  const blocking = value.findings.some((f) => f.blocking);
-  requireValue(
-    value.status === "INDETERMINATE" ||
-      (value.status === "APPROVED" ? !blocking : blocking),
-    "Review verdict contradicts findings",
-  );
-  return value;
 }
 
 // Pure reconstruction also authenticates the immutable normalized receipt later.
@@ -425,16 +244,9 @@ export function normalizeWorkflow(
     if (execution?.schema === "pi.tool-invocation-error/v1") {
       failure = execution;
       execution = null;
-    } else
-      requireValue(
-        typeof execution?.success === "boolean" &&
-          Number.isInteger(execution.operations_applied) &&
-          execution.operations_applied >= 0 &&
-          results[0].exit_code === (execution.success ? 0 : 1) &&
-          (!execution.success ||
-            execution.operations_applied === expectedOperations),
-        "Executor outcome/exit code/count mismatch",
-      );
+    } else {
+      validateExecutorResult(execution, results[0].exit_code, expectedOperations);
+    }
   }
   const checks = results.slice(1, request.commands.length - 1);
   if (results.length > 1) phase = "verification";
@@ -443,7 +255,7 @@ export function normalizeWorkflow(
     const last = results.at(-1);
     // Validation/setup errors from Review are BLOCKED, not correction requests.
     if (last.exit_code != null && [0, 1, 3].includes(last.exit_code))
-      review = reviewResult(JSON.parse(toolOutputs.review), last.exit_code);
+      review = validateReviewResult(JSON.parse(toolOutputs.review), last.exit_code);
     else if (toolOutputs.review) {
       const error = JSON.parse(toolOutputs.review);
       if (error.schema_version === "agent.error/v1")
