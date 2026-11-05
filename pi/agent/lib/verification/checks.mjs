@@ -1,11 +1,5 @@
 // Normalize the caller's verification plan; Conductor owns command execution.
 import { fileURLToPath } from "node:url";
-// Older repair receipts can name either of the former evaluator entry points.
-const historicalTestScripts = [
-  fileURLToPath(new URL("../delivery-state/meaningful-test-condition.mjs", import.meta.url)),
-  ...["conductor", "execute-and-review"].map(extension =>
-    fileURLToPath(new URL(`../../extensions/${extension}/meaningful-test-condition.mjs`, import.meta.url))),
-];
 const meaningfulTestScript = fileURLToPath(new URL("./meaningful-test-condition.mjs", import.meta.url));
 export function meaningfulChecks(checks) {
   return checks.map((c) => {
@@ -116,15 +110,10 @@ export function sameVerification(left, right) {
 // The original design still governs coverage; every command is rerun and Review
 // must approve the result. Both preflight and receipt authentication use this rule.
 export function correctionVerification(previous, args) {
-  const reason = args.verificationRepairReason;
-  if (
-    reason !== undefined &&
-    (typeof reason !== "string" ||
-      !reason.trim() ||
-      reason.length > 4000 ||
-      reason.includes("\0"))
-  )
-    return false;
+  if (args.verificationRepairReason !== undefined ||
+      !["BLOCKED", "NEEDS_DESIGN"].includes(previous.result?.status)) return false;
+  if (args.contextUpdates?.some(u => u.kind === "repair_check" &&
+    (typeof u.reason !== "string" || !u.reason.trim() || u.reason.length > 4000 || u.reason.includes("\0")))) return false;
   const before = verificationChecks(previous.args);
   const after = verificationChecks(args);
   const evaluatorRepairs = Array.isArray(args.contextUpdates) ? args.contextUpdates.filter(u =>
@@ -143,9 +132,7 @@ export function correctionVerification(previous, args) {
         if (JSON.stringify(check.successCondition) === JSON.stringify(next.successCondition)) return true;
         const evaluator = meaningfulTestEvaluator(check.command);
         return !!check.successCondition && !!evaluator &&
-          (JSON.stringify(next.successCondition) === JSON.stringify(evaluator) ||
-            historicalTestScripts.some(script =>
-              JSON.stringify(next.successCondition) === JSON.stringify([evaluator[0], script]))) &&
+          JSON.stringify(next.successCondition) === JSON.stringify(evaluator) &&
           evaluatorRepairs.some(u => u.checkId === check.name && typeof u.reason === "string" && u.reason.trim());
       });
   }
@@ -173,15 +160,5 @@ export function correctionVerification(previous, args) {
     )
       return true;
   }
-  if (!reason || !["BLOCKED", "NEEDS_DESIGN"].includes(previous.result.status))
-    return false;
-  return (
-    before.length === after.length &&
-    before.every(
-      (check, i) =>
-        check.name === after[i].name &&
-        JSON.stringify(check.successCondition) ===
-          JSON.stringify(after[i].successCondition),
-    )
-  );
+  return false;
 }

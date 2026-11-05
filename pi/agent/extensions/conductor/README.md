@@ -14,5 +14,4 @@ Scaffold-bound work that requires independent review and a verified checkpoint.
 For copy-based installs, include `pi/agent/lib/conductor/` under the agent
 home's `lib/` directory.
 
-The legacy `meaningful-test-condition.mjs` path forwards older retained plans
-to the validator in the shared delivery-state library.
+Test evaluators use `lib/verification/meaningful-test-condition.mjs` exclusively.

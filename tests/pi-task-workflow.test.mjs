@@ -69,7 +69,7 @@ function response(status = "PASSED", patch = {}) {
     code: { PASSED: 0, NEEDS_DESIGN: 2, BLOCKED: 3 }[status],
     stderr: "",
     stdout: JSON.stringify({
-      schema: "conductor.result/v1",
+      schema: "fixture.delivery-outcome/v1",
       status,
       phase: "review",
       execution: { success: true, operations_applied: 1 },
@@ -521,7 +521,7 @@ test(
       (await call("add", { payload: [definition("model")] })).ok,
       true,
     );
-    assert.equal((await call("next")).data.task, null);
+    assert.equal((await call("select")).data.context, null);
     const rejected = await call("start", { task_id: "model" });
     assert.equal(rejected.ok, false);
     assert.match(rejected.scaffold_error.error, /design/);
@@ -675,8 +675,8 @@ test(
       true,
     );
     const before = (await call({ operation: "list" })).data.feature;
-    assert.equal((await call({ operation: "next" })).data.task, null);
-    assert.equal((await call({ operation: "design-next" })).data.task.id, "F3");
+    assert.equal((await call({ operation: "select" })).data.context, null);
+    assert.equal((await call({ operation: "design-select" })).data.context.issue.id, "F3");
     const children = [
       definition("contract"),
       definition("writes", ["contract"]),
@@ -716,7 +716,7 @@ test(
       assert.equal(after.tasks[child.id].context, child.context);
     }
     assert.deepEqual(after.tasks.consumer.dependencies, ["model"]);
-    assert.equal((await call({ operation: "next" })).data.task, null);
+    assert.equal((await call({ operation: "select" })).data.context, null);
     assert.equal(
       (await call({ operation: "start", task_id: "model" })).ok,
       false,

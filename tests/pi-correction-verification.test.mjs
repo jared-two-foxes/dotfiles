@@ -9,12 +9,12 @@ test('explicit invocation repair retains names/order and semantic conditions for
   const previous = { args: { checks }, result: { status: 'BLOCKED' } };
   const changed = structuredClone(checks);
   changed[1].command = ['cargo', 'test', '--test', 'regression'];
-  const repair = { checks: changed, verificationRepairReason: 'Invoke Cargo directly because sh is not installed; same regression target' };
+  const repair = { checks: changed, deliveryContext: { schema: 'pi.delivery-context/v1' }, contextUpdates: [{ kind: 'repair_check', checkId: 'regression', reason: 'Invoke Cargo directly because sh is not installed; same regression target' }] };
   assert.equal(correctionVerification(previous, { checks }), true);
   assert.equal(correctionVerification(previous, { checks: changed }), false);
   assert.equal(correctionVerification(previous, repair), true);
   for (const reason of ['', ' ', 3, 'bad\0reason', 'x'.repeat(4001)])
-    assert.equal(correctionVerification(previous, { ...repair, verificationRepairReason: reason }), false);
+    assert.equal(correctionVerification(previous, { ...repair, contextUpdates: [{ ...repair.contextUpdates[0], reason }] }), false);
   for (const alter of [c => c.pop(), c => c.reverse(), c => { c[1].name = 'other'; },
     c => { delete c[1].successCondition; }, c => { c[1].successCondition = ['true']; }]) {
     const checks = structuredClone(changed); alter(checks);
@@ -44,7 +44,7 @@ test('evaluator repair requires a redesigned issue handoff and the canonical val
     legacy.checks[0].successCondition[1] = fileURLToPath(
       new URL(`../pi/agent/extensions/${extension}/meaningful-test-condition.mjs`, import.meta.url),
     );
-    assert.equal(correctionVerification(previous, legacy), true);
+    assert.equal(correctionVerification(previous, legacy), false);
   }
   assert.equal(correctionVerification({ ...previous, kind: 'rebase-handoff' }, repaired), false);
   assert.equal(correctionVerification(previous, { ...repaired, contextUpdates: [] }), false);

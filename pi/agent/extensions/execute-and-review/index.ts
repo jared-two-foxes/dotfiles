@@ -148,14 +148,6 @@ export default function (pi: ExtensionAPI) {
             "Review context resource allowance; default 200000 UTF-8 bytes. Increase explicitly when required without dropping obligations or resetting history.",
         }),
       ),
-      verificationRepairReason: Type.Optional(
-        Type.String({
-          minLength: 1,
-          maxLength: 4000,
-          description:
-            "Explicit command invocation repair after a failed/blocked previousAttempt (for example missing sh on Windows). Explain the failure and why coverage is equivalent. Preserve check names/order and success conditions, original obligations and baseline. Never bypass a failing test or weaken coverage.",
-        }),
-      ),
       input: Type.String({
         description:
           "Exact executor JSON with an operations array; authored by the agent",

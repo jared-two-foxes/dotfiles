@@ -243,13 +243,6 @@ export function validateRunner(
 
 export async function toolOutput(request, runner, record) {
   if (!record || record.exit_code == null) return undefined;
-  if (!record.stdout_path) {
-    requireValue(
-      !record.stdout_truncated,
-      "Complete tool output unavailable; upgrade Conductor for retained logs",
-    );
-    return record.stdout;
-  }
   const file = record.stdout_path;
   requireValue(
     typeof file === "string" &&

@@ -1,6 +1,6 @@
 export type ScaffoldOperation =
-  | "init" | "add" | "list" | "next" | "start" | "complete" | "block"
-  | "fail" | "retry" | "decompose" | "design-next" | "design-record"
+  | "init" | "add" | "list" | "start" | "complete" | "block"
+  | "fail" | "retry" | "decompose" | "design-record"
   | "design-finish" | "design-reopen" | "checkpoint-record" | "issue-resume"
   | "summary" | "issue" | "select" | "design-select" | "delivery-record";
 

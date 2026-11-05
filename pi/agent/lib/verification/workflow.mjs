@@ -23,27 +23,12 @@ export const reviewCondition = {
   program: process.execPath,
   args: [fileURLToPath(new URL("./review-condition.mjs", import.meta.url))],
 };
-// Historical paths are receipt identities only. New requests use the local helpers.
-const reviewConditionByGuard = new Map([[guard, reviewCondition]]);
-const legacyDirectory = new URL("../delivery-state/", import.meta.url);
-reviewConditionByGuard.set(fileURLToPath(new URL("input-guard.mjs", legacyDirectory)), {
-  program: process.execPath,
-  args: [fileURLToPath(new URL("review-condition.mjs", legacyDirectory))],
-});
-for (const extension of ["execute-and-review", "conductor"]) {
-  const directory = new URL(`../../extensions/${extension}/`, import.meta.url);
-  reviewConditionByGuard.set(fileURLToPath(new URL("input-guard.mjs", directory)), {
-    program: process.execPath,
-    args: [fileURLToPath(new URL("review-condition.mjs", directory))],
-  });
-}
-
-export function guarded(name, program, args, files, guardPath = guard) {
+export function guarded(name, program, args, files) {
   return {
     name,
     program: process.execPath,
     args: [
-      guardPath,
+      guard,
       JSON.stringify({
         program,
         args,
@@ -57,11 +42,12 @@ export function guarded(name, program, args, files, guardPath = guard) {
 }
 
 export function reviewRequirements(args) {
-  if (!args.verificationRepairReason) return args.requirements;
+  const repairs = (args.contextUpdates ?? []).filter(update => update.kind === "repair_check");
+  if (!repairs.length) return args.requirements;
   return (
     args.requirements +
     "\n\nVerification command repair (does not change the criteria above):\n" +
-    args.verificationRepairReason +
+    repairs.map(update => update.reason).join("\n") +
     "\nPrior attempt: " +
     args.previousAttempt +
     "\nCurrent verification plan: " +
@@ -97,14 +83,13 @@ export function authenticateWorkflow(workflow, request, args, repository) {
   const first = request.commands[0],
     last = request.commands.at(-1);
   const guardPath = first.args[0];
-  const condition = reviewConditionByGuard.get(guardPath);
-  requireValue(condition && last.args[0] === guardPath,
+  requireValue(guardPath === guard && last.args[0] === guard,
     "Retained Executor/Review invocation mismatch");
   const executorProgram = JSON.parse(first.args[1]).program;
   const reviewProgram = JSON.parse(last.args[1]).program;
   const execution = executorStep(path.join(directory, "executor.json"), workflow.inputs.execution, executorProgram);
   const review = deliveryReviewStep(directory, args, workflow.inputs, reviewProgram);
-  const reviewInvocation = guarded("review", review.program, review.args, review.files, guardPath);
+  const reviewInvocation = guarded("review", review.program, review.args, review.files);
   requireValue(
     [executorProgram, reviewProgram].every(
       (program) =>
@@ -112,12 +97,11 @@ export function authenticateWorkflow(workflow, request, args, repository) {
         program.trim() &&
         !program.includes("\0"),
     ) &&
-      equal(first, guarded("executor", execution.program, execution.args, execution.files, guardPath)) &&
-      (equal(last, {
+      equal(first, guarded("executor", execution.program, execution.args, execution.files)) &&
+      equal(last, {
         ...reviewInvocation,
-        success_condition: condition,
-      }) ||
-        equal(last, reviewInvocation)), // Historical complete v2 receipts predate semantic Review conditions.
+        success_condition: reviewCondition,
+      }),
     "Retained Executor/Review invocation mismatch",
   );
   return request.commands.slice(1, -1);
@@ -138,11 +122,7 @@ export function normalizeWorkflow(
     "Missing retained operation count",
   );
   if (expectedSchema === "pi.command-results/v1") {
-    const conditionReceipts =
-      runner.conditionReceipts ??
-      (request.commands.every((command) => !command.success_condition)
-        ? runner.commands.map(() => null)
-        : null);
+    const conditionReceipts = runner.conditionReceipts;
     requireValue(
       Array.isArray(runner.receipts) &&
         runner.receipts.length === runner.commands.length &&

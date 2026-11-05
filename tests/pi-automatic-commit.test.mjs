@@ -308,6 +308,8 @@ test(
       (r) => {
         r.producer = "unverified";
       },
+      (r) => { r.producer = "pi.command-receipts/v1"; },
+      (r) => { delete r.result.conductor.runner.conditionReceipts; },
       (r) => {
         r.deliveryRequest.commands.pop();
       },
@@ -388,7 +390,7 @@ test(
     };
     const noReason = await executeAndCheckpoint(correction, f.context);
     assert.equal(noReason.status, "BLOCKED");
-    assert.match(noReason.message, /verificationRepairReason/);
+    assert.match(noReason.message, /repair_check/);
     assert.equal(
       noReason.evidence,
       undefined,
@@ -398,7 +400,7 @@ test(
       "Missing shell executable; invoke the same targeted regression directly with Node, preserving coverage";
     process.env.EXPECTED_REVIEW_REQUIREMENTS = "*";
     const delivered = await executeAndCheckpoint(
-      { ...correction, verificationRepairReason: reason },
+      { ...correction, contextUpdates: [{ kind: "repair_check", checkId: "environment check", command: f.args.checks[0].command, reason }] },
       f.context,
     );
     assert.equal(delivered.status, "PASSED", JSON.stringify(delivered));
@@ -433,7 +435,7 @@ test(
     assert.deepEqual(JSON.parse(record.args.input).operations, []);
     assert.equal(f.git("rev-list", "--count", f.base + "..HEAD"), "1");
     const unaudited = structuredClone(record);
-    delete unaudited.args.verificationRepairReason;
+    unaudited.args.contextUpdates = [];
     const unauditedRef = await retainEvidence(f.directory, unaudited);
     await assert.rejects(
       authenticateAttemptChain(f.directory, unauditedRef, f.args.task),
@@ -862,7 +864,7 @@ test(
     assert.equal(record.startedReference != null, true);
     await rm(runs);
     const corrected = await executeAndCheckpoint(
-      { ...f.args, previousAttempt: blocked.evidence.reference },
+      { previousAttempt: blocked.evidence.reference, input: f.args.input },
       f.context,
       { invokeConductor: (body) => f.finalCommand(body) },
     );

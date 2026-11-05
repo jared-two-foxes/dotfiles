@@ -17,9 +17,8 @@ Use `/skill:design` for the complete Research → Design → Implement workflow.
 
 The user provides a ticket; a feature retains its original objective, criteria,
 branch and baseline; all graph nodes are issues. Existing API names remain
-`task`, `task_id` and `tasks` for compatibility. Issue origin records whether it
-came from the ticket, design, review or an implementation discovery. The legacy
-criteria stack is separate; never mirror this graph into it.
+`task`, `task_id` and `tasks` in the current wire contract. Issue origin records whether it
+came from the ticket, design, review or an implementation discovery.
 
 ## Initialize and design downward
 
@@ -68,7 +67,7 @@ designs. A null selection alone never grants execution authority.
 
 ## Implement upward
 
-Use `summary` and `select` to select an eligible issue. **`next` returning null does not
+Use `summary` and `select` to select an eligible issue. **`select` returning null does not
 necessarily mean the feature is complete.** It also returns null during Design,
 while an issue is active, when a checkpoint is missing or when work is suspended.
 Inspect the complete state. Recover its approved design and include the exact
@@ -152,12 +151,11 @@ can follow a persisted mutation; query summary/issue before replaying; request f
 use the returned suspensionRef/handoffRef to recover the same operation. Never
 initialize a replacement feature to hide failures.
 
-## Compatibility
+## Supported contract
 
-Features without an issue graph require explicit migration of their original scope, source and receipts before implementation. The task store uses schema v2 exclusively; older state is rejected without modification. Upgrade Scaffold and Pi together; an older Scaffold rejects the new init/operations before
-implementation. Legacy `scaffold stack list`, `scaffold status` and
-`scaffold fetch-ticket ID` remain read-only inspection aids outside this graph.
-
+Require the recursive issue graph and task-store schema v2. Older state and CLI
+operations are rejected without modification. Install Scaffold and Pi together;
+there is no legacy-stack or task-state migration path in this workflow.
 
 ## Scoped context and persisted issue handoff
 
@@ -166,9 +164,8 @@ for the next design issue; `select` for the next implementable issue; and `issue
 with explicit task_id to fetch one issue. Scoped context includes its approved
 design, ancestor contracts, inherited prerequisite contracts and immediate children.
 It omits lifecycle transcripts, sibling bodies and old executor inputs. Selection
-is read-only and null never proves completion. The native Pi tool also projects
-old next/design-next calls into scoped selection and returns compact mutation
-acknowledgements. Full `list` remains an explicit diagnostic operation; native
+is read-only and null never proves completion. The native Pi tool accepts only `select` and `design-select` and returns compact
+mutation acknowledgements. Full `list` remains an explicit diagnostic operation; native
 verification continues to inspect complete state and receipts internally.
 
 After selecting an issue, use native `prepare_issue_handoff` with featureId/taskId

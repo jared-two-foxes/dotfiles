@@ -61,7 +61,7 @@ export async function suspendIssue(args, context = {}, options = {}) {
       const chain = args.previousAttempt ? await authenticateAttemptChain(repository, args.previousAttempt, args.task) : null;
       if (!chain) {
         requireValue(task.delivery_policy === 'versioned-context/v1',
-          'EVIDENCE_RECOVERY_REQUIRED: legacy issue cannot assert zero invocations without retained history');
+          'UNSUPPORTED_DELIVERY_FORMAT: current versioned delivery policy is required');
         await assertLatestAttempt(repository, undefined, args.task, 0);
         requireValue(beforeStart.clean && !beforeStart.bookkeepingVisible, 'Zero-attempt suspension requires clean source/index');
       }

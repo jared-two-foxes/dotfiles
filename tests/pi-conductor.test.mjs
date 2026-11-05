@@ -10,7 +10,7 @@ import { executeAndReview } from '../pi/agent/extensions/execute-and-review/adap
 import { contract } from './helpers/conductor-contract.mjs';
 contract('Pi', executeAndReview);
 
-test('delivery authenticates retained workflows from the old extension layout', async t => {
+test('delivery rejects workflows from obsolete extension layouts', async t => {
   const root = await mkdtemp(path.join(tmpdir(), 'pi-legacy-layout-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const args = { input: '{"operations":[]}', baseRef: 'a'.repeat(40), requirements: 'Requirements' };
@@ -25,7 +25,7 @@ test('delivery authenticates retained workflows from the old extension layout', 
     executor.args[0] = legacyPath('input-guard.mjs');
     review.args[0] = legacyPath('input-guard.mjs');
     review.success_condition.args[0] = legacyPath('review-condition.mjs');
-    assert.deepEqual(authenticateWorkflow(workflow, workflow.request, args, root), checks);
+    assert.throws(() => authenticateWorkflow(workflow, workflow.request, args, root), /invocation mismatch/);
   }
   review.success_condition.args[0] = fileURLToPath(new URL('../pi/agent/extensions/conductor/review-condition.mjs', import.meta.url));
   assert.throws(() => authenticateWorkflow(workflow, workflow.request, args, root), /invocation mismatch/);

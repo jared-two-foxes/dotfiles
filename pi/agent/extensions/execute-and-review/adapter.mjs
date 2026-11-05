@@ -52,7 +52,7 @@ const MAX_WORKFLOW_TIMEOUT_MS = 2147483647;
 
 function outcome(status, stage, fields = {}) {
   return {
-    schema: "opencode.execute_and_review.result/v1",
+    schema: "pi.execute-and-review.result/v1",
     status,
     stage,
     ...fields,
@@ -268,9 +268,11 @@ async function executeAttempt(args, context = {}, options = {}) {
   }
 }
 
-// Optional task binding leaves legacy single-change callers unchanged. Receipts
-// retain one attempt only; Pi still owns approvals, interpretation and lifecycle.
+// The native delivery tool requires issue binding. This adapter also exposes the
+// current Conductor v2 pass for component-level invocation and contract tests.
 export async function hydrateContinuation(args, context) {
+  if (args?.verificationRepairReason !== undefined)
+    throw new Error("Use contextUpdates.repair_check for verification repairs");
   if (args?.previousAttempt === undefined) return args;
   const repository = path.resolve(
     await git(path.resolve(context.worktree ?? context.directory ?? "."), [
@@ -303,24 +305,8 @@ export async function hydrateContinuation(args, context) {
   const checks =
     callerPlan || !inheritedChecks ? verificationChecks(args) : inheritedChecks;
 
-  const supplied = args.requirements;
-  const inherited = previous.args.deliveryContext;
-
-  const additional =
-    typeof supplied === "string" &&
-    supplied.trim() &&
-    supplied !== previous.args.requirements &&
-    !(inherited?.original ?? previous.args.requirements).includes(supplied) &&
-    !inherited?.obligations.some((o) => o.text === supplied)
-      ? [
-          {
-            kind: "add_obligation",
-            text: supplied,
-            reason:
-              "Continuation additions retained; original criteria remain authoritative",
-          },
-        ]
-      : [];
+  if (args.requirements !== undefined && args.requirements !== previous.args.requirements)
+    throw new Error("Use contextUpdates.add_obligation to extend retained requirements");
 
   return {
     ...previous.args,
@@ -331,7 +317,7 @@ export async function hydrateContinuation(args, context) {
     reviewProbe: args.reviewProbe === true,
     callerPlan,
     requirements: previous.args.requirements,
-    contextUpdates: [...additional, ...(args.contextUpdates ?? [])],
+    contextUpdates: args.contextUpdates ?? [],
     checks,
   };
 }
@@ -383,7 +369,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     const feature = await issueFeature(repository, args.task, options);
     if (options.issueWorkflowOnly && !feature)
       throw new Error(
-        "Recursive issue graph required; migrate this feature through Design",
+        "Current recursive issue graph required",
       );
     if (feature) {
       const issue = approvedIssue(feature, args.task);
@@ -514,7 +500,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
         !correctionVerification(previous, args)
       )
         throw new Error(
-          "Verification plan mismatch; command repairs require verificationRepairReason and must preserve check names/order, coverage and success conditions",
+          "Verification plan mismatch; use structured repair_check updates and preserve check names/order, coverage and success conditions",
         );
       if (previous.result.status === "PASSED")
         throw new Error(
@@ -537,8 +523,6 @@ export async function executeAndReview(args, context = {}, options = {}) {
       attempt = previous.attempt + 1;
       if (!Number.isSafeInteger(attempt))
         throw new Error("Invalid invocation sequence");
-    } else if (args.verificationRepairReason !== undefined) {
-      throw new Error("verificationRepairReason requires previousAttempt");
     } else if (!before.clean) {
       return outcome("BLOCKED", "PRECHECK", {
         repository,

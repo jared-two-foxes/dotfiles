@@ -24,7 +24,7 @@ const evidence = Type.Object({
 // Keep the tool schema an object for Pi/provider function-tool compatibility.
 // The adapter enforces operation-specific required/forbidden fields as well.
 const parameters = Type.Object({
-  operation: Type.Union((["init", "add", "list", "next", "start", "complete", "block", "fail", "retry", "decompose", "design-next", "design-record", "design-finish", "design-reopen", "checkpoint-record", "issue-resume", "summary", "issue", "select", "design-select"] as const).map(value => Type.Literal(value))),
+  operation: Type.Union((["init", "add", "list", "start", "complete", "block", "fail", "retry", "decompose", "design-record", "design-finish", "design-reopen", "checkpoint-record", "issue-resume", "summary", "issue", "select", "design-select"] as const).map(value => Type.Literal(value))),
   feature_id: text(),
   task_id: Type.Optional(text()),
   payload: Type.Optional(Type.Union([feature, Type.Array(task, { minItems: 1 }), evidence,
@@ -45,8 +45,7 @@ export default function (pi: ExtensionAPI) {
       "Use summary for phase/counts; issue for one scoped context; select/design-select for eligible scoped work. list is an explicit full-state diagnostic. Null selection never implies completion.",
     parameters,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const scopedParams = { ...params, operation: params.operation === "next" ? "select" : params.operation === "design-next" ? "design-select" : params.operation };
-      const result = await scaffoldTasks(scopedParams, { directory: ctx.cwd, abort: signal }, {
+      const result = await scaffoldTasks(params, { directory: ctx.cwd, abort: signal }, {
         authorizeIssueMutation: authenticateIssueMutation,
       });
       return {

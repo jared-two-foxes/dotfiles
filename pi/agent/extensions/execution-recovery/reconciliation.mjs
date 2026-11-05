@@ -107,7 +107,7 @@ export async function reconcileFeature(args, context = {}, options = {}) {
     }
     const verifiedBefore = prefixBefore ?? pre.before;
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.upstreamBaseRef,
-      head: args.headRef, tree: verifiedBefore.tree, branch: args.branch, task_revision: pre.feature.task_revision ?? 0,
+      head: args.headRef, tree: verifiedBefore.tree, branch: args.branch, task_revision: pre.feature.task_revision,
       plan_digest: digest(JSON.stringify(plan)) };
     record = { kind: 'reconciliation', originalBaseline: args.featureBaseRef, oldHead: args.oldHeadRef,
       previousReconciliationRef: args.previousReconciliationRef, binding, plan, feature: pre.feature, tasks: pre.feature.tasks,

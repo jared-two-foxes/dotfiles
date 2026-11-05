@@ -3,7 +3,7 @@ import { issueDesignRequirements } from '../../pi/agent/lib/scaffold/contracts.m
 export async function approveGraph(call) {
   if ((await call('list')).feature.workflow.phase !== 'design') return;
   for (;;) {
-    const task = (await call('design-next')).task;
+    const task = (await call('design-select')).context?.issue;
     if (!task) break;
     const feature = (await call('list')).feature;
     await call('design-record', { task_id: task.id, payload: {

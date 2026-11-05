@@ -53,7 +53,7 @@ once. Prior per-issue approvals alone do not imply this broader delivery grant.
 ## 2. Design the issue graph downward
 
 Conversational memory is not authoritative; authenticate persisted state and evidence.
-Use `summary`, then `design-select` (the compact equivalent of `design-next`) for
+Use `summary`, then `design-select` for
 one eligible issue. Inspect only that issue's scoped context, ancestor contracts,
 inherited dependencies and relevant source. Make detailed engineering decisions
 within the approved direction yourself. Share concise progress when useful;
@@ -172,7 +172,7 @@ that expensive suite across each issue or parent. If final review creates correc
 issues, use targeted checks for those issues, then rerun the full final gate.
 
 The selected ordered plan stays fixed within a correction epoch. For an invocation
-error, use `verificationRepairReason` with equivalent commands, preserving names,
+error, use a structured `repair_check` update with equivalent commands, preserving names,
 order, success conditions and coverage. Never silently weaken a plan; changed
 verification contracts require Design recovery retaining criteria, history and count.
 
@@ -292,9 +292,8 @@ for the next design issue; `select` for the next implementable issue; and `issue
 with explicit task_id to fetch one issue. Scoped context includes its approved
 design, ancestor contracts, inherited prerequisite contracts and immediate children.
 It omits lifecycle transcripts, sibling bodies and old executor inputs. Selection
-is read-only and null never proves completion. The native Pi tool also projects
-old next/design-next calls into scoped selection and returns compact mutation
-acknowledgements. Full `list` remains an explicit diagnostic operation; native
+is read-only and null never proves completion. The native Pi tool accepts `select` and `design-select` for scoped selection and
+returns compact mutation acknowledgements. Full `list` remains an explicit diagnostic operation; native
 verification continues to inspect complete state and receipts internally.
 
 After selecting an issue, use native `prepare_issue_handoff` with featureId/taskId

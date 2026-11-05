@@ -201,7 +201,7 @@ export function validContextContinuation(previous, args) {
   const old = previous.args.deliveryContext;
   const next = args.deliveryContext;
   if (args.requirements !== renderContext(next)) return false;
-  if (!old) return next.original.includes(previous.args.requirements);
+  if (old?.schema !== "pi.delivery-context/v1" || next.schema !== "pi.delivery-context/v1") return false;
   return (
     old.original === next.original &&
     equal(old.updates, next.updates.slice(0, old.updates.length)) &&

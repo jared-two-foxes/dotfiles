@@ -1,13 +1,14 @@
-// Existing lifecycle scenarios describe domain outcomes. Translate ONLY their
-// injected fixtures to actual v2 transport, keeping those tests about task/rebase
-// semantics. Wire-contract tests import the production adapters directly.
+// Lifecycle scenarios describe explicit test-domain outcomes, not an application
+// wire protocol. Emit current Conductor v2 receipts with retained logs.
+// Wire-contract tests import the production adapters directly.
+function assertV2(request) { if (request.schema !== 'conductor.request/v2') throw new Error('Fixture requires a current v2 command list'); }
 import { executeAndReview as pi } from '../../pi/agent/extensions/execute-and-review/adapter.mjs';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 export async function requestView(request) {
-  if (request.schema !== 'conductor.request/v2') return request;
+  assertV2(request);
   const underlying = command => command.args[0].endsWith('input-guard.mjs') ? JSON.parse(command.args[1]) : command;
   const reviewCommand = underlying(request.commands.at(-1));
   const review = JSON.parse(await readFile(reviewCommand.args[reviewCommand.args.indexOf('--request') + 1], 'utf8'));
@@ -19,7 +20,7 @@ export async function requestView(request) {
     ['max_repeated_actions', '--max-repeated-actions'], ['max_completion_attempts', '--max-completion-attempts']]) {
     if (reviewCommand.args.includes(option)) settings[name] = Number(flag(option));
   }
-  return { schema: 'conductor.request/v1', repository_path: request.working_directory,
+  return { schema: 'fixture.delivery-input/v1', repository_path: request.working_directory,
     execution: JSON.parse(await readFile(underlying(request.commands[0]).args[1], 'utf8')),
     checks: request.commands.slice(1, -1), review: { requirements, base_ref: review.base_ref,
       model: flag('--model'), ...settings } };
@@ -28,8 +29,8 @@ export async function requestView(request) {
 export async function domainResponse(request, response) {
   let value;
   try { value = JSON.parse(response.stdout); } catch { return response; }
-  if (value.schema !== 'conductor.result/v1') return response;
-  const legacy = await requestView(request);
+  if (value.schema !== 'fixture.delivery-outcome/v1') return response;
+  const view = await requestView(request);
   const directory = path.join(request.output_directory, 'fixture-' + randomUUID());
   await mkdir(directory);
   const records = [];
@@ -47,9 +48,9 @@ export async function domainResponse(request, response) {
       stderr_truncated: false, stdout_path, stderr_path });
   }
   const execution = value.execution ?? { success: value.phase !== 'execution' };
-  await add(0, { operations_applied: execution.success ? legacy.execution.operations.length : 0, ...execution }, execution.success ? 0 : 1);
+  await add(0, { operations_applied: execution.success ? view.execution.operations.length : 0, ...execution }, execution.success ? 0 : 1);
   let checks = value.checks;
-  if (!checks) checks = legacy.checks.map((check, i) => ({ name: check.name,
+  if (!checks) checks = view.checks.map((check, i) => ({ name: check.name,
     exit_code: value.phase === 'verification' && i === 0 ? 1 : 0, stdout: '' }));
   if (value.phase !== 'execution') {
     for (const check of checks) {
@@ -65,7 +66,7 @@ export async function domainResponse(request, response) {
         reason: review.status === 'INDETERMINATE' ? 'BUDGET_EXHAUSTED' : 'REVIEW_COMPLETED',
         findings: review.status === 'CHANGES_REQUESTED' ? [{ severity: 'high', blocking: true, message: 'Fixture correction required' }] : [], ...review };
       if (['APPROVED', 'CHANGES_REQUESTED'].includes(review?.status)) {
-        const line = legacy.review.requirements.split('\n').find(l => l.startsWith('{"design":'));
+        const line = view.review.requirements.split('\n').find(l => l.startsWith('{"design":'));
         const context = line ? JSON.parse(line) : null;
         review.obligation_assessments ??= (context?.obligations ?? []).filter(o => o.status !== 'independently_verified')
           .map(o => ({ obligation_id: o.id, disposition: 'verified', evidence: 'Independent fixture inspected the correction and regression output' }));
@@ -88,14 +89,14 @@ export async function domainResponse(request, response) {
   const runner = { schema: 'conductor.result/v2', status,
     phase: status === 'PASSED' ? 'completed' : 'commands', commands: records, output_directory: directory,
     ...(status === 'PASSED' ? {} : { failed_command_index: records.length - 1, error: 'Fixture failed' }) };
-  const legacyExit = { PASSED: 0, NEEDS_DESIGN: 2, BLOCKED: 3 }[value.status];
-  const code = response.code === legacyExit ? { PASSED: 0, FAILED: 1, BLOCKED: 2 }[status] : -1;
+  const outcomeExit = { PASSED: 0, NEEDS_DESIGN: 2, BLOCKED: 3 }[value.status];
+  const code = response.code === outcomeExit ? { PASSED: 0, FAILED: 1, BLOCKED: 2 }[status] : -1;
   return { code, stdout: JSON.stringify(runner), stderr: response.stderr ?? '' };
 }
 
 export async function successResponse(request, patch = {}) {
   return domainResponse(request, { code: 0, stderr: '', stdout: JSON.stringify({
-    schema: 'conductor.result/v1', status: 'PASSED', phase: 'review', ...patch,
+    schema: 'fixture.delivery-outcome/v1', status: 'PASSED', phase: 'review', ...patch,
   }) });
 }
 

@@ -60,7 +60,8 @@ successful process that reports zero passing tests still fails this gate. If the
 filter itself selects no tests, repair the command separately and preserve the
 approved target coverage.
 
-Legacy verificationRepairReason remains compatible for invocation-only repairs.
+Invocation repairs require structured `contextUpdates.repair_check`; the free-form
+`verificationRepairReason` input is rejected.
 Material behavior/scope changes or removal/relaxation of obligations require
 approve_delivery_amendment: show the concrete original IDs, replacement and reason
 for explicit user confirmation. Apply its authenticated reference through
@@ -137,19 +138,22 @@ positive-completed-count validator when no explicit evaluator exists. Other runn
 need an appropriate explicit successCondition. A zero-test success is not coverage.
 Full project validation remains mandatory at the final feature gate.
 
-## Compatibility and repair
+## Supported delivery contract
 
-Existing receipt bytes and references are unchanged. The first modern continuation
-authenticates the old chain, imports original requirements losslessly, retains
-findings and records a journal linking its latest receipt and sequence. Attempt
-five can continue as six and beyond. Legacy requirement prose is inherited; use
-structured updates to revise context. Receipt authentication understands both
-legacy fixed-context records and modern versioned-context records. Imported legacy
-check/evaluator definitions remain unchanged across subsequent continuations;
-new coverage is introduced explicitly through structured additions or repairs.
-New supported test checks receive the default meaningful-count evaluator. There is no
-64-record lifetime cap; cycle checks remain. Rebase/suspension handoffs retain the
-same execution sequence and update the journal anchor.
+Delivery requires a recursive issue graph, `versioned-context/v1` policy, a
+`pi.delivery-context/v1` context and its existing Scaffold journal for nonzero
+continuations. Fixed-context records are retained but cannot be imported or resumed.
+Use structured `add_obligation` and `repair_check` updates; replacement requirements
+strings are rejected. Only current helper paths and `pi.command-receipts/v2`
+producers can authenticate native delivery evidence. Conductor uses request/result
+v2 and retained stdout logs; inline previews do not substitute for those logs.
+Task and feature storage remain `pi.task-attempt/v1` and `pi.feature-attempt/v1`;
+these are current storage schemas, distinct from retired binary interfaces.
+
+No receipt bytes or identifiers are rewritten. Unsupported evidence cannot authorize
+review, checkpointing or completion. There is no automatic migration or reset.
+Current-format chains retain their full history with no 64-record lifetime cap;
+rebase/suspension handoffs retain the same sequence and update the journal anchor.
 
 Missing/corrupt receipts, dropped journal history or contradictory audit anchors
 produce EVIDENCE_RECOVERY_REQUIRED. Restore exact authoritative evidence from

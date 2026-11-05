@@ -81,8 +81,9 @@ checkpoint unverified work. Do not replay already-applied operations or add iden
 edits for unchanged files. Use `{"operations":[]}` for a checks-only retry.
 
 If a check's command is wrong (for example `sh` is absent on native Windows), keep
-the named checks in order and supply `verificationRepairReason` explaining the
-failure, repaired invocation and equivalent coverage. This permits command changes,
+the named checks in order and supply `contextUpdates` with `kind: "repair_check"`,
+the original `checkId`, repaired `command` argv and `reason` explaining the failure
+and equivalent coverage. This permits command changes,
 not removing/renaming/reordering checks or changing success conditions. Keep the
 original criteria and constraints retained. The repair reason and plan reach independent
 Review and are retained in the authenticated attempt chain. Never change a command
@@ -142,8 +143,8 @@ rerun checks. Reused receipts remain explicitly linked and authenticated. Recogn
 Cargo, pytest, Vitest, Jest and Mocha test runs receive a meaningful-count validator
 when no explicit semantic validator was supplied. Never weaken a validator to pass.
 
-An existing v1 chain migrates on its original identity, baseline and receipt links,
-including a latest fifth attempt. Scaffold's journal and Git audit anchor prevent
+Current versioned-context chains continue on their original identity, baseline and
+receipt links. Obsolete fixed-context attempts are rejected without migration. Scaffold's journal and Git audit anchor prevent
 missing evidence from looking like a new run. A missing or contradictory anchor,
 in-flight intent or receipt requires explicit recovery; no reset or reapproval.
 See extensions/execute-and-review/RECOVERY.md for runtime details and current limitations.

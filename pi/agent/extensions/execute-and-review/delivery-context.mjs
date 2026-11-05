@@ -36,8 +36,8 @@ export async function deliveryEvent(repository, task, journal, event, options = 
 
 export async function prepareDelivery(repository, feature, issue, args, options = {}) {
   requireValue(
-    issue.delivery || args.previousAttempt || issue.delivery_policy === "versioned-context/v1",
-    "EVIDENCE_RECOVERY_REQUIRED: legacy issue has execution history but no latest receipt. Recover original evidence; never assume zero consumed invocations",
+    issue.delivery_policy === "versioned-context/v1",
+    "UNSUPPORTED_DELIVERY_FORMAT: current versioned delivery policy is required",
   );
   const records = args.previousAttempt
     ? (await authenticateAttemptChain(repository, args.previousAttempt, args.task)).records
@@ -80,9 +80,14 @@ export async function prepareDelivery(repository, feature, issue, args, options 
       }
   }
   const previous = records.at(-1);
-  let context = journal?.context ?? previous?.args.deliveryContext ?? {
+  if (previous && previous.kind !== "issue-zero-handoff") {
+    requireValue(previous.args.deliveryContext?.schema === "pi.delivery-context/v1",
+      "UNSUPPORTED_DELIVERY_FORMAT: retained attempt requires versioned context");
+    requireValue(journal, "EVIDENCE_RECOVERY_REQUIRED: delivery journal is missing");
+  }
+  let context = journal?.context ?? {
     schema: "pi.delivery-context/v1",
-    original: issueRequirements(issue, previous?.args.requirements ?? args.requirements ?? "") +
+    original: issueRequirements(issue, args.requirements ?? "") +
       "\nFeature contract: " + JSON.stringify({
         objective: feature.objective,
         criteria: feature.acceptance_criteria,
@@ -91,9 +96,11 @@ export async function prepareDelivery(repository, feature, issue, args, options 
     design: structuredClone(issue.designs.at(-1)),
     obligations: [],
     updates: [],
+    contractItems: deliveryContractItems(feature, issue, args.task),
   };
   context = structuredClone(context);
-  context.contractItems ??= deliveryContractItems(feature, issue, args.task);
+  requireValue(context.schema === "pi.delivery-context/v1" && Array.isArray(context.contractItems),
+    "UNSUPPORTED_DELIVERY_FORMAT: current context and contract items required");
   for (const a of context.amendments ?? [])
     requireValue(
       equal(await authenticateAmendment(repository, a.reference, args.task), a),
@@ -148,12 +155,9 @@ export async function prepareDelivery(repository, feature, issue, args, options 
     checks: revised.checks,
     requirements: renderContext(revised.context),
     deliveryContext: revised.context,
-    ...(updates.some((u) => u.kind === "repair_check") ? {
-      verificationRepairReason: updates.filter((u) => u.kind === "repair_check").map((u) => u.reason).join("\n"),
-    } : {}),
   };
   requireValue(!previous || previous.kind === "issue-zero-handoff" || correctionVerification(previous, planned),
-    "Verification plan mismatch; use a structured repair or verificationRepairReason without weakening coverage. Evaluator repair requires an authenticated redesign handoff and the same test command and check order");
+    "Verification plan mismatch; use structured repair_check updates without weakening coverage. Evaluator repair requires an authenticated redesign handoff and the same test command and check order");
   requireValue(!previous || previous.kind === "issue-zero-handoff" || validContextContinuation(previous, planned),
     "Original review context or inherited obligations changed; restore authoritative records before execution");
   if (!equal(journal.context, revised.context))

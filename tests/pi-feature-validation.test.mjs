@@ -18,12 +18,11 @@ import {
 } from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   reconcileFeature,
-  inspectReconciliation,
 } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
+import { inspectRebaseEvidence } from "../pi/agent/extensions/execution-recovery/rebase-inspection.mjs";
 import { readReconciliation } from "../pi/agent/lib/verification/reconciliation.mjs";
 import {
   recoverInterruptedTaskRebase,
-  inspectTaskRebaseRecovery,
 } from "../pi/agent/extensions/execution-recovery/interrupted-rebase.mjs";
 import { readEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { runCheck } from "../pi/agent/extensions/feature-validation/check-process.mjs";
@@ -38,7 +37,7 @@ async function executeAndReview(args, context, options) {
     context,
     scaffoldOptions,
   );
-  if (r.ok)
+  if (r.ok && !args.previousAttempt)
     args = {
       ...args,
       requirements: requirementsFor(
@@ -54,7 +53,7 @@ const integration = {
     ? "Set SCAFFOLD_SOURCE to Phase 5 Scaffold checkout"
     : false,
 };
-async function fixture(t, legacy = false) {
+async function fixture(t) {
   const root = await mkdtemp(path.join(tmpdir(), "pi-feature-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const dir = path.join(root, "repo");
@@ -65,11 +64,6 @@ async function fixture(t, legacy = false) {
   g("config", "core.autocrlf", "false");
   await writeFile(path.join(dir, ".gitignore"), ".scaffold/\noutput/\n");
   await writeFile(path.join(dir, "source.txt"), "base\n");
-  if (legacy)
-    await writeFile(
-      path.join(dir, "approved.md"),
-      "Original Git-approved feature design: producer and consumer must interoperate.",
-    );
   g("add", ".");
   g("commit", "-qm", "A");
   g("switch", "-qc", "feature/test");
@@ -116,7 +110,7 @@ async function fixture(t, legacy = false) {
   const context =
     "Approved feature: producer and consumer must interoperate. Preserve errors.\nOriginal baseline: " +
     base;
-  const designRef = legacy ? "approved.md@" + base : designReference(context);
+  const designRef = designReference(context);
   await call("init", {
     payload: {
       id: "F5",
@@ -176,7 +170,7 @@ async function fixture(t, legacy = false) {
           return {
             code: 0,
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status: "PASSED",
               phase: "review",
               execution: { success: true },
@@ -729,19 +723,12 @@ test(
   },
 );
 
-test(
-  "legacy immutable Git design references review original text",
-  integration,
-  async (t) => {
-    const f = await fixture(t, true);
-    await f.add("one");
-    await f.finish("one");
-    const r = await f.validate();
-    assert.equal(r.status, "PASSED", JSON.stringify(r));
-    const capture = JSON.parse(await readFile(f.capture, "utf8"));
-    assert.match(capture.requirements, /Original Git-approved feature design/);
-  },
-);
+test("Git design references are rejected; context hashes are required", async () => {
+  const { approvedDesign } = await import("../pi/agent/lib/verification/feature.mjs");
+  assert.throws(() => approvedDesign("/unused", {
+    context: "Original approved design", design_ref: "approved.md@" + "a".repeat(40),
+  }), /design|context/i);
+});
 
 // Real Git rebases + real Scaffold, with deterministic external verification fixtures.
 async function rebaseFixture(t, task = true) {
@@ -808,7 +795,7 @@ test(
     assert.equal(capture.req.base_ref, args.upstreamBaseRef);
     assert.match(capture.requirements, /Only task one/);
     assert.match(capture.requirements, /conflict resolutions/);
-    const inspected = await inspectReconciliation(
+    const inspected = await inspectRebaseEvidence(
       { reference: r.evidenceRef },
       { directory: f.dir },
       f.options,
@@ -818,6 +805,11 @@ test(
       true,
       JSON.stringify(inspected),
     );
+    assert.equal(inspected.results[0].kind, "reconciliation");
+    assert.equal((await inspectRebaseEvidence(
+      { reference: r.evidenceRef, featureId: "different-feature" },
+      { directory: f.dir }, f.options,
+    )).ok, false);
     await f.add("two", ["one"]);
     await f.finish("two", false, r.evidenceRef);
     const passed = await f.validate({ reconciliationRef: r.evidenceRef });
@@ -870,7 +862,7 @@ test(
       (await f.validate({ reconciliationRef: first.evidenceRef })).status,
       "BLOCKED",
     );
-    const inspection = await inspectReconciliation(
+    const inspection = await inspectRebaseEvidence(
       { featureId: "F5" },
       { directory: f.dir },
       f.options,
@@ -1110,7 +1102,7 @@ test(
           (await f.validate({ reconciliationRef: r.evidenceRef })).status,
           "BLOCKED",
         );
-        const inspected = await inspectReconciliation(
+        const inspected = await inspectRebaseEvidence(
           { reference: r.evidenceRef },
           { directory: f.dir },
           f.options,
@@ -1287,7 +1279,7 @@ async function interruptedFixture(t, attempts = 3) {
           return {
             code: status === "PASSED" ? 0 : 2,
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status,
               phase: "review",
               execution: { success: true },
@@ -1313,7 +1305,7 @@ async function interruptedFixture(t, attempts = 3) {
   }
   for (let index = 0; index < attempts; index++) {
     const r = await attempt(
-      { ...taskArgs, previousAttempt: receipts.at(-1) },
+      { ...taskArgs, ...(index ? { requirements: undefined } : {}), previousAttempt: receipts.at(-1) },
       "NEEDS_DESIGN",
       async () => {
         for (let file = 0; file < 5; file++)
@@ -1397,12 +1389,18 @@ test(
         originals[i],
       );
     assert.equal((await f.call("list")).feature.tasks.two.status, "blocked");
-    const inspected = await inspectTaskRebaseRecovery(
+    const inspected = await inspectRebaseEvidence(
       { reference: r.handoffRef },
       { directory: f.dir },
       f.options,
     );
-    assert.equal(inspected.applicable, true, JSON.stringify(inspected));
+    assert.equal(inspected.results[0].applicable, true, JSON.stringify(inspected));
+    assert.equal(inspected.results[0].kind, "rebase-handoff");
+    assert.equal(inspected.results[0].consumedAttempts, 3);
+    assert.equal((await inspectRebaseEvidence(
+      { reference: r.handoffRef, featureId: "different-feature" },
+      { directory: f.dir }, f.options,
+    )).ok, false);
     assert.equal(
       (await f.recover({ resumeHandoffRef: r.handoffRef })).recovered,
       true,
@@ -1511,12 +1509,14 @@ test(
     );
     const fifth = await f.attempt({
       ...r.resume,
+      requirements: undefined,
       input: '{"operations":[]}',
       previousAttempt: fourth.evidence.reference,
     });
     assert.equal(fifth.evidence.attempt, 5);
     const sixth = await f.attempt({
       ...r.resume,
+      requirements: undefined,
       input: '{"operations":[]}',
       previousAttempt: fifth.evidence.reference,
     });
@@ -1644,12 +1644,13 @@ test(
       );
       f.g("reflog", "expire", "--expire=now", "--all");
       f.g("gc", "--prune=now");
-      const inspected = await inspectTaskRebaseRecovery(
+      const inspected = await inspectRebaseEvidence(
         { reference: recovered.handoffRef },
         { directory: f.dir },
         f.options,
       );
-      assert.equal(inspected.applicable, true, JSON.stringify(inspected));
+      assert.equal(inspected.results[0].applicable, true, JSON.stringify(inspected));
+      assert.equal(inspected.results[0].kind, "rebase-handoff");
     }
   },
 );
@@ -1820,7 +1821,7 @@ test(
     });
     await f.call("start", { task_id: "two" });
     const changed = await executeAndReview(
-      { ...f.taskArgs, previousAttempt: f.receipts.at(-1) },
+      { ...f.taskArgs, requirements: undefined, previousAttempt: f.receipts.at(-1) },
       { directory: f.dir },
       {
         invokeConductor: async () => {
@@ -1834,7 +1835,7 @@ test(
           return {
             code: 2,
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status: "NEEDS_DESIGN",
               phase: "review",
               execution: { success: true },

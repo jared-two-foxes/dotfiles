@@ -82,7 +82,7 @@ async function respond(json, patch = {}) {
       return {
         code: 2,
         stdout: JSON.stringify({
-          schema: "conductor.result/v1",
+          schema: "fixture.delivery-outcome/v1",
           status: "NEEDS_DESIGN",
           phase: "verification",
           execution: { success: true },
@@ -96,7 +96,7 @@ async function respond(json, patch = {}) {
     code: 0,
     stderr: "",
     stdout: JSON.stringify({
-      schema: "conductor.result/v1",
+      schema: "fixture.delivery-outcome/v1",
       status: "PASSED",
       phase: "review",
       execution: { success: true },
@@ -138,7 +138,7 @@ test("forwards named commands in order without build/test defaults or shell inte
         return {
           code: 2,
           stdout: JSON.stringify({
-            schema: "conductor.result/v1",
+            schema: "fixture.delivery-outcome/v1",
             status: "NEEDS_DESIGN",
             phase: "verification",
           }),
@@ -268,7 +268,7 @@ test("corrections retain the complete ordered plan and reject scope changes", as
         ...(await respond(json)),
         code: 2,
         stdout: JSON.stringify({
-          schema: "conductor.result/v1",
+          schema: "fixture.delivery-outcome/v1",
           status: "NEEDS_DESIGN",
           phase: "review",
         }),

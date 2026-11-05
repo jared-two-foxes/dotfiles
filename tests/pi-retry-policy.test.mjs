@@ -13,7 +13,7 @@ import {
 } from '../pi/agent/lib/delivery-state/delivery-context.mjs';
 import { obligationsVerified } from '../pi/agent/lib/verification/obligations.mjs';
 const checks = [{ name: 'regression', command: ['cargo', 'test', 'status'], successCondition: ['validate-results'] }];
-const context = () => ({ original: 'Reject invalid statuses', design: { reference: 'design', summary: 'Validate imports', verification: 'Regression', approval: 'direction' }, updates: [], obligations: [] });
+const context = () => ({ schema: 'pi.delivery-context/v1', original: 'Reject invalid statuses', design: { reference: 'design', summary: 'Validate imports', verification: 'Regression', approval: 'direction' }, updates: [], obligations: [] });
 const record = (category, n, diagnostic = 'same error', tree = 'a') => ({ startedReference: 'intent-' + n,
   recordedAt: new Date(1000 * n).toISOString(), after: { tree }, args: { reviewEnvironment: 'env', checks },
   result: { status: 'NEEDS_DESIGN', conductor: category === 'review' ? { phase: 'review', checks: [],

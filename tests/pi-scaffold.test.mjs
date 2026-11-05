@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -7,7 +8,8 @@ import path from 'node:path';
 import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const feature = { id: 'F1', title: 'Feature', objective: 'Deliver feature', design_ref: 'approved-design@sha', acceptance_criteria: ['Feature works'], baseline: 'a'.repeat(40), branch: 'feature/test' };
+const context = 'Approved feature context';
+const feature = { context, id: 'F1', title: 'Feature', objective: 'Deliver feature', design_ref: 'sha256:' + createHash('sha256').update(context).digest('hex'), acceptance_criteria: ['Feature works'], baseline: 'a'.repeat(40), branch: 'feature/test' };
 const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', acceptance_criteria: ['Task works'] });
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
@@ -30,7 +32,7 @@ function response(operation) {
   if (['start', 'complete', 'block', 'fail', 'retry'].includes(operation)) {
     return success({ task: task('T1', { start: 'in_progress', complete: 'completed', block: 'blocked', fail: 'failed', retry: 'pending' }[operation]) });
   }
-  return success({ feature: { ...feature, tasks: { T1: task() } }, ...(['next', 'design-next'].includes(operation) ? { task: task() } : {}) });
+  return success({ feature: { ...feature, tasks: { T1: task() } } });
 }
 async function fixture(t) {
   const dir = await realpath(await mkdtemp(path.join(tmpdir(), 'pi-scaffold-')));
@@ -72,6 +74,7 @@ test('every operation constructs one exact CLI invocation and JSON stdin', async
 
 test('payloads and free-text arguments are literal, not shell interpolation', () => {
   const payload = { ...feature, context: 'Quotes " and newline\n$(touch unsafe); `command`' };
+  payload.design_ref = 'sha256:' + createHash('sha256').update(payload.context).digest('hex');
   const built = buildCommand({ ...params('init'), payload });
   assert.equal(built.input, JSON.stringify(payload));
   assert.deepEqual(JSON.parse(built.input), payload);
@@ -81,7 +84,7 @@ test('payloads and free-text arguments are literal, not shell interpolation', ()
 
 test('required, extraneous and invalid arguments fail before invoking Scaffold', async t => {
   const dir = await fixture(t);
-  const bad = [undefined, {}, { operation: 'push-ticket', feature_id: 'F1' },
+  const bad = [undefined, {}, { operation: 'push-ticket', feature_id: 'F1' }, { operation: 'next', feature_id: 'F1' }, { operation: 'design-next', feature_id: 'F1' },
     { ...params('list'), repo_path: '../elsewhere' },
     { ...params('start'), task_id: '' },
     { ...params('list'), task_id: 'T1' }, { ...params('list'), payload: {} },
@@ -125,22 +128,19 @@ test('nonzero exits retain structured stderr and never retry or complete', async
 
 test('malformed, unsupported, mismatched and incomplete responses fail safely', async t => {
   const dir = await fixture(t);
-  const base = JSON.parse(response('next').stdout);
+  const base = JSON.parse(response('select').stdout);
   const invalid = ['not json', 'null', '[]', '{}',
     JSON.stringify({ ...base, schema_version: 3 }),
     JSON.stringify({ ...base, schema_version: 1 }),
     JSON.stringify({ ...base, schema_version: '1' }),
     JSON.stringify({ ...base, error: 'failure' }),
-    JSON.stringify({ ...base, feature: { ...base.feature, id: 'other' } }),
-    JSON.stringify({ ...base, task: undefined }),
-    JSON.stringify({ ...base, task: { ...task(), feature_id: 'other' } }),
-    JSON.stringify({ ...base, task: { ...task(), status: 'invented' } }),
-    JSON.stringify({ ...base, task: { ...task(), id: 'not-in-feature' } }),
-    JSON.stringify({ ...base, feature: { ...base.feature, tasks: { wrongKey: task() } } }),
-    JSON.stringify({ ...base, feature: { ...base.feature, tasks: { T1: { ...task(), history: null } } } }),
+    JSON.stringify({ ...base, summary: { ...base.summary, id: 'other' } }),
+    JSON.stringify({ ...base, context: undefined }),
+    JSON.stringify({ ...base, context: { ...base.context, issue: { ...task(), feature_id: 'other' } } }),
+    JSON.stringify({ ...base, context: { ...base.context, issue: { ...task(), status: 'invented' } } }),
   ];
   for (const stdout of invalid) {
-    const result = await scaffoldTasks(params('next'), { directory: dir }, {
+    const result = await scaffoldTasks(params('select'), { directory: dir }, {
       invokeScaffold: async () => ({ code: 0, stdout, stderr: '' }),
     });
     assert.equal(result.ok, false, stdout);
@@ -152,12 +152,11 @@ test('malformed, unsupported, mismatched and incomplete responses fail safely', 
     });
     assert.equal(result.reason, 'INVALID_RESPONSE');
   }
-  const empty = await scaffoldTasks(params('next'), { directory: dir }, {
-    invokeScaffold: async () => success({ feature: { ...feature, tasks: { T1: task('T1', 'failed') } }, task: null }),
+  const empty = await scaffoldTasks(params('select'), { directory: dir }, {
+    invokeScaffold: async () => success({ summary: base.summary, context: null }),
   });
   assert.equal(empty.ok, true);
-  assert.equal(empty.data.task, null);
-  assert.equal(empty.data.feature.tasks.T1.status, 'failed');
+  assert.equal(empty.data.context, null);
 });
 
 test('missing executable, cancellation and subprocess exceptions are structured failures', async t => {
@@ -227,10 +226,10 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   };
   await call(params('init'));
   await call({ ...params('add'), operation:'decompose', task_id:'F1', payload: [definition(), { ...definition('T2'), dependencies: ['T1'] }] });
-  assert.equal((await call(params('next'))).task, null);
+  assert.equal((await call(params('select'))).context, null);
   for (const task_id of ['F1','T1','T2']) await call({operation:'design-record',feature_id:'F1',task_id,payload:{summary:'Approved', verification:'Checks', approval:'User confirmed', disposition:task_id === 'F1' ? 'decomposed' : 'leaf'}});
   await call({operation:'design-finish',feature_id:'F1'});
-  assert.equal((await call(params('next'))).task.id, 'T1');
+  assert.equal((await call(params('select'))).context.issue.id, 'T1');
   await call(params('start'));
   // Fresh module instance, no previous conversation or adapter memory.
   const fresh = await import('../pi/agent/extensions/scaffold/adapter.mjs?new-session');
@@ -238,13 +237,13 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   assert.equal(resumed.ok, true);
   assert.equal(resumed.data.feature.tasks.T1.status, 'in_progress');
   assert.equal(resumed.data.feature.tasks.T2.dependencies[0], 'T1');
-  assert.equal((await call(params('next'))).task, null);
+  assert.equal((await call(params('select'))).context, null);
   const premature = await scaffoldTasks({ ...params('start'), task_id: 'T2' }, { directory: dir });
   assert.equal(premature.ok, false);
   await call(params('complete'));
   const listed = await call(params('list'));
   assert.deepEqual(listed.feature.tasks.T1.history.at(-1).evidence, evidence);
-  assert.equal((await call(params('next'))).task, null); // missing checkpoint blocks every next issue
+  assert.equal((await call(params('select'))).context, null); // missing checkpoint blocks every next issue
   const blocked = await scaffoldTasks({...params('start'),task_id:'T2'}, {directory:dir});
   assert.equal(blocked.ok, false); assert.match(blocked.scaffold_error.error, /checkpoint/);
   assert.equal(await readFile(path.join(dir,'application.txt'),'utf8'), 'unchanged');
@@ -258,9 +257,9 @@ test('Pi policies allow only scoped state tracking and preserve separate executi
     assert.match(text, /Scaffold (?:validates structure and association|does not authenticate)/);
   }
   const skill = await readFile(path.join(root, 'pi/agent/skills/scaffold/SKILL.md'), 'utf8');
-  assert.match(skill, /next` returning null does not/);
+  assert.match(skill, /select` returning null does not/);
   assert.match(skill, /not trusted Conductor verification/);
-  for (const file of ['pi/agent/skills/scaffold/SKILL.md', 'pi/agent/skills/assisted/SKILL.md',
+  for (const file of ['pi/agent/skills/scaffold/SKILL.md',
     'pi/agent/extensions/plan/index.ts', 'pi/agent/extensions/linear/index.ts']) {
     assert.doesNotMatch(await readFile(path.join(root, file), 'utf8'), /scaffold_run|push-ticket|next-step|\/skill:tdd/);
   }

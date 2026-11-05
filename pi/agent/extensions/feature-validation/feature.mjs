@@ -59,7 +59,7 @@ export async function featurePreconditions(repository, args, options = {}) {
   const feature = await state(repository, args.featureId, options);
   requireValue(feature.design_ref === args.designRef, 'Approved design identity mismatch');
   const design = approvedDesign(repository, feature);
-  requireValue(!feature.original_baseline || feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
+  requireValue(feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
   requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
   const tasks = feature.tasks;
   for (const task of Object.values(tasks)) for (const a of task.delivery?.context?.amendments ?? [])
@@ -104,11 +104,11 @@ function handoff(record, reference) {
   return { ...record.result, attempt_id: record.attemptId, binding: record.binding, reference,
     checks: record.checks, review: record.review ?? null, message: record.result.message ?? '' };
 }
-function assembledRequirements(pre, args, versioned = true, scopedChecks = true) {
-  const feature = scopedChecks ? { ...pre.feature, tasks: pre.reviewTasks } : pre.feature;
-  return featureRequirements(feature, pre.design) + (versioned ?
+function assembledRequirements(pre, args) {
+  const feature = { ...pre.feature, tasks: pre.reviewTasks };
+  return featureRequirements(feature, pre.design) + (
     '\n\nPersisted feature obligations: ' + JSON.stringify(pre.obligations) +
-    '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.' : '') +
+    '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.') +
     (args.reconciliationRef ? '\n\nVerified rebase reconciliation: ' + args.reconciliationRef +
       '\nNew upstream baseline: ' + pre.anchor.baseline : '');
 }
@@ -120,17 +120,17 @@ export async function validateFeature(args, context = {}, options = {}) {
     repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
     const pre = await featurePreconditions(repository, args, options);
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.featureBaseRef,
-      head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision ?? 0,
+      head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision,
       plan_digest: digest(JSON.stringify(plan)) };
     const requirements = assembledRequirements(pre, args);
     const reviewTasks = pre.reviewTasks;
     if (args.resumeEvidenceRef) {
       record = await readFeatureEvidence(repository, args.resumeEvidenceRef);
-      const scopedChecks = record.scopedTaskChecks === true;
-      const expectedRequirements = assembledRequirements(pre, args, record.obligations !== undefined, scopedChecks);
+      requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
+      const expectedRequirements = assembledRequirements(pre, args);
       requireValue(record.requirements === expectedRequirements && (record.reconciliationRef ?? null) === (args.reconciliationRef ?? null), 'Approved feature requirements or reconciliation changed');
       authenticateFeatureRecord(record, binding, plan, pre.feature.tasks, expectedRequirements, undefined,
-        scopedChecks ? reviewTasks : pre.feature.tasks);
+        reviewTasks);
       // Idempotent Scaffold recording handles loss of the original confirmation.
       const current = pre.feature.validation;
       requireValue(current?.current === record.attemptId, 'Result is superseded; run a new validation');
@@ -219,13 +219,14 @@ export async function inspectFeatureValidation(args, context = {}, options = {})
       if (['reconciliation', 'feature-authorization', 'delivery-amendment'].includes(record.kind) || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
       let applicable = false, reason;
       try {
+        requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
         const b = record.binding;
         const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, reconciliationRef: record.reconciliationRef, resumeEvidenceRef: reference };
         const pre = await featurePreconditions(repository, args, options);
         requireValue(pre.feature.validation?.current === record.attemptId, 'Validation superseded');
-        authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision ?? 0 }, record.plan,
-          pre.feature.tasks, assembledRequirements(pre, args, record.obligations !== undefined, record.scopedTaskChecks === true),
-          undefined, record.scopedTaskChecks === true ? pre.reviewTasks : pre.feature.tasks);
+        authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision }, record.plan,
+          pre.feature.tasks, assembledRequirements(pre, args),
+          undefined, pre.reviewTasks);
         applicable = true;
       } catch (error) { reason = error.message; }
       results.push({ reference, record, applicable, ...(reason ? { reason } : {}) });
