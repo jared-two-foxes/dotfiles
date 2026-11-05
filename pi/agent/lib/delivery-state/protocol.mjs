@@ -16,25 +16,25 @@ import {
   runnerExitCodes,
   toolOutput,
   validateRunner,
-} from "../conductor/client.mjs";
+} from "../../extensions/conductor/client.mjs";
 
-import { executorExecutable, executorInput, executorStep, validateExecutorResult } from "../executor/client.mjs";
-import { deliveryReviewSettings, reviewExecutable, reviewRequest, reviewStep, validateReviewResult } from "../review/client.mjs";
+import { executorExecutable, executorInput, executorStep, validateExecutorResult } from "../../extensions/executor/client.mjs";
+import { deliveryReviewSettings, reviewExecutable, reviewRequest, reviewStep, validateReviewResult } from "../../extensions/review/client.mjs";
 
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
-const guard = fileURLToPath(new URL("../execute-and-review/input-guard.mjs", import.meta.url));
+const guard = fileURLToPath(new URL("../../extensions/execute-and-review/input-guard.mjs", import.meta.url));
 const reviewCondition = {
   program: process.execPath,
-  args: [fileURLToPath(new URL("../execute-and-review/review-condition.mjs", import.meta.url))],
+  args: [fileURLToPath(new URL("../../extensions/execute-and-review/review-condition.mjs", import.meta.url))],
 };
-const legacyGuard = fileURLToPath(new URL("../conductor/input-guard.mjs", import.meta.url));
+const legacyGuard = fileURLToPath(new URL("../../extensions/conductor/input-guard.mjs", import.meta.url));
 const legacyReviewCondition = {
   program: process.execPath,
-  args: [fileURLToPath(new URL("../conductor/review-condition.mjs", import.meta.url))],
+  args: [fileURLToPath(new URL("../../extensions/conductor/review-condition.mjs", import.meta.url))],
 };
 
 function guarded(name, program, args, files, guardPath = guard) {

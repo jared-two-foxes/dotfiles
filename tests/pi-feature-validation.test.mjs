@@ -4,14 +4,14 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { git } from "../pi/agent/extensions/delivery-state/git-tree.mjs";
+import { git } from "../pi/agent/lib/delivery-state/git-tree.mjs";
 import {
   snapshot,
   readFeatureEvidence,
   featureEvidenceReferences,
-} from "../pi/agent/extensions/delivery-state/evidence.mjs";
+} from "../pi/agent/lib/delivery-state/evidence.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
-import { checkpointVerifiedTask } from "../pi/agent/extensions/delivery-state/checkpoint.mjs";
+import { checkpointVerifiedTask } from "../pi/agent/lib/delivery-state/checkpoint.mjs";
 import {
   scaffoldTasks,
   designReference,
@@ -24,16 +24,16 @@ import {
   reconcileFeature,
   inspectReconciliation,
 } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
-import { readReconciliation } from "../pi/agent/extensions/delivery-state/reconciliation-evidence.mjs";
+import { readReconciliation } from "../pi/agent/lib/delivery-state/reconciliation-evidence.mjs";
 import {
   recoverInterruptedTaskRebase,
   inspectTaskRebaseRecovery,
 } from "../pi/agent/extensions/execution-recovery/interrupted-rebase.mjs";
-import { readEvidence } from "../pi/agent/extensions/delivery-state/evidence.mjs";
-import { runCheck } from "../pi/agent/extensions/delivery-state/feature-process.mjs";
+import { readEvidence } from "../pi/agent/lib/delivery-state/evidence.mjs";
+import { runCheck } from "../pi/agent/lib/delivery-state/feature-process.mjs";
 
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
-import { checkpointHistory } from "../pi/agent/extensions/delivery-state/history.mjs";
+import { checkpointHistory } from "../pi/agent/lib/delivery-state/history.mjs";
 const fixtureScaffold = new Map();
 async function executeAndReview(args, context, options) {
   const scaffoldOptions = fixtureScaffold.get(context.directory);

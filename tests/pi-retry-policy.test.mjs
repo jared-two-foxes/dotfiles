@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { diagnosticSignature, stallDecision, infrastructureDecision, failureObservation } from '../pi/agent/extensions/execute-and-review/retry-policy.mjs';
-import { updateContext, obligationsVerified, renderContext, validContextContinuation } from '../pi/agent/extensions/delivery-state/delivery-context.mjs';
+import { updateContext, obligationsVerified, renderContext, validContextContinuation } from '../pi/agent/lib/delivery-state/delivery-context.mjs';
 const checks = [{ name: 'regression', command: ['cargo', 'test', 'status'], successCondition: ['validate-results'] }];
 const context = () => ({ original: 'Reject invalid statuses', design: { reference: 'design', summary: 'Validate imports', verification: 'Regression', approval: 'direction' }, updates: [], obligations: [] });
 const record = (category, n, diagnostic = 'same error', tree = 'a') => ({ startedReference: 'intent-' + n,

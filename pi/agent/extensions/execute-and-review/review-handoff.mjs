@@ -1,12 +1,12 @@
 import path from 'node:path';
 import { lstat, readFile, realpath, writeFile } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { readEvidence, snapshot } from '../delivery-state/evidence.mjs';
-import { git } from '../delivery-state/git-tree.mjs';
-import { authenticateWorkflow } from '../delivery-state/protocol.mjs';
-import { verificationChecks } from '../delivery-state/verification.mjs';
+import { readEvidence, snapshot } from '../../lib/delivery-state/evidence.mjs';
+import { git } from '../../lib/delivery-state/git-tree.mjs';
+import { authenticateWorkflow } from '../../lib/delivery-state/protocol.mjs';
+import { verificationChecks } from '../../lib/delivery-state/verification.mjs';
 
-import { reviewEvidence, reviewHandoff } from '../delivery-state/review-evidence.mjs';
+import { reviewEvidence, reviewHandoff } from '../../lib/delivery-state/review-evidence.mjs';
 
 function requireValue(ok, message) {
   if (!ok) throw new Error(message);

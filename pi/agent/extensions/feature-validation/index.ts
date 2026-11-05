@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { featureAuthorized } from "../delivery-state/feature-authorization.mjs";
+import { featureAuthorized } from "../../lib/delivery-state/feature-authorization.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 
 export default function (pi: ExtensionAPI) {

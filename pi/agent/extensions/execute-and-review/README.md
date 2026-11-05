@@ -18,20 +18,21 @@ steps and owns authorization, evidence, and checkpointing.
 The sibling `execution-recovery` extension registers handoff, suspension,
 restore, rebase, and checkpoint-recovery tools. `feature-validation` registers
 the final feature gate and its evidence inspection tool. All three import the
-sibling `delivery-state` library for authorization, receipt and attempt-chain
-authentication, Git and Scaffold state, and verified checkpoint finalization.
+shared library in `pi/agent/lib/delivery-state` for authorization, receipt and
+attempt-chain authentication, Git and Scaffold state, and verified checkpoint
+finalization.
 The library registers no Pi tools. Recovery and feature validation use it
 without loading the Execute and Review extension. Existing receipts retain
 their original command identities and verification rules.
 
 ## Native Pi installation
 
-Install these directories as siblings. The Executor directory supplies an
-internal client module. The delivery-state directory supplies shared code.
+Install the shared library under `lib/` and the extensions under
+`extensions/`. The Executor directory supplies an internal client module.
 
 ```
 ~/.pi/agent/extensions/conductor/
-~/.pi/agent/extensions/delivery-state/
+~/.pi/agent/lib/delivery-state/
 ~/.pi/agent/extensions/execute-and-review/
 ~/.pi/agent/extensions/execution-recovery/
 ~/.pi/agent/extensions/feature-validation/
@@ -43,7 +44,8 @@ For a dotfiles checkout on Windows, a copy-based installation is:
 
 ```powershell
 Copy-Item -Recurse -Force .\pi\agent\extensions\conductor "$HOME\.pi\agent\extensions"
-Copy-Item -Recurse -Force .\pi\agent\extensions\delivery-state "$HOME\.pi\agent\extensions"
+New-Item -ItemType Directory -Force "$HOME\.pi\agent\lib" | Out-Null
+Copy-Item -Recurse -Force .\pi\agent\lib\delivery-state "$HOME\.pi\agent\lib"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execute-and-review "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\execution-recovery "$HOME\.pi\agent\extensions"
 Copy-Item -Recurse -Force .\pi\agent\extensions\feature-validation "$HOME\.pi\agent\extensions"

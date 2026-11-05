@@ -1,15 +1,15 @@
-import { anchorHandoff } from '../delivery-state/delivery-context.mjs';
+import { anchorHandoff } from '../../lib/delivery-state/delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
-import { suspensionAnchor } from '../delivery-state/issue-anchors.mjs';
+import { suspensionAnchor } from '../../lib/delivery-state/issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation, currentIndexTree } from '../delivery-state/git-tree.mjs';
-import { snapshot, readEvidence, retainEvidence, validateBinding } from '../delivery-state/evidence.mjs';
-import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../delivery-state/task-chain.mjs';
+import { git, assertNoGitOperation, currentIndexTree } from '../../lib/delivery-state/git-tree.mjs';
+import { snapshot, readEvidence, retainEvidence, validateBinding } from '../../lib/delivery-state/evidence.mjs';
+import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../../lib/delivery-state/task-chain.mjs';
 import { pinHandoff } from './interrupted-rebase.mjs';
-import { checkpointHistory } from '../delivery-state/history.mjs';
-import { readReconciliation } from '../delivery-state/reconciliation-evidence.mjs';
-import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../delivery-state/issue-state.mjs';
+import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
+import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
+import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../../lib/delivery-state/issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {

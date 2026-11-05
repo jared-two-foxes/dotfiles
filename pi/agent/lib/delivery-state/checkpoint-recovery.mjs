@@ -2,7 +2,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { lstat, mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
-import { conductorRequest, decodeRunner, runConductor, toolOutput } from '../conductor/client.mjs';
+import { conductorRequest, decodeRunner, runConductor, toolOutput } from '../../extensions/conductor/client.mjs';
 import { git } from './git-tree.mjs';
 import { requireFeatureAuthorization } from './feature-authorization.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';

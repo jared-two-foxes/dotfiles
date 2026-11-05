@@ -5,7 +5,7 @@ import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from './git-tree.mjs';
 import { digest, snapshot, readEvidence, taskEvidenceReferences } from './evidence.mjs';
 import { authenticateAttemptChain, assertLatestAttempt } from './task-chain.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { scaffoldTasks } from '../../extensions/scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 async function directory(repository, create = false) {
   const dir = path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'pi-issue-context']));

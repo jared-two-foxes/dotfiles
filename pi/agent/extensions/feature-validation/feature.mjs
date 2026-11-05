@@ -2,17 +2,17 @@
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation } from '../delivery-state/git-tree.mjs';
-import { reviewEvidence } from '../delivery-state/review-evidence.mjs';
-import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../delivery-state/evidence.mjs';
-import { checkpointHistory } from '../delivery-state/history.mjs';
-import { readReconciliation } from '../delivery-state/reconciliation-evidence.mjs';
+import { git, assertNoGitOperation } from '../../lib/delivery-state/git-tree.mjs';
+import { reviewEvidence } from '../../lib/delivery-state/review-evidence.mjs';
+import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from '../../lib/delivery-state/evidence.mjs';
+import { checkpointHistory } from '../../lib/delivery-state/history.mjs';
+import { readReconciliation } from '../../lib/delivery-state/reconciliation-evidence.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../review/adapter.mjs';
-import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from '../delivery-state/feature-verification.mjs';
-import { runCheck } from '../delivery-state/feature-process.mjs';
-import { obligationsVerified, findingObligations } from '../delivery-state/delivery-context.mjs';
-import { authenticateAmendment } from '../delivery-state/context-amendment.mjs';
+import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from '../../lib/delivery-state/feature-verification.mjs';
+import { runCheck } from '../../lib/delivery-state/feature-process.mjs';
+import { obligationsVerified, findingObligations } from '../../lib/delivery-state/delivery-context.mjs';
+import { authenticateAmendment } from '../../lib/delivery-state/context-amendment.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const result = (status, fields = {}) => ({ schema: 'pi.feature-validation/v1', status, ...fields });

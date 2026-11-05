@@ -16,7 +16,7 @@ import {
   inspectEvidence,
   digest,
   snapshot,
-} from "../pi/agent/extensions/delivery-state/evidence.mjs";
+} from "../pi/agent/lib/delivery-state/evidence.mjs";
 import {
   scaffoldTasks,
   buildCommand,
@@ -188,7 +188,7 @@ test("one task retains real request/raw response and exposes read-only recovery 
   assert.equal(result.status, "PASSED");
   assert.match(result.evidence.reference, /^pi-evidence:sha256:[a-f0-9]{64}$/);
   const fresh =
-    await import("../pi/agent/extensions/delivery-state/evidence.mjs?fresh-session");
+    await import("../pi/agent/lib/delivery-state/evidence.mjs?fresh-session");
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
     directory: f.dir,
   });
@@ -615,7 +615,7 @@ test("existing attempt evidence retains approved local design independently of i
   );
   assert.equal(result.status, "PASSED");
   const fresh =
-    await import("../pi/agent/extensions/delivery-state/evidence.mjs?local-design-recovery");
+    await import("../pi/agent/lib/delivery-state/evidence.mjs?local-design-recovery");
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
     directory: f.dir,
   });

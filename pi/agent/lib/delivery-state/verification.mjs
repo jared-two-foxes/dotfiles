@@ -1,6 +1,6 @@
 // Normalize the caller's verification plan; Conductor owns command execution.
 import { fileURLToPath } from "node:url";
-const legacyMeaningfulTestScript = fileURLToPath(new URL("../conductor/meaningful-test-condition.mjs", import.meta.url));
+const legacyMeaningfulTestScript = fileURLToPath(new URL("../../extensions/conductor/meaningful-test-condition.mjs", import.meta.url));
 export function meaningfulChecks(checks) {
   return checks.map((c) => {
     const runner = c.command[0]
@@ -19,7 +19,7 @@ export function meaningfulChecks(checks) {
           successCondition: [
             process.execPath,
             fileURLToPath(
-              new URL("../execute-and-review/meaningful-test-condition.mjs", import.meta.url),
+              new URL("../../extensions/execute-and-review/meaningful-test-condition.mjs", import.meta.url),
             ),
           ],
         }

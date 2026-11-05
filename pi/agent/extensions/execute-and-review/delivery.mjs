@@ -3,12 +3,12 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { executeAndReview, hydrateContinuation } from './adapter.mjs';
-import { git } from '../delivery-state/git-tree.mjs';
-import { requireFeatureAuthorization } from '../delivery-state/feature-authorization.mjs';
+import { git } from '../../lib/delivery-state/git-tree.mjs';
+import { requireFeatureAuthorization } from '../../lib/delivery-state/feature-authorization.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
-import { validateCheckpoint } from '../delivery-state/checkpoint-recovery.mjs';
+import { validateCheckpoint } from '../../lib/delivery-state/checkpoint-recovery.mjs';
 import { runPipeline } from './pipeline.mjs';
-import { inspectIssueHandoff } from '../delivery-state/issue-context.mjs';
+import { inspectIssueHandoff } from '../../lib/delivery-state/issue-context.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 function continuationBlocked(reason, message, task, consumedAttempts) {
   const recovery = task?.featureId && task?.taskId

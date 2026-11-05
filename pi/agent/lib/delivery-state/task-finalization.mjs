@@ -6,7 +6,7 @@ import { checkpointVerifiedTask } from './checkpoint.mjs';
 import { snapshot } from './evidence.mjs';
 import { assertLatestAttempt } from './task-chain.mjs';
 import { issueMutation, issueExecutionScope, issueDesignRequirements } from './issue-state.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { scaffoldTasks } from '../../extensions/scaffold/adapter.mjs';
 import { git, assertNoGitOperation } from './git-tree.mjs';
 import path from 'node:path';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };

@@ -8,7 +8,7 @@ import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { git, implementationTree, withTreeIndex, currentIndexTree, assertNoGitOperation } from './git-tree.mjs';
 import { validateBinding, snapshot } from './evidence.mjs';
-import { scaffoldTasks } from '../scaffold/adapter.mjs';
+import { scaffoldTasks } from '../../extensions/scaffold/adapter.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 

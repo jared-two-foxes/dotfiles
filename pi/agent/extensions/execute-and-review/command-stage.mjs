@@ -1,6 +1,6 @@
-import { snapshot } from '../delivery-state/evidence.mjs';
+import { snapshot } from '../../lib/delivery-state/evidence.mjs';
 import { prepareReviewHandoff } from './review-handoff.mjs';
-import { replayCheck } from '../delivery-state/stage-reuse.mjs';
+import { replayCheck } from '../../lib/delivery-state/stage-reuse.mjs';
 // Transparent Conductor command: preserve the child's streams and exit code,
 // retaining an actual process receipt before the final in-list commit can run.
 import { spawn } from 'node:child_process';

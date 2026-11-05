@@ -5,19 +5,19 @@ import { mkdtemp, writeFile, readFile, chmod, rm, readdir, symlink } from 'node:
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { executeAndCheckpoint } from '../pi/agent/extensions/execute-and-review/delivery.mjs';
-import { finalizeVerifiedTask } from '../pi/agent/extensions/delivery-state/checkpoint-recovery.mjs';
+import { finalizeVerifiedTask } from '../pi/agent/lib/delivery-state/checkpoint-recovery.mjs';
 import { invoke } from '../pi/agent/extensions/conductor/client.mjs';
 import { scaffoldTasks, designReference } from '../pi/agent/extensions/scaffold/adapter.mjs';
-import { approveFeatureDirection, featureAuthorized } from '../pi/agent/extensions/delivery-state/feature-authorization.mjs';
+import { approveFeatureDirection, featureAuthorized } from '../pi/agent/lib/delivery-state/feature-authorization.mjs';
 import { validateFeature } from '../pi/agent/extensions/feature-validation/feature.mjs';
-import { issueDesignRequirements, issueRequirements } from '../pi/agent/extensions/delivery-state/issue-state.mjs';
-import { digest, readEvidence, retainEvidence } from '../pi/agent/extensions/delivery-state/evidence.mjs';
-import { authenticateTaskEvidence } from '../pi/agent/extensions/delivery-state/task-evidence.mjs';
+import { issueDesignRequirements, issueRequirements } from '../pi/agent/lib/delivery-state/issue-state.mjs';
+import { digest, readEvidence, retainEvidence } from '../pi/agent/lib/delivery-state/evidence.mjs';
+import { authenticateTaskEvidence } from '../pi/agent/lib/delivery-state/task-evidence.mjs';
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
-import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/delivery-state/issue-context.mjs';
+import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/lib/delivery-state/issue-context.mjs';
 import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execution-recovery/issue-recovery.mjs';
-import { authenticateAttemptChain } from '../pi/agent/extensions/delivery-state/task-chain.mjs';
+import { authenticateAttemptChain } from '../pi/agent/lib/delivery-state/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE
   ? 'Requires real Scaffold and POSIX executable fixtures' : false };
