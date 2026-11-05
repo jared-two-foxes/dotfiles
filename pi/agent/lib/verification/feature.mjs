@@ -2,7 +2,6 @@ import { obligationsVerified } from "./obligations.mjs";
 import { designReference } from "../scaffold/contracts.mjs";
 // Shared bounded verification contracts for final validation and rebase recovery.
 import { isDeepStrictEqual as equal } from "node:util";
-import { git } from "../git/tree.mjs";
 import { digest } from "../evidence/store.mjs";
 import { validateReviewResult, reviewSettings } from "../review/adapter.mjs";
 const requireValue = (ok, message) => {
@@ -137,17 +136,12 @@ export function meaningful(check, output) {
 }
 
 export function approvedDesign(repository, feature) {
-  if (feature.design_ref === designReference(feature.context))
-    return feature.context;
-  // Legacy Git references must resolve immutable original text, never a reconstructed task summary.
-  const match = /^(.+)@([a-f0-9]{40})$/.exec(feature.design_ref ?? "");
   requireValue(
-    match && !match[1].includes("\0"),
-    "Recover complete original approved design: sha256 context or path@full-commit-SHA",
+    typeof feature.context === "string" && feature.context.trim() &&
+      feature.design_ref === designReference(feature.context),
+    "Approved design requires its exact SHA-256 context reference",
   );
-  const design = git(repository, ["show", match[2] + ":" + match[1]]);
-  requireValue(design.trim().length > 0, "Original approved design is empty");
-  return design;
+  return feature.context;
 }
 
 export function featureRequirements(feature, design) {

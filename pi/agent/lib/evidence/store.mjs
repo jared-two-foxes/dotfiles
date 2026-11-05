@@ -28,9 +28,9 @@ async function directory(repository, create = false) {
 
 export async function retainEvidence(repository, record) {
   const bytes = JSON.stringify({
-    schema: "pi.task-attempt/v1",
     recordedAt: new Date().toISOString(),
     ...record,
+    schema: "pi.task-attempt/v1",
   });
   const hash = digest(bytes);
   const dir = await directory(repository, true);

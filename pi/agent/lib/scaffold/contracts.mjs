@@ -5,14 +5,12 @@ export const OPERATIONS = [
   "init",
   "add",
   "list",
-  "next",
   "start",
   "complete",
   "block",
   "fail",
   "retry",
   "decompose",
-  "design-next",
   "design-record",
   "design-finish",
   "design-reopen",
@@ -73,13 +71,11 @@ export function designReference(context) {
   return "sha256:" + createHash("sha256").update(context, "utf8").digest("hex");
 }
 function validateDesign(feature) {
-  if (feature.design_ref?.startsWith("sha256:")) {
-    requireValue(
-      text(feature.context) &&
-        feature.design_ref === designReference(feature.context),
-      "Approved design digest mismatch; recover original design before continuing",
-    );
-  }
+  requireValue(
+    text(feature.context) &&
+      feature.design_ref === designReference(feature.context),
+    "Approved design digest mismatch; recover original design before continuing",
+  );
 }
 function definition(value, feature = false) {
   fields(value, [
@@ -308,9 +304,7 @@ export function validateResponse(data, params) {
     "init",
     "add",
     "list",
-    "next",
     "decompose",
-    "design-next",
     "design-record",
     "design-finish",
     "design-reopen",
@@ -360,16 +354,7 @@ export function validateResponse(data, params) {
     for (const [id, task] of Object.entries(data.feature.tasks))
       validateTask(task, params.feature_id, id);
   }
-  if (["next", "design-next"].includes(params.operation)) {
-    requireValue(Object.hasOwn(data, "task"), "Missing next task");
-    if (data.task !== null) {
-      validateTask(data.task, params.feature_id);
-      requireValue(
-        isDeepStrictEqual(data.task, data.feature.tasks[data.task.id]),
-        "Next task does not match feature state",
-      );
-    }
-  } else if (!needsFeature) {
+  if (!needsFeature) {
     validateTask(data.task, params.feature_id, params.task_id);
     const expected = {
       start: "in_progress",

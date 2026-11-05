@@ -18,11 +18,10 @@ export function reviewStep(requestPath, request, requirements, settings, {
   const { model, budget, turns, limits } = settings;
   const wallClock = ["--wall-clock-budget-secs", String(budget)];
   const maxTurns = ["--max-turns", String(turns)];
-  // Preserve each entry point's established argv, including retained delivery receipts.
   return {
     program,
     args: [...prefixArgs, "run", "--request", requestPath, "--format", "json", "--model", model,
-      ...(ledgerPath === undefined ? [...maxTurns, ...wallClock] : [...wallClock, ...maxTurns, "--ledger", ledgerPath]),
+      ...wallClock, ...maxTurns, ...(ledgerPath === undefined ? [] : ["--ledger", ledgerPath]),
       ...limits],
     files: [[requestPath, JSON.stringify(request)], [request.requirements, requirements]],
   };

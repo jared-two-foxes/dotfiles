@@ -29,7 +29,7 @@ const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
 const result = (status, stage, fields = {}) => ({
-  schema: "opencode.execute_and_review.result/v1",
+  schema: "pi.execute-and-review.result/v1",
   status,
   stage,
   ...fields,

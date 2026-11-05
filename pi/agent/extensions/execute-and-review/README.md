@@ -1,6 +1,6 @@
 > Current Pi continuation API: see [RECOVERY.md](RECOVERY.md). Continuations inherit
 > context from receipts and Scaffold; no exact requirements-string copy or lifetime
-> attempt allowance is required. Historical wire examples below remain compatible.
+> attempt allowance is required.
 
 # Pi delivery extension
 
@@ -34,8 +34,8 @@ Shared modules have narrower responsibilities.
 The Scaffold extension owns CLI invocation and state reads. Execute and Review,
 Recovery, and Checkpoint supply fresh Scaffold data to the shared validators and
 own lifecycle writes. See [the library boundaries](../../lib/README.md).
-New plans run guards and evaluators from `lib/verification`. Historical evaluator
-paths forward to those implementations and remain valid receipt identities.
+Plans and retained workflows require guards and evaluators from `lib/verification`.
+Obsolete helper identities and receipt producers are rejected, without rewriting retained evidence.
 
 ## Native Pi installation
 
@@ -78,9 +78,7 @@ Remove-Item -Recurse -Force "$HOME\.pi\agent\skills\tdd" -ErrorAction SilentlyCo
 If Pi already uses this dotfiles directory as its agent home, no copy is
 necessary. When upgrading a copy-based installation, stop Pi and replace the old
 `extensions/conductor` copy with the directories above before restarting.
-Retained receipts from the old layout remain valid in the same Pi agent home.
-Keep the Conductor directory alongside this one so inherited test plans can
-resolve the legacy evaluator entry point.
+Replace obsolete installed helper copies as well; old layouts are unsupported.
 
 Install `conductor` on PATH (the dotfiles Windows installer already handles
 it), or set `CONDUCTOR_BIN` to its executable path. Install `executor` and
@@ -240,7 +238,7 @@ The enclosing runner has not returned when commit starts. Therefore the final
 command seals a caller-owned `pi.command-results/v1` verification prefix from the
 actual `pi.command-receipt/v1` records; it never fabricates a completed Conductor
 response. The content-addressed task receipt marks its producer as
-`pi.command-receipts/v1`, retains exact stage/input identities and the full delivery
+`pi.command-receipts/v2`, retains exact stage/input identities and the full delivery
 request, and authenticates the reviewed source/baseline. The actual complete v2
 runner response is retained separately in the attempt's `response.json` after the
 one invocation finishes. Historical direct v2/v1 task receipts remain readable.
@@ -342,8 +340,9 @@ The original baseRef stays fixed so Review sees the complete cumulative diff.
 Never reset source, remove receipts/private refs, or checkpoint unverified work to
 recover. `retry`/`start` lifecycle transitions do not reset consumed attempts.
 
-For an incorrect command invocation, supply `verificationRepairReason` (nonblank,
-at most 4000 characters) with `previousAttempt` and the repaired commands. Preserve
+For an incorrect command invocation, supply a `contextUpdates` entry with
+`kind: "repair_check"`, the original `checkId`, repaired `command` argv and a
+nonblank `reason` (at most 4000 characters), alongside `previousAttempt`. Preserve
 the check names/order, all success conditions and the approved coverage contract.
 Preflight and correction-chain authentication enforce the same rule. The reason,
 prior receipt reference and current plan are appended to independent Review's
@@ -503,8 +502,11 @@ Scaffold's existing lifecycle contract, and additionally authenticates the rebas
 receipt and all subsequent checkpoints. No Scaffold or Rust Conductor update is
 required. No task is automatically selected, retried or marked complete.
 
-`inspect_rebase_reconciliation` discovers receipts with `featureId` or reads a
-specific `reference`, reporting applicability against actual Git and Scaffold.
+`inspect_rebase_evidence` discovers feature reconciliation receipts with
+`featureId` or reads a specific `reference`, reporting applicability against
+actual Git and Scaffold. A task receipt reference selects interrupted-task rebase
+inspection automatically. Both forms return `results` entries with `kind`,
+`record`, and `applicable`; task handoffs also include `consumedAttempts`.
 Evidence uses the existing content-addressed `pi-feature-evidence:sha256:...`
 namespace with `kind: reconciliation` and a `pi.feature-reconciliation/v1` outcome;
 feature-validation inspection excludes it. Intents and failures never authorize
@@ -569,7 +571,7 @@ retains unresolved review findings and prior context revisions. Ordinary retries
 inherit them automatically; structured repairs and added checks preserve coverage.
 Later rebases preserve the same invocation history.
 
-Inspect the handoff through `inspect_task_rebase_recovery` or
+Inspect the handoff through `inspect_rebase_evidence` with its `reference`, or
 `inspect_conductor_evidence`. If the task is blocked/failed, explicitly reconcile
 its Scaffold lifecycle with `retry` and `start`, recording the handoff reference
 and consumed count in the reason; recovery does not do this automatically.
@@ -593,7 +595,7 @@ inspect ownership before removing it, never clean the real source checkout.
 All Scaffold features use the recursive issue graph (requires the matching
 Scaffold release). There is no opt-in field or alternate lifecycle. The stored
 workflow kind is `recursive-issues/v1`; the state schema is version 2. The root is created from the agreed
-ticket. Pi uses `design-next`, `decompose` and `design-record` to approve designs
+ticket. Pi uses `design-select`, `decompose` and `design-record` to approve designs
 downward; `design-finish` gates all implementation. The API retains task IDs.
 `execute_and_review` requires an explicit started issue. For a first attempt (or a
 zero-attempt recovery handoff), the adapter adds the persisted acceptance criteria,

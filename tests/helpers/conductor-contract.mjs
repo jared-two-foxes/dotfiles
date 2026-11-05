@@ -164,7 +164,7 @@ export function contract(label, executeAndReview) {
               return domainResponse(JSON.parse(json), {
                 code: domain.status === "BLOCKED" ? 3 : 2,
                 stdout: JSON.stringify({
-                  schema: "conductor.result/v1",
+                  schema: "fixture.delivery-outcome/v1",
                   ...domain,
                 }),
               });
@@ -192,7 +192,7 @@ export function contract(label, executeAndReview) {
             domainResponse(JSON.parse(json), {
               code: 2,
               stdout: JSON.stringify({
-                schema: "conductor.result/v1",
+                schema: "fixture.delivery-outcome/v1",
                 status: "NEEDS_DESIGN",
                 phase: "review",
                 review: {
@@ -386,7 +386,7 @@ export function contract(label, executeAndReview) {
 
   test(
     label +
-      ": accepts complete untruncated inline v2 output when no log path is reported",
+      ": rejects inline v2 output without a retained log path",
     async (t) => {
       const f = await fixture(t);
       const result = await executeAndReview(
@@ -406,7 +406,7 @@ export function contract(label, executeAndReview) {
           },
         },
       );
-      assert.equal(result.status, "PASSED", JSON.stringify(result));
+      assert.equal(result.status, "BLOCKED", JSON.stringify(result));
     },
   );
 

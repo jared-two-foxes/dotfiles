@@ -63,7 +63,7 @@ test("source fingerprints preserve historical receipt hashes including trailing 
   assert.equal(state.clean, false);
 });
 
-test("workflow authentication accepts retained guard identities and rejects modified invocations", async (t) => {
+test("workflow authentication requires current guards and rejects modified invocations", async (t) => {
   const f = await fixture(t);
   const args = { input: '{"operations":[]}', requirements: "Preserve approved scope",
     baseRef: f.git("rev-parse", "HEAD") };
@@ -75,7 +75,7 @@ test("workflow authentication accepts retained guard identities and rejects modi
     const first = retained.request.commands[0], last = retained.request.commands.at(-1);
     first.args[0] = last.args[0] = path.join(agent, location, "input-guard.mjs");
     last.success_condition.args[0] = path.join(agent, location, "review-condition.mjs");
-    assert.deepEqual(authenticateWorkflow(retained, retained.request, args, f.directory), checks);
+    assert.throws(() => authenticateWorkflow(retained, retained.request, args, f.directory), /invocation mismatch/);
     last.args[1] = last.args[1].replace("--request", "--untrusted-request");
     assert.throws(() => authenticateWorkflow(retained, retained.request, args, f.directory),
       /Retained Executor\/Review invocation mismatch/);

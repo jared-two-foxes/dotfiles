@@ -22,7 +22,7 @@ function continuationBlocked(reason, message, task, consumedAttempts) {
         }
       : undefined;
   return {
-    schema: "opencode.execute_and_review.result/v1",
+    schema: "pi.execute-and-review.result/v1",
     status: "BLOCKED",
     stage: "PRECHECK",
     reason,
@@ -147,7 +147,7 @@ export async function executeAndCheckpoint(args, context = {}, options = {}) {
       : result;
   } catch (error) {
     return {
-      schema: "opencode.execute_and_review.result/v1",
+      schema: "pi.execute-and-review.result/v1",
       status: "BLOCKED",
       stage: "PRECHECK",
       reason: "AUTOMATIC_CHECKPOINT_CONTEXT",

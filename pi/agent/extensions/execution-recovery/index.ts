@@ -1,8 +1,9 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
-import { reconcileFeature, inspectReconciliation } from "./reconciliation.mjs";
-import { recoverInterruptedTaskRebase, inspectTaskRebaseRecovery } from "./interrupted-rebase.mjs";
+import { reconcileFeature } from "./reconciliation.mjs";
+import { recoverInterruptedTaskRebase } from "./interrupted-rebase.mjs";
+import { createRebaseInspectionTool } from "./rebase-inspection.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
 
@@ -208,25 +209,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
   pi.registerTool({
-    name: "inspect_task_rebase_recovery",
-    label: "Inspect interrupted task rebase handoff",
-    description:
-      "Authenticate retained task rebase handoff, consumed attempts, completed-prefix evidence and current applicability. Read only; READY never means task verification passed.",
-    parameters: Type.Object({ reference: Type.String() }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const result = await inspectTaskRebaseRecovery(params, {
-        directory: ctx.cwd,
-      });
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-        isError: !result.ok,
-        details: result,
-      };
-    },
-  });
-  pi.registerTool({
     name: "reconcile_feature_rebase",
     label: "Verify feature after rebase",
     description:
@@ -286,26 +268,5 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
-    name: "inspect_rebase_reconciliation",
-    label: "Inspect retained rebase reconciliation",
-    description:
-      "Discover and authenticate local rebase receipts against current Git and Scaffold state. Read only; no checks, review, source or lifecycle writes.",
-    parameters: Type.Object({
-      featureId: Type.Optional(Type.String()),
-      reference: Type.Optional(Type.String()),
-    }),
-    async execute(_id, params, _signal, _onUpdate, ctx) {
-      const result = await inspectReconciliation(params, {
-        directory: ctx.cwd,
-      });
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-        isError: !result.ok,
-        details: result,
-      };
-    },
-  });
+  pi.registerTool(createRebaseInspectionTool(Type));
 }

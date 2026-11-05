@@ -126,7 +126,7 @@ export async function inspectIssueAttempt(args, context = {}) {
     const { input, ...fixed } = record.args;
     return { ok: true, reference: args.reference, task: record.task, consumed_attempts: record.attempt,
       matches_source: equal(await snapshot(repository), record.after),
-      review_context: fixed.deliveryContext ?? { legacy_requirements: fixed.requirements },
+      review_context: fixed.deliveryContext,
       continuation: { previousAttempt: args.reference },
       status: record.result.status, note: 'Inherited context is authoritative; supply previousAttempt, fresh operations and structured updates. Inspect full receipt by reference for diagnostics. Reconcile phase, source and approvals before execution.' };
   } catch (e) { return { ok: false, message: e.message }; }

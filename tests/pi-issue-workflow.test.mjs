@@ -159,7 +159,7 @@ async function fixture(t) {
           return {
             code: status === "PASSED" ? 0 : 2,
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status,
               phase: "review",
               execution: { success: true },
@@ -261,7 +261,7 @@ test(
       ["types", "api", "F"],
     );
     assert.equal(f.g("rev-list", "--count", f.base + "..HEAD"), "3");
-    assert.equal((await f.call("next")).task, null);
+    assert.equal((await f.call("select")).context, null);
   },
 );
 
@@ -414,7 +414,7 @@ test(
       });
       assert.equal(r.evidence.attempt, n);
       latest = r.evidence.reference;
-      a = { ...a, previousAttempt: latest };
+      a = { previousAttempt: latest, input: a.input };
     }
     const original = await snapshot(f.dir);
     const denied = await suspendIssue(
@@ -889,7 +889,7 @@ test(
       ...freshArgs,
       ...resumed.resume,
       checks: freshArgs.checks,
-      requirements: "",
+      requirements: undefined,
       input: '{"operations":[]}',
     });
     assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 1);
@@ -1169,14 +1169,14 @@ test(
     const f = await fixture(t);
     assert.equal(
       (await f.call("design-select")).context.issue.id,
-      (await f.call("design-next")).task.id,
+      (await f.call("list")).feature.workflow.root_id,
     );
     assert.equal((await f.call("select")).context, null);
     await f.approve("F");
     await f.call("design-finish");
     assert.equal(
       (await f.call("select")).context.issue.id,
-      (await f.call("next")).task.id,
+      (await f.call("list")).feature.workflow.root_id,
     );
     const { compactMutation } =
       await import("../pi/agent/extensions/scaffold/compact-mutation.mjs");
@@ -1214,7 +1214,7 @@ test(
         return {
           code: 2,
           stdout: JSON.stringify({
-            schema: "conductor.result/v1",
+            schema: "fixture.delivery-outcome/v1",
             status: "NEEDS_DESIGN",
             phase: "review",
           }),
@@ -1535,7 +1535,7 @@ test(
 );
 
 test(
-  "legacy attempt-five migration and chains longer than 64 retain every original receipt",
+  "obsolete fixed-context continuations are rejected without changing long retained chains",
   integration,
   async (t) => {
     const { retainEvidence } =
@@ -1572,19 +1572,13 @@ test(
         previousAttempt: previous,
         input: '{"operations":[]}',
       });
-      assert.equal(delivered.status, "PASSED", JSON.stringify(delivered));
-      assert.equal(delivered.evidence.attempt, count + 1);
+      assert.equal(delivered.status, "BLOCKED", JSON.stringify(delivered));
+      assert.match(delivered.message, /UNSUPPORTED_DELIVERY_FORMAT/);
+      assert.equal(delivered.evidence, undefined);
       assert.deepEqual(await readFile(original), originalBytes);
-      const chain = await authenticateAttemptChain(
-        f.dir,
-        delivered.evidence.reference,
-        f.binding("F"),
-      );
-      assert.equal(chain.records.length, count + 1);
-      assert.equal(
-        (await f.call("list")).feature.tasks.F.delivery.sequence,
-        count + 1,
-      );
+      const chain = await authenticateAttemptChain(f.dir, previous, f.binding("F"));
+      assert.equal(chain.records.length, count);
+      assert.equal((await f.call("list")).feature.tasks.F.delivery, undefined);
     }
   },
 );
@@ -1603,7 +1597,7 @@ test(
     await writeFile(stateFile, JSON.stringify(state));
     const result = await f.run(await f.args("F"));
     assert.equal(result.status, "BLOCKED");
-    assert.match(result.message, /legacy issue.*no latest receipt/);
+    assert.match(result.message, /UNSUPPORTED_DELIVERY_FORMAT/);
     assert.equal((await f.call("list")).feature.tasks.F.delivery, undefined);
     const parked = await suspendIssue(
       { ...f.scope("F"), reason: "Try zero-attempt recovery" },
@@ -1611,12 +1605,12 @@ test(
       f.options,
     );
     assert.equal(parked.status, "BLOCKED");
-    assert.match(parked.message, /legacy issue cannot assert zero/);
+    assert.match(parked.message, /UNSUPPORTED_DELIVERY_FORMAT/);
   },
 );
 
 test(
-  "legacy continuation prose becomes an additive obligation without replacing inherited criteria",
+  "continuation prose is rejected; structured obligations retain inherited criteria",
   integration,
   async (t) => {
     const f = await fixture(t);
@@ -1626,10 +1620,18 @@ test(
     const first = await f.run(await f.args("F"), "NEEDS_DESIGN");
     const addition =
       "Clarification: imported invalid quote statuses need a dedicated regression";
-    const next = await f.run({
+    const rejected = await f.run({
       previousAttempt: first.evidence.reference,
       input: '{"operations":[]}',
       requirements: addition,
+    });
+    assert.equal(rejected.status, "BLOCKED");
+    assert.match(rejected.message, /contextUpdates.add_obligation/);
+    assert.equal(rejected.evidence, undefined);
+    const next = await f.run({
+      previousAttempt: first.evidence.reference,
+      input: '{"operations":[]}',
+      contextUpdates: [{ kind: "add_obligation", text: addition, reason: "Clarify retained regression coverage" }],
     });
     assert.equal(next.status, "PASSED", JSON.stringify(next));
     const record = await readEvidence(f.dir, next.evidence.reference);
@@ -1645,8 +1647,6 @@ test(
   "named test-runner checks survive multiple continuations without implicit validator changes",
   integration,
   async (t) => {
-    const { retainEvidence } =
-      await import("../pi/agent/lib/evidence/store.mjs");
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");
@@ -1656,22 +1656,14 @@ test(
         ...originalArgs,
         checks: originalArgs.checks.map((check) =>
           check.name === "test"
-            ? { ...check, command: ["pytest", "-q"] }
+            ? { ...check, command: ["pytest", "-q"], successCondition: ["fixture-test-evaluator"] }
             : check,
         ),
-      },
-      state = await snapshot(f.dir);
-    const previous = await retainEvidence(f.dir, {
-      repository: f.dir,
-      task: f.binding("F"),
-      attempt: 1,
-      args,
-      before: state,
-      after: state,
-      result: { status: "BLOCKED", stage: "REVIEW" },
-    });
+      };
+    const previous = await f.run(args, "NEEDS_DESIGN");
+    assert.equal(previous.status, "NEEDS_DESIGN", JSON.stringify(previous));
     const migrated = await f.run(
-      { previousAttempt: previous, input: '{"operations":[]}' },
+      { previousAttempt: previous.evidence.reference, input: '{"operations":[]}' },
       "NEEDS_DESIGN",
     );
     assert.equal(migrated.status, "NEEDS_DESIGN", JSON.stringify(migrated));
@@ -1682,9 +1674,9 @@ test(
     assert.equal(continued.status, "PASSED", JSON.stringify(continued));
     const record = await readEvidence(f.dir, continued.evidence.reference);
     assert.equal(
-      record.args.checks[1].successCondition,
-      undefined,
-      "the retained check does not acquire an implicit validator",
+      JSON.stringify(record.args.checks[1].successCondition),
+      JSON.stringify(["fixture-test-evaluator"]),
+      "the retained explicit evaluator is unchanged",
     );
     assert.deepEqual(record.args.checks[1].command, ["pytest", "-q"]);
     assert.equal(record.attempt, 3);

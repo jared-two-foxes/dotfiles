@@ -13,8 +13,8 @@ export function verifiedResult(result, args) {
   const c = result?.conductor;
   return (
     result?.status === "PASSED" &&
-    (c?.schema === "conductor.result/v1" ||
-      (c?.schema === "pi.conductor-result/v1" && authenticNormalized(c))) &&
+    c?.schema === "pi.conductor-result/v1" &&
+    authenticNormalized(c) &&
     c.status === "PASSED" &&
     c.phase === "review" &&
     !c.error &&
@@ -24,10 +24,8 @@ export function verifiedResult(result, args) {
     checks.every(
       (check, index) =>
         c.checks[index]?.name === check.name &&
-        (c.schema === "conductor.result/v1"
-          ? c.checks[index].exit_code === 0
-          : c.checks[index].status === "PASSED" &&
-            (check.successCondition || c.checks[index].exit_code === 0)),
+        c.checks[index].status === "PASSED" &&
+        (check.successCondition || c.checks[index].exit_code === 0),
     ) &&
     c.review?.status === "APPROVED" &&
     obligationsVerified(args ?? {}, c.review)

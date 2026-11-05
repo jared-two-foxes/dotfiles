@@ -1,3 +1,4 @@
+import { designReference } from '../pi/agent/lib/scaffold/contracts.mjs';
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
@@ -48,7 +49,8 @@ async function fixture(t) {
   const base = g("rev-parse", "HEAD");
   const feature = {
     id: "F4",
-    design_ref: "approved@v1",
+    context: "Approved checkpoint design",
+    design_ref: designReference("Approved checkpoint design"),
     baseline: base,
     original_baseline: base,
     branch: "feature/test",
@@ -106,7 +108,7 @@ async function fixture(t) {
             code: 0,
             stderr: "",
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status: "PASSED",
               phase: "review",
               execution: { success: true },
@@ -546,7 +548,7 @@ test("real test wrapper preserves command output/status and binds the pre-review
         : 'console.log("2 relevant tests passed")',
     ];
     const args = {
-      task: { featureId: "F4", taskId: "one", designRef: "approved@v1" },
+      task: { featureId: "F4", taskId: "one", designRef: designReference("Approved checkpoint design") },
       baseRef: f.base,
       requirements: "One behavior",
       input: '{"operations":[]}',
@@ -589,7 +591,7 @@ test("real test wrapper preserves command output/status and binds the pre-review
           return {
             code: code === 0 ? 0 : 2,
             stdout: JSON.stringify({
-              schema: "conductor.result/v1",
+              schema: "fixture.delivery-outcome/v1",
               status: code === 0 ? "PASSED" : "NEEDS_DESIGN",
               phase: code === 0 ? "review" : "verification",
               execution: { success: true },
@@ -672,8 +674,8 @@ test(
         objective: "Two independent review scopes",
         baseline: f.base,
         branch: "feature/test",
-        design_ref: "approved@v1",
-        context: "Feature baseline " + f.base,
+        context: "Approved checkpoint design",
+        design_ref: designReference("Approved checkpoint design"),
         acceptance_criteria: ["Dependent consumer works"],
       },
     });
@@ -690,7 +692,7 @@ test(
     await approveGraph(call);
     let last = f.base;
     for (const id of ["one", "two"]) {
-      assert.equal((await call("next")).task.id, id);
+      assert.equal((await call("select")).context.issue.id, id);
       await call("start", { task_id: id });
       const args = await f.verify(id, last, async () => {
         await writeFile(path.join(f.dir, id + ".txt"), id);
@@ -719,7 +721,7 @@ test(
       );
       last = checkpoint.commit;
     }
-    assert.equal((await call("next")).task.id, "F4");
+    assert.equal((await call("select")).context.issue.id, "F4");
     await call("start", { task_id: "F4" });
     const parent = await f.verify("F4", last, async () => {});
     await call("complete", {
@@ -739,7 +741,7 @@ test(
       f.g("rev-parse", last + "^{tree}"),
       f.g("rev-parse", parentCommit.commit + "^{tree}"),
     );
-    assert.equal((await call("next")).task, null);
+    assert.equal((await call("select")).context, null);
     assert.equal(f.g("rev-list", "--count", f.base + "..HEAD"), "3");
   },
 );
