@@ -15,7 +15,7 @@ import { authenticateTaskEvidence } from '../pi/agent/extensions/execute-and-rev
 import { conductorFixture, executorFixture, reviewFixture } from './helpers/conductor-executables.mjs';
 import { approveGraph } from './helpers/issue-plan.mjs';
 import { inspectIssueAttempt, prepareIssueHandoff } from '../pi/agent/extensions/execute-and-review/issue-context.mjs';
-import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execute-and-review/issue-recovery.mjs';
+import { suspendIssue, resumeIssue } from '../pi/agent/extensions/execute-and-review/recovery/issue-recovery.mjs';
 import { authenticateAttemptChain } from '../pi/agent/extensions/execute-and-review/task-chain.mjs';
 
 const integration = { skip: process.platform === 'win32' || !process.env.SCAFFOLD_SOURCE

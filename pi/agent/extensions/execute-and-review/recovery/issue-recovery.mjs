@@ -1,15 +1,15 @@
-import { anchorHandoff } from './delivery-context.mjs';
+import { anchorHandoff } from '../delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
 import { suspensionAnchor } from './issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
-import { git, assertNoGitOperation, currentIndexTree } from './git-tree.mjs';
-import { snapshot, readEvidence, retainEvidence, validateBinding } from './evidence.mjs';
-import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from './task-chain.mjs';
+import { git, assertNoGitOperation, currentIndexTree } from '../git-tree.mjs';
+import { snapshot, readEvidence, retainEvidence, validateBinding } from '../evidence.mjs';
+import { authenticateAttemptChain, assertLatestAttempt, carriedRequirements, rebasedAttemptTree, recoveryCommitEnvironment, readTaskHandoff } from '../task-chain.mjs';
 import { pinHandoff } from './interrupted-rebase.mjs';
-import { checkpointHistory } from './history.mjs';
+import { checkpointHistory } from '../history.mjs';
 import { readReconciliation } from './reconciliation.mjs';
-import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from './issue-state.mjs';
+import { issueFeature, approvedIssue, issueDesignRequirements, issueMutation } from '../issue-state.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const definition = task => Object.fromEntries(Object.entries(task).filter(([k]) => !['status', 'history', 'designs', 'design_history', 'suspension', 'delivery'].includes(k)));
 async function scope(args, context, options) {

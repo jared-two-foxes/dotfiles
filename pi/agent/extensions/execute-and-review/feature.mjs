@@ -6,7 +6,7 @@ import { git, assertNoGitOperation } from './git-tree.mjs';
 import { reviewEvidence } from './review-evidence.mjs';
 import { digest, snapshot, readEvidence, retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from './evidence.mjs';
 import { checkpointHistory } from './history.mjs';
-import { readReconciliation } from './reconciliation.mjs';
+import { readReconciliation } from './recovery/reconciliation.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../review/adapter.mjs';
 import { planFor, meaningful, monitorTrackedInputs, approvedDesign, featureRequirements, reviewScope, authenticateFeatureRecord, featureObligationsVerified } from './feature-verification.mjs';

@@ -24,9 +24,9 @@ import { issueDesignRequirements } from "../pi/agent/extensions/execute-and-revi
 import {
   suspendIssue,
   resumeIssue,
-} from "../pi/agent/extensions/execute-and-review/issue-recovery.mjs";
+} from "../pi/agent/extensions/execute-and-review/recovery/issue-recovery.mjs";
 import { authenticateAttemptChain } from "../pi/agent/extensions/execute-and-review/task-chain.mjs";
-import { reconcileFeature } from "../pi/agent/extensions/execute-and-review/reconciliation.mjs";
+import { reconcileFeature } from "../pi/agent/extensions/execute-and-review/recovery/reconciliation.mjs";
 import { validateFeature } from "../pi/agent/extensions/execute-and-review/feature.mjs";
 import {
   prepareIssueHandoff,

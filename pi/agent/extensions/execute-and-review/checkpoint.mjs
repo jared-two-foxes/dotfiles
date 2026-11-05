@@ -2,7 +2,7 @@ import { issueMutation } from './issue-state.mjs';
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from './task-evidence.mjs';
 export { authenticateTaskEvidence } from './task-evidence.mjs';
-import { readReconciliation } from './reconciliation.mjs';
+import { readReconciliation } from './recovery/reconciliation.mjs';
 import { checkpointHistory } from './history.mjs';
 import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
