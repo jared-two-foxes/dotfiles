@@ -1,5 +1,6 @@
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
+import { requireCurrentFeatureReceipt } from '../../lib/verification/feature-instance.mjs';
 export { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
 import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
@@ -69,6 +70,7 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
+    requireCurrentFeatureReceipt(feature, record);
     const task = feature?.tasks?.[args.task.taskId];
     requireValue(feature?.id === args.task.featureId && feature.design_ref === args.task.designRef && task?.status === 'completed' &&
       task.history.some(h => h.evidence?.reference === args.evidenceRef && h.evidence?.source === 'conductor' &&
