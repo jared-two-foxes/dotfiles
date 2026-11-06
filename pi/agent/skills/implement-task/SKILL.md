@@ -17,7 +17,7 @@ approve direction, choose the next task or run the feature-wide final gate.
 A direct invocation is valid for one already selected, approved, eligible issue.
 Fetch scoped issue state and retain exact task identity, baseline, branch and
 previous evidence. Where permission or an approved design is missing, return a
-clear blocker to the caller; do not infer approval from a chat summary.
+clear blocker and direct the caller to `/skill:init-feature` for preparation; do not infer approval from a chat summary.
 Use `/skill:design` only for engineering design, not execution authority.
 The retained overall feature direction covers in-scope task implementation,
 checks, independent review, verified checkpoints and recovery across sessions.
