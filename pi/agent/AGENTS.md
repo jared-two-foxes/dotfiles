@@ -1,6 +1,6 @@
 # Pi workflow
 
-Follow SYSTEM.md and /skill:design. Use Research → Design → Implement with one
+Follow SYSTEM.md and /skill:feature-delivery for full delivery; use /skill:design for standalone engineering design. Use Research → Design → Implement with one
 approve_feature_direction confirmation of the overall direction and local delivery
 scope. No per-issue design or execution confirmation is needed. The retained scope
 covers implementation, meaningful checks, independent review, verified checkpoints,
