@@ -14,7 +14,7 @@ test('feature initialization owns the single direction approval and design-finis
     'design-record', 'design-finish', 'summary', 'existing', 'baseline', 'branch']) {
     assert.ok(init.includes(phrase), phrase);
   }
-  assert.match(init, /Do not ask for per-issue design approval/);
+  assert.match(init, /do not ask the\s+user to approve individual issue designs/);
   assert.match(init, /across sessions|session changes/);
   assert.match(init, /never.*execute_and_review|never.*calls.*execute_and_review/is);
   assert.match(delivery, /\/skill:init-feature/);
