@@ -70,12 +70,12 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
-    requireCurrentFeatureReceipt(feature, record);
     const task = feature?.tasks?.[args.task.taskId];
     requireValue(feature?.id === args.task.featureId && feature.design_ref === args.task.designRef && task?.status === 'completed' &&
       task.history.some(h => h.evidence?.reference === args.evidenceRef && h.evidence?.source === 'conductor' &&
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
+    requireCurrentFeatureReceipt(feature, record);
     if (args.reconciliationRef) {
       const anchor = await readReconciliation(repository, args.reconciliationRef, feature, args);
       // Preserve ancestry and inherited dependencies while excluding only the
