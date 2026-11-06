@@ -6,17 +6,23 @@ import path from 'node:path';
 const root = path.resolve(import.meta.dirname, '..');
 const read = p => readFileSync(path.join(root, p), 'utf8');
 
-test('Pi uses one feature direction approval across its implementation phases', () => {
-  const design = read('pi/agent/skills/feature-delivery/SKILL.md'), system = read('pi/agent/SYSTEM.md');
-  for (const text of [design, system]) {
-    assert.match(text, /approve_feature_direction/);
-    assert.match(text, /execute_and_review/);
-    assert.match(text, /design-finish/);
-    assert.match(text, /across sessions|session changes/);
+test('feature initialization owns the single direction approval and design-finish', () => {
+  const init = read('pi/agent/skills/init-feature/SKILL.md');
+  const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
+  const system = read('pi/agent/SYSTEM.md');
+  for (const phrase of ['linear_get_ticket', 'scaffold_tasks', 'approve_feature_direction',
+    'design-record', 'design-finish', 'summary', 'existing', 'baseline', 'branch']) {
+    assert.ok(init.includes(phrase), phrase);
   }
-  assert.match(design, /Do not ask for per-issue design approval/);
+  assert.match(init, /Do not ask for per-issue design approval/);
+  assert.match(init, /across sessions|session changes/);
+  assert.match(init, /never.*execute_and_review|never.*calls.*execute_and_review/is);
+  assert.match(delivery, /\/skill:init-feature/);
+  assert.match(delivery, /execute_and_review/);
+  assert.match(delivery, /design-finish/);
   assert.match(system, /Only native `execute_and_review`/);
 });
+
 
 const publishingPolicy = name => {
   const text = read(name).replace(/\r\n/g, '\n');
@@ -69,6 +75,7 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
     'pi/agent/SYSTEM.md',
     'pi/agent/AGENTS.md',
     'pi/agent/skills/feature-delivery/SKILL.md',
+    'pi/agent/skills/init-feature/SKILL.md',
     'pi/agent/skills/implement-task/SKILL.md',
   ]) {
     const text = read(name).replace(/\s+/g, ' ');
@@ -100,11 +107,13 @@ test('Pi executor guide uses the merged exact-text edit operation', () => {
 
 
 test('delegated issue designs remain explicit and final review remains mandatory', () => {
-  const design = read('pi/agent/skills/feature-delivery/SKILL.md');
+  const init = read('pi/agent/skills/init-feature/SKILL.md');
+  const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
   for (const phrase of ['agent-authored', 'design-record', 'actual reference',
-    'Never claim the user approved an individual issue', 'Final feature review is mandatory',
-    'no per-issue attempt limit', 'previousAttempt', 'completed descendants']) assert.ok(design.includes(phrase), phrase);
-  assert.match(design, /material scope changes|material commitments|material departures|material changes/);
+    'Never claim the user approved an individual issue', 'completed descendants']) assert.ok(init.includes(phrase), phrase);
+  for (const phrase of ['Final feature review is mandatory', 'no per-issue attempt limit',
+    'previousAttempt', 'completed descendants']) assert.ok(delivery.includes(phrase), phrase);
+  assert.match(delivery, /material scope changes|material commitments|material departures|material changes/);
 });
 
 test('native checkpoints, recovery and validation reuse the same durable direction authority', () => {
@@ -141,8 +150,8 @@ test('standalone design contract is independent of delivery orchestration', () =
   assert.match(design, /verification strategy/);
   assert.doesNotMatch(design, /approve_feature_direction|execute_and_review|checkpoint_verified_task|validate_feature/);
   assert.match(delivery, /name: feature-delivery/);
-  assert.match(delivery, /\/skill:design/);
-  assert.match(delivery, /approve_feature_direction/);
+  assert.match(read('pi/agent/skills/init-feature/SKILL.md'), /\/skill:design/);
+  assert.match(delivery, /\/skill:init-feature/);
   assert.match(delivery, /execute_and_review/);
   assert.match(read('pi/agent/SYSTEM.md'), /\/skill:feature-delivery/);
 });
@@ -167,4 +176,21 @@ test('feature-delivery delegates exactly one task to implement-task without re-o
   assert.match(system, /\/skill:implement-task/);
   assert.match(read('pi/agent/skills/conductor/SKILL.md'), /\/skill:implement-task/);
   assert.match(read('pi/agent/extensions/execute-and-review/README.md'), /\/skill:implement-task/);
+});
+
+test('init-feature supports independent Linear preparation and safe reuse', () => {
+  const init = read('pi/agent/skills/init-feature/SKILL.md');
+  const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
+  for (const phrase of ['Linear identifier', 'linear_get_ticket', 'origin:', 'init',
+    'summary', 'source identifier', 'design_ref', 'approval', 'design-finish',
+    'original baseline', 'without implementing']) {
+    assert.ok(init.includes(phrase), `init-feature missing: ${phrase}`);
+  }
+  assert.match(init, /Never call|Never.*call/i);
+  assert.match(init, /never.*execute_and_review/is);
+  assert.match(delivery, /prepared feature/);
+  assert.match(delivery, /validate_feature/);
+  assert.doesNotMatch(delivery, /### Feature planning and the single approval|## 2\. Design the issue graph downward/);
+  assert.match(read('pi/agent/AGENTS.md'), /\/skill:init-feature/);
+  assert.match(read('pi/agent/skills/scaffold/SKILL.md'), /\/skill:init-feature/);
 });
