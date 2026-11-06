@@ -107,6 +107,42 @@ test("journal anchors validate caller-supplied state and never reset retained hi
   assert.throws(() => anchorDeliveryJournal(context.directory, task, first, first), /EVIDENCE_RECOVERY_REQUIRED/);
 });
 
+test("delivery journal anchors remain isolated after clean and recreate of identical task", async (t) => {
+  const { context } = await fixture(t);
+  const task = { featureId: "F", taskId: "T", designRef: "same-approved-design" };
+  const originalInstance = "1".repeat(32);
+  const recreatedInstance = "2".repeat(32);
+  const original = { revision: 1, head: null, inflight: null, sequence: 0, context: {}, contract: {} };
+  const recreated = { ...original, context: { "fresh": true } };
+
+  // Retain the original generation's Git audit anchor; clean never deletes it.
+  anchorDeliveryJournal(context.directory, task, null, original, originalInstance);
+  assert.ok(assertDeliveryJournal(context.directory, task, original, originalInstance).sha);
+  // A new feature generation with the *same* task and design starts clean.
+  assert.equal(assertDeliveryJournal(context.directory, task, null, recreatedInstance), null);
+  anchorDeliveryJournal(context.directory, task, null, recreated, recreatedInstance);
+  assert.ok(assertDeliveryJournal(context.directory, task, recreated, recreatedInstance).sha);
+  assert.ok(assertDeliveryJournal(context.directory, task, original, originalInstance).sha);
+  assert.throws(
+    () => assertDeliveryJournal(context.directory, task, original, recreatedInstance),
+    /EVIDENCE_RECOVERY_REQUIRED/,
+  );
+});
+
+test("pre-instance delivery journal can continue without a silent anchor migration", async (t) => {
+  const { context } = await fixture(t);
+  const task = { featureId: "F", taskId: "T", designRef: "approved-design" };
+  const first = { revision: 1, head: null, inflight: null, sequence: 0, context: {}, contract: {} };
+  anchorDeliveryJournal(context.directory, task, null, first);
+  // A pre-existing journal written before anchor namespacing is valid only
+  // while its exact persisted state remains present, never for a new feature.
+  assert.ok(assertDeliveryJournal(context.directory, task, first, "1".repeat(32)).sha);
+  const updated = { ...first, revision: 2, sequence: 1, head: "old-receipt" };
+  anchorDeliveryJournal(context.directory, task, first, updated, "1".repeat(32));
+  assert.ok(assertDeliveryJournal(context.directory, task, updated).sha);
+  assert.equal(assertDeliveryJournal(context.directory, task, null, "2".repeat(32)), null);
+});
+
 test("contract item identities preserve their persisted hashes", () => {
   const items = deliveryContractItems(
     { objective: "Objective", acceptance_criteria: ["Feature works"], constraints: ["Preserve errors"] },
