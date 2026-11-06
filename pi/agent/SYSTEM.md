@@ -33,7 +33,7 @@ infrastructure circuits and resumable resource allowances govern continuation.
 
 BLOCKED ends the current Conductor command list, not the approved local delivery
 loop. Diagnose retained evidence and current files, then continue recoverable
-in-scope corrections with the latest previousAttempt under /skill:execute-and-review.
+in-scope corrections with the latest previousAttempt under /skill:implement-task.
 Preserve applied edits, baseline, criteria and consumed attempts. Do not reset the
 tree, delete evidence or reapprove an unchanged direction to recover a failed check.
 
