@@ -551,7 +551,7 @@ test("workflow guidance separates preparation, feature delivery and one-task exe
     new URL("../pi/agent/skills/implement-task/SKILL.md", import.meta.url), "utf8");
   for (const phrase of [
     "Mandatory decomposition", "approve_feature_direction", "Verification:",
-    "ancestor dependencies", "original feature criteria",
+    "ancestor dependencies", "original feature context",
     "completed descendants", "Conversational memory is not authoritative",
     "single approval", "design-record", "design-finish",
   ]) {
