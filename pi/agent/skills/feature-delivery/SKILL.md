@@ -7,6 +7,18 @@ description: >
 
 # Autonomous feature delivery
 
+## Cleaned or recreated feature state
+
+`scaffold clean` is a human-only administrative action, not a recovery step,
+Pi tool or implicit initialization fallback. If the current Scaffold feature
+is missing after a reset or its `workflow.instance_id` differs from retained
+handoff/receipt authority, stop delivery. Do not reuse old attempts or approvals.
+Preserve Git commits, source changes and external evidence; ask for explicit
+new feature preparation through `/skill:init-feature` and a fresh overall
+direction approval before any new work on the recreated instance.
+
+
+
 This skill orchestrates multi-task delivery of a prepared feature.
 Use `/skill:init-feature` to create or finish the approved Scaffold graph and
 `/skill:design` for a standalone engineering contract. Here Pi owns task
