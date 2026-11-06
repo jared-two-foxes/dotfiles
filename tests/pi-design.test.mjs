@@ -151,7 +151,7 @@ test('feature-delivery delegates exactly one task to implement-task without re-o
   const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
   const task = read('pi/agent/skills/implement-task/SKILL.md');
   const system = read('pi/agent/SYSTEM.md');
-  assert.match(delivery, /\\/skill:implement-task/);
+  assert.match(delivery, /\/skill:implement-task/);
   assert.match(delivery, /design-finish/);
   assert.match(delivery, /validate_feature/);
   assert.match(delivery, /discovery exit hatch/i);
@@ -164,7 +164,7 @@ test('feature-delivery delegates exactly one task to implement-task without re-o
   assert.match(task, /checkpoint_verified_task/);
   assert.match(task, /stage: COMMITTED/);
   assert.match(task, /missing prerequisites|NEEDS_DECOMPOSITION/i);
-  assert.match(system, /\\/skill:implement-task/);
-  assert.match(read('pi/agent/skills/conductor/SKILL.md'), /\\/skill:implement-task/);
-  assert.match(read('pi/agent/extensions/execute-and-review/README.md'), /\\/skill:implement-task/);
+  assert.match(system, /\/skill:implement-task/);
+  assert.match(read('pi/agent/skills/conductor/SKILL.md'), /\/skill:implement-task/);
+  assert.match(read('pi/agent/extensions/execute-and-review/README.md'), /\/skill:implement-task/);
 });
