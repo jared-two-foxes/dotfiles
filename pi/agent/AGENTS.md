@@ -8,7 +8,7 @@ final feature validation and issue recovery across sessions. Stop and discuss
 material changes to approved objectives, public behaviour or explicit constraints.
 
 Use scaffold_tasks for persistent issue state; design downward before design-finish,
-implement upward through execute_and_review, which automatically completes and
+implement upward through /skill:implement-task using execute_and_review, which automatically completes and
 checkpoints each verified node after review. Supply known checkpoint branch
 protection metadata; recover finalization failures from the successful receipt.
 Scaffold validates structure and association, not authenticity. Preserve original
