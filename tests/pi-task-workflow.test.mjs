@@ -557,7 +557,7 @@ test("workflow guidance separates feature orchestration from task implementation
     "Verification:",
     "ancestor dependencies",
     "original feature criteria",
-    "Oversized task",
+    "oversized scope",
     "completed descendants",
     "Conversational memory is not authoritative",
     "single approval",
