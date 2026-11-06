@@ -55,8 +55,11 @@ independent verification. The integration test skips explicitly without a source
 checkout; mocked tests run in CI on Linux and Windows. The production tool always
 uses `scaffold` on PATH, not this test launcher.
 
-State access is limited to the current repository; symlinked `.scaffold`,
-`tasks.json` and lock paths are rejected before CLI invocation. As with Scaffold's
+State access is limited to the current repository. The adapter rejects symlinked
+`.scaffold`, `.scaffold/tasks.json` and `.scaffold/.tasks.lock` paths, and
+rejects unexpected file types at those paths before CLI invocation. Scaffold
+uses `.scaffold/tasks.json` and the task-only `.scaffold/.tasks.lock`; no
+legacy criteria-stack state, fallback or migration is supported. As with Scaffold's
 own local file API, this is not a sandbox against concurrent hostile filesystem
 changes. Timeouts, aborts and protocol failures never retry: a write may already
 have persisted, so inspect full state with `list` before recovery.
