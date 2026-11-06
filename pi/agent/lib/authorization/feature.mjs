@@ -31,6 +31,10 @@ function scopeFor(args, f, context) {
   } catch {}
   const featureId = args.featureId ?? args.task?.featureId;
   requireValue(f && f.id === featureId, "Cannot inspect feature direction");
+  requireValue(
+    !!f.branch,
+    "Feature " + featureId + ": no feature branch recorded in Scaffold",
+  );
   const currentBranch = git(repository, [
     "symbolic-ref",
     "--quiet",
@@ -72,10 +76,6 @@ function scopeFor(args, f, context) {
     f.workflow?.kind === "recursive-issues/v1",
     "Feature " + featureId + ": unsupported issue workflow " +
       JSON.stringify(f.workflow?.kind ?? null) + "; expected recursive-issues/v1",
-  );
-  requireValue(
-    !!f.branch,
-    "Feature " + featureId + ": no feature branch recorded in Scaffold",
   );
   requireValue(
     !["main", "master", defaultBranch].includes(f.branch),
