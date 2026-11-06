@@ -302,6 +302,7 @@ export async function recoverInterruptedTaskRebase(
     const handoff = {
       kind: "rebase-handoff",
       repository,
+      ...(feature.workflow.instance_id ? { featureInstanceId: feature.workflow.instance_id } : {}),
       task: args.task,
       attempt: previous.attempt,
       args: {

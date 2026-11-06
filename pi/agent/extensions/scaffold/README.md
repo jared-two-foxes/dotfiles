@@ -21,6 +21,28 @@ Conductor is a generic conditional tool runner, not a Scaffold/Linear state
 engine. No skill takes over Scaffold lifecycle ownership.
 
 The extension peer dependencies match Pi's native `typebox` convention.
+
+### Administrative clean is not a Pi lifecycle operation
+
+`scaffold clean --feature ID` and `scaffold clean --all` are **human/operator
+CLI commands**, not part of `scaffold_tasks`. They require a dry-run/confirmation
+or an explicit operator-provided `--yes`; Pi must never invoke them as retry,
+recovery, or initialization fallbacks. No native `clean` tool or lifecycle
+operation is registered.
+
+Cleaning removes selected feature associations only from `.scaffold/tasks.json`.
+It does not change Git commits, branches, worktrees, implementation/source files,
+`.scaffold/.tasks.lock`, historical criteria-stack files or retained
+Pi/Conductor evidence in Git metadata. Existing task receipts and direction
+approvals remain historically inspectable, but **cannot authorize** a
+freshly initialized feature: Scaffold gives each new feature workflow a
+`workflow.instance_id`, and Pi binds approval and receipts to that ID.
+For existing schema-v2 features without that identity, the prior contract
+remains readable. If feature state is missing or was intentionally cleaned,
+stop and explicitly re-run `/skill:init-feature` with fresh direction
+approval; never infer authority from a matching old ticket, baseline or receipt.
+
+
 The extension's Scaffold adapter owns the CLI protocol and safe state reads. For an
 issue workflow, it requires a native authorization callback before reopening
 design, recording a checkpoint, or resuming an issue. The tool and internal

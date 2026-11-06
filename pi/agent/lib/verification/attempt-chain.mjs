@@ -4,6 +4,7 @@ import { rebasedAttemptTree } from '../git/recovery-tree.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from '../git/tree.mjs';
 import { readEvidence, taskEvidenceReferences } from '../evidence/store.mjs';
+import { featureInstanceId } from './feature-instance.mjs';
 import { validateBinding } from '../delivery-state/binding.mjs';
 import { sameVerification, correctionVerification } from './checks.mjs';
 import { readReconciliation } from './reconciliation.mjs';
@@ -31,9 +32,22 @@ export function carriedRequirements(requirements, records) {
 // A same-tree failed attempt still consumes budget. Do not select an older
 // receipt or intent simply because its fingerprint also matches current files.
 export async function assertLatestAttempt(repository, reference, binding, attempt) {
+  // Old evidence remains in Git metadata after an operator runs scaffold clean.
+  // It must not block the first attempt in a *new* feature instance, or serve as
+  // a continuation reference for that instance.
+  const { readScaffoldState } = await import('../../extensions/scaffold/adapter.mjs');
+  const state = await readScaffoldState(repository);
+  const current = state?.features?.[binding.featureId];
+  const instanceId = featureInstanceId(current);
+  if (reference && current) {
+    const receipt = await readEvidence(repository, reference);
+    requireValue(receipt.featureInstanceId === instanceId,
+      'Feature was cleaned or reinitialized; old attempt receipts cannot continue this feature');
+  }
   for (const otherRef of await taskEvidenceReferences(repository)) {
     const other = await readEvidence(repository, otherRef);
     if (!equal(other.task, binding)) continue;
+    if (current && other.featureInstanceId !== instanceId) continue;
     if (other.attempt > attempt || (reference && other.startedReference === reference))
       throw Object.assign(new Error('A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count'),
         reference ? { code: 'CONTINUATION_RECEIPT_STALE' } : {});

@@ -1,5 +1,6 @@
 // One explicit local checkpoint, never task selection, source editing or publishing.
 import { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
+import { requireCurrentFeatureReceipt } from '../../lib/verification/feature-instance.mjs';
 export { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
 import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
@@ -74,6 +75,7 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
       task.history.some(h => h.evidence?.reference === args.evidenceRef && h.evidence?.source === 'conductor' &&
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
+    requireCurrentFeatureReceipt(feature, record);
     if (args.reconciliationRef) {
       const anchor = await readReconciliation(repository, args.reconciliationRef, feature, args);
       // Preserve ancestry and inherited dependencies while excluding only the

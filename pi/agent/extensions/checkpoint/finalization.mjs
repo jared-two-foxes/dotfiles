@@ -1,6 +1,7 @@
 // Conductor's post-review Git commit command. It consumes an immutable successful
 // receipt; never applies source changes or reruns implementation/review.
 import { authenticateTaskEvidence } from "../../lib/verification/task-evidence.mjs";
+import { requireCurrentFeatureReceipt } from "../../lib/verification/feature-instance.mjs";
 import { requireFeatureAuthorization, featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { checkpointVerifiedTask } from "./scaffold.mjs";
 import { snapshot } from "../../lib/git/snapshot.mjs";
@@ -55,6 +56,7 @@ export async function commitVerifiedTask(args, context = {}, options = {}) {
     );
     const feature = response.data?.feature,
       task = feature?.tasks?.[args.task.taskId];
+    if (response.ok) requireCurrentFeatureReceipt(feature, record);
     requireValue(
       response.ok &&
         feature.design_ref === args.task.designRef &&

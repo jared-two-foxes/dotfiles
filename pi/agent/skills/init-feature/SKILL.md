@@ -8,6 +8,21 @@ description: >
 
 # Initialize a feature
 
+## Clean/reinitialization boundary
+
+A human may explicitly reset a feature using the separate administrative
+`scaffold clean` CLI. Pi must **never** use that command automatically
+or offer it as a way to bypass blocked state or failed attempts. If the
+feature is missing after a clean, do not restore old approvals, task snapshots,
+execution receipts or checkpoint history from Git metadata. New Scaffold
+`tasks init` generates a different `workflow.instance_id`, so previously
+retained approvals cannot authorize the new feature even with the same
+Linear ID, design, branch and original baseline. Re-run normal intake,
+inspect any surviving Git/source/evidence, present the direction and obtain
+a genuine new approval. Preserve unrelated work; cleaning never edits Git.
+
+
+
 Prepare a persistent Scaffold feature without initiating autonomous implementation.
 This skill is independently invocable (for example `/skill:init-feature SA-585`)
 or called by `/skill:feature-delivery` before its multi-task implementation loop.

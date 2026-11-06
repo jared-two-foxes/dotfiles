@@ -75,7 +75,8 @@ export async function suspendIssue(args, context = {}, options = {}) {
       const indexTree = await currentIndexTree(repository, path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index'])));
       const sourceCommit = git(repository, ['commit-tree', before.tree, '-p', before.head],
         { input: 'Pi suspended issue snapshot\n', env: recoveryCommitEnvironment });
-      record = { kind: 'issue-suspension', repository, task: args.task, attempt: previous.attempt,
+      record = { kind: 'issue-suspension', repository,
+        ...(feature.workflow.instance_id ? { featureInstanceId: feature.workflow.instance_id } : {}), task: args.task, attempt: previous.attempt,
         args: { ...previous.args, previousAttempt: args.previousAttempt }, before, after: before,
         result: { status: 'BLOCKED', reason: 'ISSUE_SUSPENDED' },
         suspension: { branch: args.branch, featureBaseRef: args.featureBaseRef, reconciliationRef: args.reconciliationRef,
@@ -189,7 +190,8 @@ export async function resumeIssue(args, context = {}, options = {}) {
     const after = await snapshot(repository);
     requireValue(after.head === head && after.tree === expected && !after.bookkeepingVisible &&
       await currentIndexTree(repository, path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index']))) === expectedIndex, 'Restored source differs from authenticated transplant; preserve saved snapshots');
-    const h = { kind: parked.attempt ? 'issue-handoff' : 'issue-zero-handoff', repository, task: args.task, attempt: previous.attempt,
+    const h = { kind: parked.attempt ? 'issue-handoff' : 'issue-zero-handoff', repository,
+      ...(feature.workflow.instance_id ? { featureInstanceId: feature.workflow.instance_id } : {}), task: args.task, attempt: previous.attempt,
       args: { ...previous.args, baseRef: head, requirements, reconciliationRef: args.reconciliationRef, previousAttempt: parked.args.previousAttempt },
       before: after, after, result: { status: 'BLOCKED', reason: 'ISSUE_RECOVERY_READY' },
       recovery: { suspensionRef: args.suspensionRef, feature, featureBaseRef: args.featureBaseRef, branch: args.branch,

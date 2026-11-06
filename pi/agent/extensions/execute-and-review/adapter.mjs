@@ -3,6 +3,7 @@ import { prepareDelivery, deliveryEvent } from "./delivery-context.mjs";
 import { stallDecision, infrastructureDecision, reviewEnvironment } from "./retry-policy.mjs";
 import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
 import { issueFeature, readScaffoldState } from "../scaffold/adapter.mjs";
+import { featureInstanceId } from "../../lib/verification/feature-instance.mjs";
 import { approvedIssue, issueDesignRequirements, issueRequirements } from "../../lib/scaffold/contracts.mjs";
 import { issueExecutionScope } from "../../lib/verification/issue-scope.mjs";
 import { verificationChecks, correctionVerification } from "../../lib/verification/checks.mjs";
@@ -337,7 +338,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       return outcome("BLOCKED", "PRECHECK", { reason: "TASK_REQUIRED" });
     return executeAttempt(args, context, options);
   }
-  let repository, before, request, response, boundaryPath, workflow, delivery;
+  let repository, before, request, response, boundaryPath, workflow, delivery, instanceId;
   let attempt = 1;
   try {
     validateBinding(args.task);
@@ -367,6 +368,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       ),
     );
     const feature = await issueFeature(repository, args.task, options);
+    if (feature) instanceId = featureInstanceId(feature);
     if (options.issueWorkflowOnly && !feature)
       throw new Error(
         "Current recursive issue graph required",
@@ -535,6 +537,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     // original baseline, requirements and attempt count discoverable.
     const startedReference = await retainEvidence(repository, {
       repository,
+      ...(instanceId ? { featureInstanceId: instanceId } : {}),
       task: args.task,
       attempt,
       args,
@@ -615,6 +618,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       const after = await snapshot(repository);
       const reference = await retainEvidence(repository, {
         repository,
+      ...(instanceId ? { featureInstanceId: instanceId } : {}),
         task: args.task,
         attempt,
         args,
@@ -686,6 +690,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
     try {
       const reference = await retainEvidence(repository, {
         repository,
+      ...(instanceId ? { featureInstanceId: instanceId } : {}),
         task: args.task,
         attempt,
         args,

@@ -3,6 +3,7 @@ import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
 import { git } from "../git/tree.mjs";
 import { approvedDesign } from "../verification/feature.mjs";
+import { featureInstanceId } from "../verification/feature-instance.mjs";
 import { retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from "../evidence/store.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
@@ -128,6 +129,7 @@ function scopeFor(args, f, context) {
   return {
     repository,
     featureId,
+    ...(featureInstanceId(f) ? { instanceId: featureInstanceId(f) } : {}),
     designRef: f.design_ref,
     branch: f.branch,
     baseline: f.original_baseline,
