@@ -189,25 +189,7 @@ test('requires a current repository and refuses task-state symlinks', async t =>
     const result = await scaffoldTasks(params('init'), { directory: dir }, { invokeScaffold: () => assert.fail('must not follow symlink') });
     assert.equal(result.ok, false);
     assert.match(result.message, /symlinks/);
-    assert.match(result.message, new RegExp(suffix.replace(/[.*+?^${}()|[\\]\\]/g, '\\test('requires a current repository and refuses state symlinks', async t => {
-  const dir = await fixture(t);
-  const outside = await mkdtemp(path.join(tmpdir(), 'pi-scaffold-outside-'));
-  t.after(() => rm(outside, { recursive: true, force: true }));
-  for (const directory of [undefined, outside]) {
-    const result = await scaffoldTasks(params('list'), { directory }, { invokeScaffold: () => assert.fail('must not invoke') });
-    assert.equal(result.ok, false);
-  }
-  if (process.platform === 'win32') return; // symlink privileges vary on Windows
-  for (const suffix of ['.scaffold', '.scaffold/tasks.json', '.scaffold/.criteria-stack.lock']) {
-    if (suffix !== '.scaffold') await mkdir(path.join(dir, '.scaffold'), { recursive: true });
-    const target = path.join(dir, suffix);
-    await symlink(outside, target);
-    const result = await scaffoldTasks(params('init'), { directory: dir }, { invokeScaffold: () => assert.fail('must not follow symlink') });
-    assert.equal(result.ok, false);
-    assert.match(result.message, /symlinks/);
-    await rm(target);
-  }
-});')));
+    assert.ok(result.message.includes(suffix));
     await assert.rejects(readScaffoldState(dir), /symlinks/);
     await rm(target);
   }
