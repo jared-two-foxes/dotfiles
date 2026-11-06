@@ -85,8 +85,8 @@ it), or set `CONDUCTOR_BIN` to its executable path. Install `executor` and
 `review-cli` separately on PATH, or set `EXECUTOR_BIN` and `REVIEW_CLI_BIN`.
 The Windows installers provision all three; use `-Force` to upgrade existing binaries.
 Conductor must support v2 with retained-output/output_directory support;
-v1 runner responses are rejected without fallback. Pi loads `/skill:design` when implementation is requested, or you can
-invoke it explicitly for the full collaborative design-first persona. It
+v1 runner responses are rejected without fallback. Pi loads `/skill:feature-delivery` when autonomous feature implementation is requested, or you can
+invoke it explicitly for the complete approved feature workflow. It
 uses `/skill:executor` to author exact operations and the native
 `execute_and_review` tool to apply them under retained overall feature authority.
 `/skill:execute-and-review` covers task delivery and recovery.
