@@ -331,6 +331,35 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   assert.equal(await readFile(path.join(dir,'application.txt'),'utf8'), 'unchanged');
 });
 
+test('real Scaffold clean invalidates old feature state and reinit changes identity', {
+  skip: !process.env.SCAFFOLD_SOURCE || process.platform === 'win32'
+    ? 'Requires POSIX Python Scaffold checkout' : false,
+}, async t => {
+  const dir = await fixture(t);
+  const source = path.resolve(process.env.SCAFFOLD_SOURCE, 'src');
+  const script = "import sys;sys.path.insert(0,sys.argv.pop(1));from scaffold_cli.cli import main;main()";
+  const { invoke } = await import('../pi/agent/extensions/scaffold/adapter.mjs');
+  const invokeScaffold = (_program, args, options) =>
+    invoke('python3', ['-c', script, source, ...args], options);
+  const call = operation => scaffoldTasks(params(operation), {directory:dir}, {invokeScaffold});
+  const first = await call('init');
+  assert.equal(first.ok,true,JSON.stringify(first));
+  const instance1 = first.data.feature.workflow.instance_id;
+  assert.match(instance1,/^[a-f0-9]{32}$/);
+  const dry = execFileSync('python3',['-c',script,source,'clean','--feature','F1','--dry-run'],{cwd:dir,encoding:'utf8'});
+  assert.match(dry,/Affected features: 1/);
+  assert.equal((await readScaffoldState(dir)).features.F1.workflow.instance_id,instance1);
+  execFileSync('python3',['-c',script,source,'clean','--feature','F1','--yes'],{cwd:dir});
+  assert.equal((await readScaffoldState(dir)).features.F1,undefined);
+  const afterClean = await call('list');
+  assert.equal(afterClean.ok,false);
+  assert.equal(afterClean.reason,'COMMAND_FAILED');
+  const next = await call('init');
+  assert.equal(next.ok,true,JSON.stringify(next));
+  assert.notEqual(next.data.feature.workflow.instance_id,instance1);
+  assert.equal(next.data.feature.design_ref,first.data.feature.design_ref);
+});
+
 test('Pi policies allow only scoped state tracking and preserve separate execution gates', async () => {
   for (const file of ['pi/agent/AGENTS.md', 'pi/agent/SYSTEM.md', 'pi/agent/skills/init-feature/SKILL.md']) {
     const text = (await readFile(path.join(root, file), 'utf8')).replace(/\s+/g, ' ');
