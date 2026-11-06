@@ -250,7 +250,7 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
 });
 
 test('Pi policies allow only scoped state tracking and preserve separate execution gates', async () => {
-  for (const file of ['pi/agent/AGENTS.md', 'pi/agent/SYSTEM.md', 'pi/agent/skills/design/SKILL.md']) {
+  for (const file of ['pi/agent/AGENTS.md', 'pi/agent/SYSTEM.md', 'pi/agent/skills/feature-delivery/SKILL.md']) {
     const text = (await readFile(path.join(root, file), 'utf8')).replace(/\s+/g, ' ');
     assert.match(text, /scaffold_tasks/);
     assert.match(text, /overall (?:feature )?direction|overall feature/);

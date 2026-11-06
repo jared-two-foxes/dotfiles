@@ -13,7 +13,7 @@ Pi owns reasoning, approvals, decomposition and sequencing. Scaffold owns its
 atomic locked state at `.scaffold/tasks.json`, dependencies and lifecycle history.
 Never edit state files directly. Native tools never automatically select the next
 issue, generate code, retry implementation or claim verification from bookkeeping.
-Use `/skill:design` for the complete Research → Design → Implement workflow.
+Use `/skill:feature-delivery` for the complete Research → Design → Implement workflow. Use `/skill:design` for independently requested engineering designs.
 
 The user provides a ticket; a feature retains its original objective, criteria,
 branch and baseline; all graph nodes are issues. Existing API names remain

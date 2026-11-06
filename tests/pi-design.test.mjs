@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, '..');
 const read = p => readFileSync(path.join(root, p), 'utf8');
 
 test('Pi uses one feature direction approval across its implementation phases', () => {
-  const design = read('pi/agent/skills/design/SKILL.md'), system = read('pi/agent/SYSTEM.md');
+  const design = read('pi/agent/skills/feature-delivery/SKILL.md'), system = read('pi/agent/SYSTEM.md');
   for (const text of [design, system]) {
     assert.match(text, /approve_feature_direction/);
     assert.match(text, /execute_and_review/);
@@ -68,7 +68,7 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
   for (const name of [
     'pi/agent/SYSTEM.md',
     'pi/agent/AGENTS.md',
-    'pi/agent/skills/design/SKILL.md',
+    'pi/agent/skills/feature-delivery/SKILL.md',
     'pi/agent/skills/execute-and-review/SKILL.md',
   ]) {
     const text = read(name).replace(/\s+/g, ' ');
@@ -93,13 +93,13 @@ test('Pi executor guide uses the merged exact-text edit operation', () => {
     assert.ok(!guide.includes('| `patch` |'), name);
     assert.ok(guide.includes('occur exactly once'), name);
   }
-  assert.ok(read('pi/agent/skills/design/SKILL.md').includes('Use `edit_file` for in-place text changes'));
+  assert.ok(read('pi/agent/skills/feature-delivery/SKILL.md').includes('Use `edit_file` for in-place text changes'));
   assert.ok(read('pi/agent/skills/execute-and-review/SKILL.md').includes('removed `patch` variants'));
 });
 
 
 test('delegated issue designs remain explicit and final review remains mandatory', () => {
-  const design = read('pi/agent/skills/design/SKILL.md');
+  const design = read('pi/agent/skills/feature-delivery/SKILL.md');
   for (const phrase of ['agent-authored', 'design-record', 'actual reference',
     'Never claim the user approved an individual issue', 'Final feature review is mandatory',
     'no per-issue attempt limit', 'previousAttempt', 'completed descendants']) assert.ok(design.includes(phrase), phrase);
@@ -125,9 +125,23 @@ test('native checkpoints, recovery and validation reuse the same durable directi
 });
 
 test('execution guides do not add a second approval after the overall direction', () => {
-  for (const file of ['pi/agent/skills/design/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/execute-and-review/SKILL.md']) {
+  for (const file of ['pi/agent/skills/feature-delivery/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/execute-and-review/SKILL.md']) {
     const text = read(file);
     assert.doesNotMatch(text, /After \*\*separate explicit execution approval|Explicitly ask the user whether to \*\*execute/);
     assert.match(text, /full operations on request/);
   }
+});
+
+test('standalone design contract is independent of delivery orchestration', () => {
+  const design = read('pi/agent/skills/design/SKILL.md');
+  const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
+  assert.match(design, /name: design/);
+  assert.match(design, /inputs, outputs|Inputs, outputs/i);
+  assert.match(design, /verification strategy/);
+  assert.doesNotMatch(design, /approve_feature_direction|execute_and_review|checkpoint_verified_task|validate_feature/);
+  assert.match(delivery, /name: feature-delivery/);
+  assert.match(delivery, /\/skill:design/);
+  assert.match(delivery, /approve_feature_direction/);
+  assert.match(delivery, /execute_and_review/);
+  assert.match(read('pi/agent/SYSTEM.md'), /\/skill:feature-delivery/);
 });

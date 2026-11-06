@@ -130,7 +130,7 @@ export default function (pi: ExtensionAPI) {
           type: "text" as const,
           text:
             `Written: ${filename} (${content.length} chars)\n` +
-            "Use /skill:design for implementation and /skill:scaffold for task tracking.",
+            "Use /skill:feature-delivery for implementation, /skill:design for engineering design, and /skill:scaffold for task tracking.",
         }],
       };
     },
