@@ -542,45 +542,40 @@ test(
   },
 );
 
-test("workflow guidance separates feature orchestration from task implementation and recovery", async () => {
+test("workflow guidance separates preparation, feature delivery and one-task execution", async () => {
+  const init = await readFile(
+    new URL("../pi/agent/skills/init-feature/SKILL.md", import.meta.url), "utf8");
   const delivery = await readFile(
-    new URL("../pi/agent/skills/feature-delivery/SKILL.md", import.meta.url),
-    "utf8",
-  );
+    new URL("../pi/agent/skills/feature-delivery/SKILL.md", import.meta.url), "utf8");
   const task = await readFile(
-    new URL("../pi/agent/skills/implement-task/SKILL.md", import.meta.url),
-    "utf8",
-  );
+    new URL("../pi/agent/skills/implement-task/SKILL.md", import.meta.url), "utf8");
   for (const phrase of [
-    "Mandatory decomposition",
-    "approve_feature_direction",
-    "Verification:",
-    "ancestor dependencies",
-    "original feature criteria",
-    "oversized scope",
-    "completed descendants",
-    "Conversational memory is not authoritative",
-    "single approval",
-    "validate_feature",
-    "/skill:implement-task",
+    "Mandatory decomposition", "approve_feature_direction", "Verification:",
+    "ancestor dependencies", "original feature criteria",
+    "completed descendants", "Conversational memory is not authoritative",
+    "single approval", "design-record", "design-finish",
   ]) {
-    assert.ok(delivery.includes(phrase), `delivery missing: ${phrase}`);
+    assert.ok(init.includes(phrase), `init-feature missing: ${phrase}`);
   }
   for (const phrase of [
-    "Before generating Executor",
-    "previousAttempt",
-    "inspect_conductor_evidence",
-    "parent remains incomplete",
-    "no per-issue attempt limit",
-    "three equivalent substantive",
-    "checkpoint required",
-    "execute_and_review",
-    "checkpoint_verified_task",
+    "/skill:init-feature", "oversized scope", "validate_feature",
+    "original feature criteria", "/skill:implement-task",
+    "no per-issue attempt limit", "completed descendants",
+  ]) {
+    assert.ok(delivery.includes(phrase), `feature-delivery missing: ${phrase}`);
+  }
+  for (const phrase of [
+    "Before generating Executor", "previousAttempt",
+    "inspect_conductor_evidence", "parent remains incomplete",
+    "three equivalent substantive", "checkpoint required",
+    "execute_and_review", "checkpoint_verified_task",
   ]) {
     assert.ok(task.includes(phrase), `implement-task missing: ${phrase}`);
   }
-  assert.ok(delivery.indexOf("### Feature planning") <
-    delivery.indexOf("## 4. Delegate one issue"));
+  assert.ok(init.indexOf("### Feature planning") <
+    init.indexOf("## 2. Design the issue graph"));
+  assert.ok(delivery.indexOf("## 1. Ensure an initialized feature") <
+    delivery.indexOf("## 3. Delegate one issue"));
 });
 
 const approvedTaskDesign = [
