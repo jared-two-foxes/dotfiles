@@ -36,7 +36,7 @@ workflow without registering a Scaffold feature.
 
 ## Integration with autonomous feature delivery
 
-When invoked within `/skill:feature-delivery`, design *one bounded selected
+When invoked within `/skill:init-feature` (or feature-level design recovery), design *one bounded selected
 issue* using its requirements, ancestor contracts and prerequisite context.
 Return a contract suitable for the delivery workflow to persist through
 `scaffold_tasks design-record`, including a concise summary, verification

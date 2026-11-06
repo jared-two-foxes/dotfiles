@@ -1,19 +1,19 @@
 ---
 name: feature-delivery
 description: >
-  End-to-end autonomous feature delivery: approve direction, design and decompose
-  Scaffold issues, implement through Conductor, review, checkpoint and validate.
+  Orchestrate multi-task implementation of an initialized, approved Scaffold
+  feature, using implement-task for issues and final feature validation.
 ---
 
 # Autonomous feature delivery
 
-This skill orchestrates the full approved feature lifecycle. For the independently
-invocable design capability and its engineering contract, load `/skill:design`.
-This workflow consumes that contract for each scoped issue, but alone owns
-Scaffold lifecycle transitions, execution authority, retry/recovery, checkpoints
-and final feature validation.
+This skill orchestrates multi-task delivery of a prepared feature.
+Use `/skill:init-feature` to create or finish the approved Scaffold graph and
+`/skill:design` for a standalone engineering contract. Here Pi owns task
+selection, prerequisite recovery, correction graph decisions and final validation;
+`/skill:implement-task` owns each task's execution and checkpoint loop.
 
-Research → Design → Implement. Use one overall feature direction approval for the
+Prepare → Implement → Validate. Reuse the one overall feature direction approval for the
 local delivery loop. Do not ask for per-issue design approval, a second design
 confirmation, execution permission, checkpoint confirmation or verification permission.
 The retained direction authorizes scoped work across sessions. A context handoff
@@ -28,77 +28,25 @@ For Git/GitHub publishing follow SYSTEM.md: publication needs a user request;
 Never merge PRs. Finish or suspend the active verification/correction loop before
 publishing. Offer full operations on request, not by default.
 
-## 1. Discovery and overall direction
+## 1. Ensure an initialized feature
 
-Inspect the actual repository, existing source, relevant tests, interfaces, Git
-branch/status and local instructions. Establish the ticket objective, acceptance
-criteria, boundaries, important interfaces, constraints and proposed approach.
-Discuss unresolved choices that affect the user's objectives, public behaviour,
-compatibility, cost or scope. Do not design every private detail up front.
+For a new Linear-backed feature or explicit requirements, invoke
+`/skill:init-feature` to load the source, capture and approve the original
+direction, create/reconcile the Scaffold graph, design/decompose all issues
+and run `design-finish`. Do not duplicate that initialization logic here.
+If an existing feature is already prepared, authenticate its persisted state,
+original approval, branch, baseline, task graph and design phase. Continue
+without reinitializing or requesting another approval. If the graph is still
+in Design, or feature approval is missing, delegate to `/skill:init-feature`
+to finish preparation; never claim a null selection means completion.
 
-### Feature planning and the single approval
+This skill owns the **multi-task implementation loop** and final feature
+validation only. Preparation is separate from execution: `init-feature`
+does not apply code or start tasks, and `feature-delivery` must not execute
+before verified `design-finish`. Reuse the single retained direction grant
+through task checkpointing, recovery and final validation.
 
-Present a concise overall design direction and the intended local delivery scope:
-design/decomposition, implementation, relevant checks and independent review,
-verified local commits, final feature validation, and necessary issue/rebase recovery.
-Persist its exact text in feature context using `scaffold_tasks` `init`, immutable
-`design_ref: "sha256:context"`, original full Git baseline and feature branch.
-Scaffold creates the root issue. State creation does not grant source authority.
-
-Call native `approve_feature_direction` with featureId. Its UI confirmation is the
-single approval: present the direction, then invoke this tool without a separate
-conversational yes/no question. On refusal or absent UI, stop before implementation.
-The tool retains scope-bound authority; existing matching approval is reused without
-prompting, including after a new session. Preserve its returned reference.
-Do not invent authority from a design note, transcript summary or issue status.
-
-An existing feature may use this tool to approve its retained overall direction
-once. Prior per-issue approvals alone do not imply this broader delivery grant.
-
-## 2. Design the issue graph downward
-
-Conversational memory is not authoritative; authenticate persisted state and evidence.
-Use `summary`, then `design-select` for
-one eligible issue. Inspect only that issue's scoped context, ancestor contracts,
-inherited dependencies and relevant source. Make detailed engineering decisions
-within the approved direction yourself. Share concise progress when useful;
-do not turn design previews into additional approval requests.
-
-### One bounded design pass
-
-Use `/skill:design` to produce the issue's bounded engineering contract; persist
-that contract using the existing `design-record` operation. The design skill
-itself must not initialize Scaffold, authorize implementation or invoke execution.
-
-
-Define inputs, outputs, immediate responsibilities, interfaces, invariants,
-producers/consumers, ownership/lifecycle, failure behaviour and verification.
-Use focused `diff` blocks with changed portions marked when explaining decisions;
-these are illustrative design excerpts, not executor input. Keep the implementation
-preview proportional to the issue and cover acceptance criteria and edge cases.
-
-Mandatory decomposition applies when the issue cannot be understood, implemented
-and independently verified in one bounded scope. Add immediate children with
-`decompose`; defer their internal details to their own design passes. Preserve
-ancestor dependencies and completed descendants. Every child needs a stable ID,
-objective, criteria, context, constraints and explicit dependencies. Put
-`Verification:` strategy and edge cases in context; retain review/discovery origin.
-Definitions remain immutable. Small changes use the root itself as the leaf.
-
-Persist each agent-authored design with `design-record`:
-`{summary, verification, approval, disposition: "leaf"|"decomposed"}`.
-The existing `approval` field records delegated authority, for example:
-"Agent-designed under overall feature direction authorization <actual reference>;
-no separate user approval was requested for this issue."
-Never claim the user approved an individual issue if they did not. Add a parent's
-immediate children before recording its design. Reopened designs retain their
-history and invalidate affected unfinished designs, which Pi redesigns autonomously.
-
-Continue downward until every issue has a complete design, then `design-finish`.
-No implementation may run before this entire graph design phase completes.
-Scaffold validates structure and association, not authority or verification truth.
-
-## 3. Implement upward and process discoveries
+## 2. Implement upward and process discoveries
 
 Use `select` for one eligible issue. Recover its current design and inspect source.
 Do not redo design approvals or request execution confirmation. On the first attempt,
@@ -136,7 +84,7 @@ and corrections that satisfy the approved direction are delegated decisions.
 Original ticket criteria must block rather than weaken them when incompatible work
 is discovered. Do not fabricate revised evidence or replace an active feature.
 
-## 4. Delegate one issue to implement-task
+## 3. Delegate one issue to implement-task
 
 After `design-finish`, select the next eligible issue through Scaffold and
 load `/skill:implement-task` with the exact `featureId`, `taskId`,
