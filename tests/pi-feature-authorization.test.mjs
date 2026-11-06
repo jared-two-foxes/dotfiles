@@ -120,6 +120,43 @@ test(
     );
 
     await suite.test(
+      "clean and reinitialize requires new approval even for identical ticket, design and Git baseline",
+      async (context) => {
+        const local = await fixture(context);
+        const { args, data, context: runtime } = local;
+        const originallyInitialized = "1".repeat(32);
+        data.feature.workflow.instance_id = originallyInitialized;
+        let confirmations = 0;
+        const options = {
+          confirmFeature: async () => {
+            confirmations++;
+            return structuredClone(data.feature);
+          },
+        };
+        const old = await approveFeatureDirection(args, data, runtime, options);
+        assert.equal(old.ok, true, old.message);
+        assert.equal(old.scope.instanceId, originallyInitialized);
+        assert.equal(await featureAuthorized(args, data, runtime), true);
+
+        // A new Scaffold init produces a different instance ID even if the
+        // Linear ticket, design, branch and original baseline are unchanged.
+        data.feature.workflow.instance_id = "2".repeat(32);
+        assert.equal(await featureAuthorized(args, data, runtime), false);
+        await assert.rejects(
+          requireFeatureAuthorization(args, data, runtime),
+          /Approve the overall feature direction/,
+        );
+
+        const recreated = await approveFeatureDirection(args, data, runtime, options);
+        assert.equal(recreated.ok, true, recreated.message);
+        assert.equal(recreated.recovered, undefined);
+        assert.notEqual(recreated.reference, old.reference);
+        assert.equal(recreated.scope.instanceId, "2".repeat(32));
+        assert.equal(confirmations, 2);
+      },
+    );
+
+    await suite.test(
       "checks fresh feature direction after confirmation",
       async (context) => {
         const { args, data, context: runtime } = await fixture(context);
