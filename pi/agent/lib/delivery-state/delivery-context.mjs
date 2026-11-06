@@ -7,7 +7,8 @@ const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
 const text = (v) => typeof v === "string" && v.trim() && !v.includes("\0");
-const anchorName = (task) => "refs/pi-delivery-journals/" + hash(task);
+const anchorName = (task, instanceId) => "refs/pi-delivery-journals/" +
+  hash(instanceId ? { task, instanceId } : task);
 const anchorBody = (j) => ({
   revision: j.revision,
   head: j.head,
@@ -16,19 +17,30 @@ const anchorBody = (j) => ({
   contextDigest: hash(j.context),
   contractDigest: hash(j.contract),
 });
-function deliveryAnchor(repository, task) {
-  try {
-    return {
-      sha: git(repository, ["rev-parse", anchorName(task)]),
-      body: JSON.parse(git(repository, ["show", anchorName(task)])),
-    };
-  } catch {
-    return null;
-  }
+function deliveryAnchor(repository, task, journal, instanceId) {
+  const read = (name) => {
+    try {
+      return {
+        name,
+        sha: git(repository, ["rev-parse", name]),
+        body: JSON.parse(git(repository, ["show", name])),
+      };
+    } catch {
+      return null;
+    }
+  };
+  const current = read(anchorName(task, instanceId));
+  if (current || !journal || !instanceId) return current;
+
+  // A feature initialized before the instance-scoped journal change may still
+  // have an active legacy anchor. Allow its *exact* persisted journal to
+  // continue in place; never adopt a legacy anchor for a new empty graph.
+  const legacy = read(anchorName(task));
+  return legacy && equal(legacy.body, anchorBody(journal)) ? legacy : null;
 }
 
-export function assertDeliveryJournal(repository, task, journal) {
-  const prior = deliveryAnchor(repository, task);
+export function assertDeliveryJournal(repository, task, journal, instanceId) {
+  const prior = deliveryAnchor(repository, task, journal, instanceId);
   requireValue(
     journal ? prior && equal(prior.body, anchorBody(journal)) : !prior,
     "EVIDENCE_RECOVERY_REQUIRED: delivery journal and Git audit anchor disagree; restore retained history",
@@ -36,14 +48,14 @@ export function assertDeliveryJournal(repository, task, journal) {
   return prior;
 }
 
-export function anchorDeliveryJournal(repository, task, journal, next) {
-  const prior = assertDeliveryJournal(repository, task, journal);
+export function anchorDeliveryJournal(repository, task, journal, next, instanceId) {
+  const prior = assertDeliveryJournal(repository, task, journal, instanceId);
   const blob = git(repository, ["hash-object", "-w", "--stdin"], {
     input: JSON.stringify(anchorBody(next)),
   });
   git(repository, [
     "update-ref",
-    anchorName(task),
+    prior?.name ?? anchorName(task, instanceId),
     blob,
     prior?.sha ?? "0".repeat(40),
   ]);

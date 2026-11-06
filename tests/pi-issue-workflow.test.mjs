@@ -1194,6 +1194,109 @@ test(
 );
 
 test(
+  "operator clean blocks active Pi execution and checkpoint; recreated feature rejects old approval and receipt",
+  integration,
+  async (t) => {
+    const f = await fixture(t);
+    const context = { directory: f.dir };
+    const options = { scaffoldOptions: f.options.scaffoldOptions };
+    await f.approve("F");
+    await f.call("design-finish");
+    await f.call("start", { task_id: "F" });
+    const original = (await f.call("list")).feature;
+    const oldInstance = original.workflow.instance_id;
+    const approved = await approveFeatureDirection(
+      { featureId: "F" }, context, { ...options, confirm: async () => true },
+    );
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    assert.equal(await featureAuthorized({ featureId: "F" }, context, options), true);
+
+    // An interrupted/failed attempt leaves external evidence behind.
+    const originalArgs = await f.args("F");
+    const first = await f.run(originalArgs, "NEEDS_DESIGN");
+    assert.equal(first.status, "NEEDS_DESIGN", JSON.stringify(first));
+    const oldReceipt = await readEvidence(f.dir, first.evidence.reference);
+    assert.equal(oldReceipt.featureInstanceId, oldInstance);
+    const beforeGit = await snapshot(f.dir);
+    const oldEvidence = await readEvidence(f.dir, first.evidence.reference);
+
+    // This is a human/operator CLI invocation, never a native Pi tool.
+    execFileSync(process.env.PYTHON ?? "python3", [
+      "-c",
+      "import sys;sys.path.insert(0,sys.argv.pop(1));from scaffold_cli.cli import main;main()",
+      path.join(process.env.SCAFFOLD_SOURCE, "src"),
+      "clean", "--feature", "F", "--yes",
+    ], { cwd: f.dir, encoding: "utf8" });
+    assert.deepEqual(await snapshot(f.dir), beforeGit);
+    assert.deepEqual(await readEvidence(f.dir, first.evidence.reference), oldEvidence);
+
+    let invoked = 0;
+    const noExecution = {
+      ...options,
+      issueWorkflowOnly: true,
+      invokeConductor: async () => {
+        invoked++;
+        assert.fail("Cleaned feature must not start the execution pipeline");
+      },
+    };
+    const blocked = await executeAndReview(originalArgs, context, noExecution);
+    assert.equal(blocked.status, "BLOCKED");
+    assert.equal(invoked, 0);
+    const checkpoint = await checkpointVerifiedTask(
+      { ...f.scope("F"), evidenceRef: first.evidence.reference, authorizationMode: "manual" },
+      context, { ...f.options, authorize: async () => assert.fail("Must not request checkpoint approval") },
+    );
+    assert.equal(checkpoint.ok, false);
+    const completion = await scaffoldTasks({
+      operation: "complete", feature_id: "F", task_id: "F",
+      payload: {
+        feature_id: "F", task_id: "F", source: "conductor", result: "PASSED",
+        reference: first.evidence.reference, summary: "Stale previous attempt",
+      },
+    }, context, f.options.scaffoldOptions);
+    assert.equal(completion.ok, false);
+
+    // Same ticket, approved design and Git baseline, but a distinct new instance.
+    const restored = await f.call("init", {
+      payload: {
+        id: "F", title: "Ticket", objective: "Preserve behavior",
+        acceptance_criteria: ["Behavior works"], design_ref: original.design_ref,
+        context: original.context, baseline: f.base, branch: "feature/issues",
+      },
+    });
+    assert.notEqual(restored.feature.workflow.instance_id, oldInstance);
+    assert.equal(restored.feature.design_ref, original.design_ref);
+    assert.equal(await featureAuthorized({ featureId: "F" }, context, options), false);
+    await f.approve("F");
+    await f.call("design-finish");
+    await f.call("start", { task_id: "F" });
+    assert.equal((await executeAndReview(await f.args("F"), context, noExecution)).status, "BLOCKED");
+    assert.equal(invoked, 0);
+    const freshApproval = await approveFeatureDirection(
+      { featureId: "F" }, context, { ...options, confirm: async () => true },
+    );
+    assert.equal(freshApproval.ok, true, JSON.stringify(freshApproval));
+    assert.notEqual(freshApproval.reference, approved.reference);
+
+    // Even after fresh approval, replaying the previous incarnation's receipt
+    // cannot resume an old task, although the external evidence still exists.
+    const replay = await executeAndReview(
+      { previousAttempt: first.evidence.reference, input: originalArgs.input },
+      context,
+      { ...noExecution, invokeConductor: async () => assert.fail("Old receipt cannot execute") },
+    );
+    assert.equal(replay.status, "BLOCKED", JSON.stringify(replay));
+    const fresh = await f.run(await f.args("F"), "NEEDS_DESIGN");
+    assert.equal(fresh.status, "NEEDS_DESIGN", JSON.stringify(fresh));
+    assert.equal(fresh.evidence.attempt, 1, "Old attempt history must not consume new budgets");
+    assert.equal(
+      (await readEvidence(f.dir, fresh.evidence.reference)).featureInstanceId,
+      restored.feature.workflow.instance_id,
+    );
+  },
+);
+
+test(
   "one retained direction approval covers execution and survives contexts without new confirmations",
   integration,
   async (t) => {

@@ -19,7 +19,7 @@ const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const text = (v) => typeof v === "string" && v.trim() && !v.includes("\0");
 
 export async function deliveryEvent(repository, task, journal, event, options = {}) {
-  assertDeliveryJournal(repository, task, journal);
+  assertDeliveryJournal(repository, task, journal, options.featureInstanceId);
   const r = await scaffoldTasks(
     {
       operation: "delivery-record",
@@ -31,7 +31,8 @@ export async function deliveryEvent(repository, task, journal, event, options = 
     options.scaffoldOptions,
   );
   requireValue(r.ok, "DELIVERY_STATE: " + r.message + " " + (r.stderr ?? ""));
-  return anchorDeliveryJournal(repository, task, journal, r.data.feature.tasks[task.taskId].delivery);
+  return anchorDeliveryJournal(repository, task, journal,
+    r.data.feature.tasks[task.taskId].delivery, options.featureInstanceId);
 }
 
 export async function prepareDelivery(repository, feature, issue, args, options = {}) {
@@ -42,8 +43,10 @@ export async function prepareDelivery(repository, feature, issue, args, options 
   const records = args.previousAttempt
     ? (await authenticateAttemptChain(repository, args.previousAttempt, args.task)).records
     : [];
+  const instanceId = feature.workflow?.instance_id;
+  const scopedOptions = { ...options, featureInstanceId: instanceId };
   let journal = issue.delivery;
-  assertDeliveryJournal(repository, args.task, journal);
+  assertDeliveryJournal(repository, args.task, journal, instanceId);
   if (journal?.inflight) {
     // Recover a terminal response lost before the Scaffold finish transaction.
     const terminal = [];
@@ -57,7 +60,7 @@ export async function prepareDelivery(repository, feature, issue, args, options 
       "INVOCATION_RECOVERY_REQUIRED: retained intent may still be active; inspect terminal stages, never replay",
     );
     journal = await deliveryEvent(repository, args.task, journal,
-      { kind: "finished", started: journal.inflight, reference: terminal[0] }, options);
+      { kind: "finished", started: journal.inflight, reference: terminal[0] }, scopedOptions);
   }
   if (journal) {
     if (journal.head !== (args.previousAttempt ?? null)) {
@@ -132,7 +135,7 @@ export async function prepareDelivery(repository, feature, issue, args, options 
       context,
       head: args.previousAttempt ?? null,
       sequence: previous?.attempt ?? 0,
-    }, options);
+    }, scopedOptions);
   const updates = args.contextUpdates ?? [];
   requireValue(previous?.kind === "issue-handoff" ||
     !updates.some(u => u.kind === "repair_check" && u.useMeaningfulTestEvaluator === true),
@@ -162,8 +165,8 @@ export async function prepareDelivery(repository, feature, issue, args, options 
     "Original review context or inherited obligations changed; restore authoritative records before execution");
   if (!equal(journal.context, revised.context))
     journal = await deliveryEvent(repository, args.task, journal,
-      { kind: "context", updates, context: revised.context }, options);
-  return { journal, records, args: planned };
+      { kind: "context", updates, context: revised.context }, scopedOptions);
+  return { journal, records, args: planned, instanceId };
 }
 
 export async function anchorHandoff(repository, task, reference, previous, options = {}) {
@@ -171,5 +174,6 @@ export async function anchorHandoff(repository, task, reference, previous, optio
     journal = f?.tasks[task.taskId]?.delivery;
   if (!journal || journal.head === reference) return;
   await deliveryEvent(repository, task, journal,
-    { kind: "handoff", reference, previous: previous ?? null }, options);
+    { kind: "handoff", reference, previous: previous ?? null },
+    { ...options, featureInstanceId: f.workflow?.instance_id });
 }

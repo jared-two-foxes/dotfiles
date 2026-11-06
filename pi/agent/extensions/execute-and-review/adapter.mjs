@@ -558,7 +558,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
           previous: args.previousAttempt ?? null,
           sequence: attempt,
         },
-        options,
+        { ...options, featureInstanceId: delivery.instanceId },
       );
     const finishDelivery = async (result) => {
       if (
@@ -575,7 +575,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
             started: startedReference,
             reference: result.evidence.reference,
           },
-          options,
+          { ...options, featureInstanceId: delivery.instanceId },
         );
       return result;
     };
