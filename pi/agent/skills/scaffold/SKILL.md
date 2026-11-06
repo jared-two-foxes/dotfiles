@@ -13,6 +13,22 @@ Pi owns reasoning, approvals, decomposition and sequencing. Scaffold owns its
 atomic task state at `.scaffold/tasks.json`, protected by `.scaffold/.tasks.lock`, dependencies and lifecycle history.
 Never edit state files directly.
 
+
+
+**Operator-only reset:** `scaffold clean --feature ID` (or explicit `--all`)
+is a destructive administrative CLI outside the native `scaffold_tasks`
+contract. Never invoke it autonomously, to recover blocked work, to bypass a
+checkpoint/review, or to clear execution attempts. Only an operator may run it
+after dry-run/confirmation or with their own explicit `--yes`. It rewrites
+only the selected records in `.scaffold/tasks.json`: it leaves the lock,
+Git work, source files, retained receipts and historical criteria artifacts
+intact. Cleaning invalidates active Pi workflow authority, so stop stale
+sessions/handoffs. A new `tasks init` gets a distinct feature instance ID even
+if the ticket, design and Git baseline are identical; complete
+`/skill:init-feature` and obtain *fresh* direction approval before work.
+Never treat earlier receipts as eligible for checkpoint or continuation.
+
+
 There is **one** supported work-tracking model: the schema-v2 recursive
 feature/task graph. The former LIFO criteria stack is retired; never run
 `scaffold stack` or `scaffold status` or use `.criteria-stack.json` as an
