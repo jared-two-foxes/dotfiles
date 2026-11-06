@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util';
+import { requireCurrentFeatureReceipt } from './feature-instance.mjs';
 
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 
@@ -11,6 +12,7 @@ export async function authenticateIssueMutation(repository, feature, params) {
     requireValue(current.clean && !current.bookkeepingVisible, 'Park unfinished source with suspend_issue before reopening design');
     if (params.payload.reference) {
       const r = await readEvidence(repository, params.payload.reference);
+      requireCurrentFeatureReceipt(feature, r);
       const { git } = await import('../git/tree.mjs');
       requireValue(r.kind === 'issue-suspension' && isDeepStrictEqual(r.task, binding) &&
         r.before.head === current.head && git(repository, ['rev-parse', 'refs/pi-issue-suspensions/' + params.payload.reference.split(':').at(-1) + '^{tree}']) === r.before.tree,
@@ -19,12 +21,14 @@ export async function authenticateIssueMutation(repository, feature, params) {
   } else if (params.operation === 'issue-resume') {
     const { readTaskHandoff } = await import('./attempt-chain.mjs');
     const h = await readTaskHandoff(repository, params.payload.handoff, binding);
+    requireCurrentFeatureReceipt(feature, h);
     requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === params.payload.reference && isDeepStrictEqual(current, h.after), 'Authenticated issue restore required');
   } else {
     const { authenticateTaskEvidence } = await import('./task-evidence.mjs');
     const { checkpointProvenance } = await import('./checkpoint-history.mjs');
     const { git } = await import('../git/tree.mjs');
     const record = await authenticateTaskEvidence(repository, params.payload.reference, binding);
+    requireCurrentFeatureReceipt(feature, record);
     const p = checkpointProvenance(repository, params.payload.commit);
     requireValue(p.evidenceRef === params.payload.reference && p.taskId === params.task_id && p.featureId === feature.id &&
       p.designRef === feature.design_ref && p.tree === record.after.tree &&
