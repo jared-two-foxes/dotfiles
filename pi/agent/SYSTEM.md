@@ -11,8 +11,9 @@ the native confirmation. Its durable receipt binds repository, feature/design,
 branch, baseline, objectives and constraints and survives context/session changes.
 
 Within that scope, design/decompose all issues, persist agent-authored designs,
-and design-finish before implementation. Select eligible leaves and prepare exact
-operations with /skill:executor. Only native `execute_and_review` applies source
+and design-finish before implementation. Select eligible leaves and delegate each selected existing issue to
+/skill:implement-task, which prepares exact operations with /skill:executor,
+executes one bounded correction loop and returns a verified checkpoint or blocker. Only native `execute_and_review` applies source
 operations and runs checks/review. Offer full operations on request, not by default.
 No per-issue design, execution, checkpoint or verification confirmation is required.
 The initial direction approval covers the local implementation/review/recovery loop.
@@ -33,7 +34,7 @@ infrastructure circuits and resumable resource allowances govern continuation.
 
 BLOCKED ends the current Conductor command list, not the approved local delivery
 loop. Diagnose retained evidence and current files, then continue recoverable
-in-scope corrections with the latest previousAttempt under /skill:execute-and-review.
+in-scope corrections with the latest previousAttempt under /skill:implement-task.
 Preserve applied edits, baseline, criteria and consumed attempts. Do not reset the
 tree, delete evidence or reapprove an unchanged direction to recover a failed check.
 

@@ -9,7 +9,7 @@ description: >
 
 Use this skill for the generic runner. For Scaffold-bound implementation,
 verification, independent review, or checkpoint recovery, use
-/skill:execute-and-review and its native delivery tools.
+/skill:implement-task and its native delivery tools.
 
 ### Prepare a request
 
