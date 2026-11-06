@@ -10,8 +10,18 @@ description: >
 
 Use native **`scaffold_tasks`**, backed by the installed `scaffold` executable.
 Pi owns reasoning, approvals, decomposition and sequencing. Scaffold owns its
-atomic locked state at `.scaffold/tasks.json`, dependencies and lifecycle history.
-Never edit state files directly. Native tools never automatically select the next
+atomic task state at `.scaffold/tasks.json`, protected by `.scaffold/.tasks.lock`, dependencies and lifecycle history.
+Never edit state files directly.
+
+There is **one** supported work-tracking model: the schema-v2 recursive
+feature/task graph. The former LIFO criteria stack is retired; never run
+`scaffold stack` or `scaffold status` or use `.criteria-stack.json` as an
+alternate state source. Historical stack files are not migrated or deleted.
+The task-only CLI supports `scaffold tasks summary --feature ID`,
+`scaffold tasks issue --feature ID --task ID`, `scaffold tasks design-select
+--feature ID`, and `scaffold tasks select --feature ID`. Inside Pi, use the
+matching native `scaffold_tasks` operations rather than shelling out.
+ Native tools never automatically select the next
 issue, generate code, retry implementation or claim verification from bookkeeping.
 Use `/skill:init-feature` for ticket/requirements intake, approval, decomposition
 and `design-finish` without implementation. Use `/skill:feature-delivery` for
