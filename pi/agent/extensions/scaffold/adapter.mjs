@@ -50,18 +50,24 @@ export function invoke(program, args, { cwd, signal, input = "" }) {
 }
 
 
-// Reject state symlinks, so Scaffold cannot follow them into unrelated directories.
+// Match Scaffold's task-only state paths and reject unsafe filesystem entries
+// before invoking the CLI or reading persisted issue data.
 export async function checkStatePaths(repository) {
-  for (const suffix of [
-    ".scaffold",
-    ".scaffold/tasks.json",
-    ".scaffold/.criteria-stack.lock",
+  for (const [suffix, kind] of [
+    [".scaffold", "directory"],
+    [".scaffold/tasks.json", "file"],
+    [".scaffold/.tasks.lock", "file"],
   ]) {
     try {
       const stat = await lstat(path.join(repository, suffix));
       requireValue(
         !stat.isSymbolicLink(),
-        "Scaffold state paths must not be symlinks",
+        "Scaffold state paths must not be symlinks: " + suffix,
+      );
+      requireValue(
+        kind === "directory" ? stat.isDirectory() : stat.isFile(),
+        "Scaffold state path must be a " +
+          (kind === "directory" ? "directory: " : "regular file: ") + suffix,
       );
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
