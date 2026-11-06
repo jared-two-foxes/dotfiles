@@ -69,20 +69,61 @@ function scopeFor(args, f, context) {
     );
   }
   requireValue(
-    f.workflow?.kind === "recursive-issues/v1" &&
-      f.branch &&
-      f.branch !== defaultBranch &&
-      f.original_baseline &&
-      (!args.designRef || args.designRef === f.design_ref) &&
-      (!args.task ||
-        (args.task.featureId === featureId &&
-          args.task.designRef === f.design_ref &&
-          f.tasks[args.task.taskId])) &&
-      (!args.branch || args.branch === f.branch) &&
-      (!args.featureBaseRef || args.featureBaseRef === f.original_baseline) &&
-      git(repository, ["symbolic-ref", "--short", "HEAD"]) === f.branch &&
-      !["main", "master"].includes(f.branch),
-    "Feature authority scope mismatch",
+    f.workflow?.kind === "recursive-issues/v1",
+    "Feature " + featureId + ": unsupported issue workflow " +
+      JSON.stringify(f.workflow?.kind ?? null) + "; expected recursive-issues/v1",
+  );
+  requireValue(
+    !!f.branch,
+    "Feature " + featureId + ": no feature branch recorded in Scaffold",
+  );
+  requireValue(
+    !["main", "master", defaultBranch].includes(f.branch),
+    "Feature " + featureId + " is bound to protected branch '" + f.branch +
+      "'. Approval and implementation require an unprotected feature branch. " +
+      "If Scaffold was already initialized on this branch, switching Git branches " +
+      "alone will not change its recorded binding. Inspect and reconcile the " +
+      "existing feature; do not edit Scaffold state or reinitialize it to bypass this check.",
+  );
+  requireValue(
+    !!f.original_baseline,
+    "Feature " + featureId + ": original Git baseline is missing from Scaffold",
+  );
+  if (args.task) {
+    requireValue(
+      args.task.featureId === featureId,
+      "Task feature ID mismatch: expected " + featureId +
+        ", received " + String(args.task.featureId),
+    );
+    requireValue(
+      args.task.designRef === f.design_ref,
+      "Task design reference mismatch: expected " + f.design_ref +
+        ", received " + String(args.task.designRef),
+    );
+    requireValue(
+      !!f.tasks?.[args.task.taskId],
+      "Task " + String(args.task.taskId) +
+        " does not exist in Scaffold feature " + featureId,
+    );
+  }
+  if (args.branch) {
+    requireValue(
+      args.branch === f.branch,
+      "Feature branch argument mismatch: expected " + f.branch +
+        ", received " + args.branch,
+    );
+  }
+  if (args.featureBaseRef) {
+    requireValue(
+      args.featureBaseRef === f.original_baseline,
+      "Original feature baseline mismatch: expected " + f.original_baseline +
+        ", received " + args.featureBaseRef,
+    );
+  }
+  requireValue(
+    git(repository, ["symbolic-ref", "--short", "HEAD"]) === f.branch,
+    "Feature branch changed while validating authority; inspect the current " +
+      "checkout before retrying",
   );
   return {
     repository,
