@@ -136,141 +136,45 @@ and corrections that satisfy the approved direction are delegated decisions.
 Original ticket criteria must block rather than weaken them when incompatible work
 is discovered. Do not fabricate revised evidence or replace an active feature.
 
-## 4. Prepare executor handoff
+## 4. Delegate one issue to implement-task
 
-Before generating Executor input, inspect exact current source and load
-`/skill:executor`. Prepare and retain the complete executor input. Use `edit_file` for in-place text changes as documented there; never send unified diffs as operations.
-Generate only the selected issue's complete operations, not a feature-wide operation
-set split afterwards. Pass exact JSON and meaningful verification commands as
-executable/argument arrays to `execute_and_review`, plus
-`checkpoint: {defaultBranch, protectedBranches}` with known repository branch
-protection metadata. A successful review automatically records completion and
-creates a local commit of the exact reviewed tree. Retained feature direction
-approval already covers this action; do not ask again.
+After `design-finish`, select the next eligible issue through Scaffold and
+load `/skill:implement-task` with the exact `featureId`, `taskId`,
+approved design and current context. Pi remains the sole orchestrator: the
+task skill owns implementation operations, targeted check selection, bounded
+Conductor attempts, in-scope corrections, evidence inspection and verified
+checkpoint completion for **one issue only**. Its native execution mechanism
+is still `execute_and_review`; the extension applies source operations,
+runs checks and independent review, records authentic completion and commits
+the exact reviewed tree. One invocation of the native tool is one attempt,
+not an entire task or a feature.
 
-### Select checks for the current issue
+On `stage: COMMITTED`, inspect the returned `nextBaseRef` and select the
+next eligible task. Do not repeat completion/checkpoint operations. When the
+task skill returns an unresolved blocker, missing dependency, oversized scope
+or NEEDS_DESIGN requiring graph changes, stop task execution and use the
+discovery exit hatch above: suspend with evidence, design/decompose remaining
+work, `design-finish`, complete prerequisites, and `resume_issue` with an
+authenticated handoff. Do not restart the feature, discard partial changes or
+reset prior attempts. A review failure inside a bounded task is normally
+handled by implement-task; a new graph is a feature-level decision.
 
-Prefer an explicit `checks` array with the smallest meaningful verification plan
-for this issue. During its design pass, identify the affected behavior, relevant
-tests, exact executable/argument arrays and expected coverage; retain that plan in
-its design verification record. Inspect the repository's test runner and existing
-scripts rather than guessing filters. Use test-name, file, package, module or target
-filters as supported. For example, a Rust crate change may use
-`["cargo", "test", "-p", "affected-crate", "regression_name"]`; a Node test change
-may use `["node", "--test", "tests/affected.test.mjs"]`. Include a scoped build,
-type check or lint check when it establishes relevant correctness.
-If a tool's exit code does not establish success, set that named check's optional
-`successCondition` to an explicit executable/argv array that examines the full
-output path or other state. Its exit 0 advances Conductor. Do not add generic
-text matching to Cargo build/test when their exit status already expresses
-failure; use a tool-specific condition for cases such as a zero-test run.
-
-Leaf issues run targeted regressions; intermediate parents run scoped integration
-checks for their immediate children and interfaces. Exclude the full repository or
-workspace test command from these nodes' `checks` whenever targeted coverage is
-available. Do not append an unfiltered full-suite command as a default safety check.
-If the runner cannot select the necessary tests, explain and retain why the broader
-command is needed; never substitute an irrelevant passing check or omit required
-coverage merely to keep commands narrow. Inspect output to prove the selected tests
-actually ran, including correct handling of filters matching no tests.
-
-Reserve the full test suite for the final root/feature verification through
-`validate_feature` after required issue checkpoints. The root's implementation
-attempt may use focused integration checks; the final gate supplies full-project
-build/test commands and independently reviews the complete result. Avoid duplicating
-that expensive suite across each issue or parent. If final review creates corrective
-issues, use targeted checks for those issues, then rerun the full final gate.
-
-The selected ordered plan stays fixed within a correction epoch. For an invocation
-error, use a structured `repair_check` update with equivalent commands, preserving names,
-order, success conditions and coverage. Never silently weaken a plan; changed
-verification contracts require Design recovery retaining criteria, history and count.
-
-## 5. Own the execution and review loop
-
-Capture the current checkpoint HEAD once as the issue's baseRef and retain that
-baseline within its correction epoch. The adapter versions and assembles context. Preserve the check contract; explicit
-invocation repairs follow /skill:execute-and-review. Start the explicit
-Scaffold issue before execution. Supply task identity and the previousAttempt for
-corrections. Use `previousAttempt`, fresh `input` and structured `contextUpdates`; inspect
-`inspect_issue_attempt` for the authoritative context; inspect full logs
-through `inspect_conductor_evidence` only when needed. Do not hide Scaffold state in
-the review diff: bookkeeping must be ignored and untracked.
-
-- PASSED: inspect authentic execution, meaningful check output, APPROVED independent
-  review and exact tree/task binding. Native `execute_and_review` automatically
-  records Scaffold completion and runs the verified Git commit command. On
-  `stage: COMMITTED`, use `nextBaseRef`; do not repeat completion or checkpointing.
-  If implementation passed but commit finalization blocked, use
-  `checkpoint_verified_task` with the same successful receipt and matching scope.
-  Never reapply operations or rerun review to recover a failed commit. Each resolved node gets its own
-  commit, including an empty commit for parent verification. A parent remains incomplete
-  after children finish until its original integrated criteria pass independently.
-- NEEDS_DESIGN: inspect actual source/diff and findings, author a minimal correction
-  against the current tree with the latest `previousAttempt`, or use the discovery
-  exit hatch for additional issues. Never replay the original operations.
-- BLOCKED: stop the current command list, retain evidence and partial work, inspect
-  the actual cause and continue an in-scope recoverable correction under the existing
-  approval. Follow /skill:execute-and-review's recovery procedure. An environment failure is
-  not a code defect. Keep the prior after-tree; a checks-only retry uses an empty
-  operations array. Stop only for a concrete unresolved blocker or loop limit.
-- Oversized task: suspend and decompose only the remaining unverified responsibilities.
-
-There is **no per-issue attempt limit**. Preserve every invocation across contexts
-and handoffs. Native stall detection pauses after three equivalent substantive
-outcomes or recurring source cycles. Infrastructure circuits and resource pauses
-are separate. Diagnose the returned signature and change the relevant correction
-or plan; never create replacement issues or remove history to continue.
-Scaffold state transitions do not prove verification. If authentic completion or a
-checkpoint is unavailable, report checkpoint required and stop dependent execution.
+Task-level `previousAttempt`, `repair_check`, targeted checks, correction,
+checkpoint recovery, retained receipts, meaningful test evaluators and retry
+details live in `/skill:implement-task`. Task completion requires authentic
+PASSED evidence and exact Git checkpoint. The full repository test suite is
+reserved for `validate_feature`, not repeated for each leaf or parent by
+default. Original feature criteria and all completed descendants remain intact.
+There is **no per-issue attempt limit**; evidence-backed stall detection and
+resource/infrastructure pauses govern continuation.
 
 ## Checkpoints, recovery and final review
 
-The initial feature authority covers verified local checkpoints, bounded checks,
-independent review and recovery on the approved feature branch. The native tools
-reuse it across sessions without routine confirmation. Supply actual default and
-known protected branches, original feature baseline and any reconciliationRef.
-Protected branches, unrelated source and unverified commits remain prohibited.
-
-#### Checkpoint recovery
-
-Read scoped Scaffold `summary`/`issue`, relevant receipts, Git HEAD/history/index/worktree and
-`Pi-Task-Checkpoint` commit trailer before selecting work. Completion without a
-checkpoint: use the retained feature authority and call the tool with the original receipt.
-A retry before commit stages only the exact retained Git tree in a private index;
-the real index is never used as a catch-all. Interruption after commit: the tool
-recognizes matching provenance, exact parent and tree at HEAD, then repairs an index equal to the old baseline only when the atomic Git
-`refs/pi-checkpoints/<receipt-hash>` pending marker proves an unfinished index
-update. Without that marker, only an index equal to the verified tree is accepted.
-The marker is removed after index finalization; a staged reversal after a finished
-checkpoint is preserved and rejected. It returns the existing SHA
-with `recovered: true`; it does not create a duplicate. Repeated successful calls
-also return that SHA. A new session reuses the matching retained feature authorization.
-
-A hard process kill may leave Git's standard `index.lock`. The tool never removes
-an existing lock. Establish that no Git process owns it; have the user explicitly
-resolve the stale lock, then retry. Do not reset/discard source or index changes.
-Unexpected HEAD, unrelated edits, divergent staged versions, ambiguous state,
-missing evidence or a mismatch blocks recovery. Reconcile explicitly. A matching
-checkpoint can explain why the old receipt no longer matches an uncommitted tree;
-do not rerun implementation merely because that fingerprint changed on commit.
-If later task commits already exist, inspect their parent/provenance chain; do
-not replay an older checkpoint request (the tool only reconciles current HEAD).
-
-Receipt Git trees are local objects retained with the existing evidence records;
-commits carry their provenance without another workflow database. Keep receipts
-with this checkout. Hashes detect corruption, not malicious local rewriting.
-For task calls, the adapter transparently wraps the approved test executable and
-arguments, preserving its output and exit code. A successful test captures the
-full Git tree/fingerprint immediately before Conductor starts independent review.
-A missing boundary or any final source/index mismatch blocks PASSED and checkpoints.
-The receipt retains both boundary and final snapshots, plus the actual request.
-This is a narrow Pi adapter addition; Conductor still performs one attempt and
-never commits. Checkpoint scope comes from actual Git state and the full review
-baseline, not Executor paths. Concurrent external writers remain unsupported:
-endpoint fingerprints cannot detect transient changes restored during review.
-Stop if concurrent activity is suspected; local hashes are not adversarial proof.
-
+Feature delivery ensures each dependency and parent issue is independently
+completed and checkpointed before final validation. Per-task Git tree and
+index recovery is delegated to `/skill:implement-task` and its native tools.
+Feature-level suspension, dependency changes, rebase reconciliation and
+final validation remain this workflow's responsibility.
 
 ## Final feature verification
 
@@ -295,68 +199,14 @@ inspection tools; only an authenticated handoff changes the continuation baselin
 The retained feature authority covers verification/recovery, not performing a rebase
 or arbitrary history rewriting. See extensions/execute-and-review/README.md for exact inputs.
 
-## Scoped context and persisted issue handoff
 
-Use `scaffold_tasks` `summary` for phase, counts and state digest; `design-select`
-for the next design issue; `select` for the next implementable issue; and `issue`
-with explicit task_id to fetch one issue. Scoped context includes its approved
-design, ancestor contracts, inherited prerequisite contracts and immediate children.
-It omits lifecycle transcripts, sibling bodies and old executor inputs. Selection
-is read-only and null never proves completion. The native Pi tool accepts `select` and `design-select` for scoped selection and
-returns compact mutation acknowledgements. Full `list` remains an explicit diagnostic operation; native
-verification continues to inspect complete state and receipts internally.
+## Scoped feature state and handoffs
 
-After selecting an issue, use native `prepare_issue_handoff` with featureId/taskId
-and optional notes `{next_action, source_locations, open_questions}`. Save useful
-navigation notes before ending the issue session. The returned reference identifies
-an immutable context capsule bound to graph state, approved contracts, Git source,
-index/HEAD and latest authenticated attempt. No implementation or graph transition
-occurs. Notes are agent-authored reminders, never user approval or verification.
-
-On a fresh context use `inspect_issue_handoff` with reference, or featureId/taskId
-to discover the newest saved handoff. Inspect `applicable`; stale context is omitted
-and a refresh instruction is returned. Prepare a fresh handoff after graph, source
-or attempt changes. Refresh does not carry old notes automatically: inspect actual
-state and reconcile open questions. `inspect_issue_attempt` retrieves exact retained
-requirements/checks and consumed attempts without loading raw logs or executor
-input. Retrieve full diagnostics through inspect_conductor_evidence only when needed.
-Latest finding excerpts never establish that earlier findings were resolved.
-These context tools grant no design/execution/checkpoint authority and never replace
-receipt authentication, original obligations or execution history.
-
-
-## Versioned continuation
-
-A correction supplies `previousAttempt`, fresh exact `input` and optional structured
-`contextUpdates`. Native tools inherit task identity, baseline, approval, checks and
-all original obligations. Do not copy approval prose, hashes or requirements text.
-Use add_obligation for discoveries, annotate/correct_assumption/revise_design for
-in-scope evolution, repair_check for equivalent invocation repairs and add_check
-for additional coverage. Every update needs a reason. Removing obligations or
-material scope changes requires the explicit Design/approval transition.
-
-A proposed_addressed claim never closes a finding. Independent Review must return
-an explicit verified assessment for each open stable obligation ID. Final feature
-review carries original criteria, issue contexts and unresolved feature findings.
-
-Use checkEnvironmentInputs only when all relevant inputs of deterministic checks
-can be measured; otherwise omit it and rerun checks. No secrets belong in this
-manifest. A reviewer-only repair can reuse matching source/index/HEAD, definitions,
-environment and authenticated successful check evidence. Reused stages are linked
-to their original receipts; they are not described as freshly executed checks.
-
-INFRASTRUCTURE_PAUSED requires relevant repair or the permitted bounded probe after
-cooldown. RESOURCE_PAUSED retains usage and needs an explicit allowance revision.
-DIAGNOSIS_REQUIRED includes evidence-backed signatures; unsupported claims of
-progress do not reset it. EVIDENCE_RECOVERY_REQUIRED means restore authoritative
-proof or report the exact blocker. Preserve files, index, original baseline, Git
-audit anchors and all receipts. Never reapprove unchanged direction to recover.
-
-Material contract amendments use approve_delivery_amendment with the latest receipt,
-concrete original criterion/finding IDs, replacement and reason. Only that exceptional
-delta requests user confirmation. Apply its returned reference through
-contextUpdates.apply_amendment; originals and invocation history remain retained,
-and replacement behavior requires independent verification. For environment-only
-credential rotation use reviewProbe with empty operations; failed probes are bounded
-and throttled. Oversized review context can resume with an explicit
-reviewContextMaxBytes allowance increase without dropping obligations.
+Use `scaffold_tasks summary`, `design-select`, `select` and a scoped
+`issue` query for the current phase; never treat null selection as proof of
+completion. Within a selected issue, `/skill:implement-task` owns detailed
+`prepare_issue_handoff`, `inspect_issue_attempt`, `previousAttempt`
+and retained evidence inspection. Only Scaffold owns graph lifecycle state;
+returning from task implementation does not authorize creation of unrelated
+work. Feature delivery coordinates material approval amendments, suspended
+issue prerequisites and final review corrective issues without losing history.
