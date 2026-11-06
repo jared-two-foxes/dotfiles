@@ -6,6 +6,9 @@ import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink, realpath } fro
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { scaffoldTasks, readScaffoldState, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
+import { retainEvidence } from '../pi/agent/lib/evidence/store.mjs';
+import { assertLatestAttempt } from '../pi/agent/lib/verification/attempt-chain.mjs';
+import { requireCurrentFeatureReceipt } from '../pi/agent/lib/verification/feature-instance.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const context = 'Approved feature context';
@@ -84,7 +87,7 @@ test('payloads and free-text arguments are literal, not shell interpolation', ()
 
 test('required, extraneous and invalid arguments fail before invoking Scaffold', async t => {
   const dir = await fixture(t);
-  const bad = [undefined, {}, { operation: 'push-ticket', feature_id: 'F1' }, { operation: 'next', feature_id: 'F1' }, { operation: 'design-next', feature_id: 'F1' },
+  const bad = [undefined, {}, { operation: 'push-ticket', feature_id: 'F1' }, { operation: 'clean', feature_id: 'F1' }, { operation: 'next', feature_id: 'F1' }, { operation: 'design-next', feature_id: 'F1' },
     { ...params('list'), repo_path: '../elsewhere' },
     { ...params('start'), task_id: '' },
     { ...params('list'), task_id: 'T1' }, { ...params('list'), payload: {} },
@@ -237,6 +240,39 @@ test('regular task state and lock files allow safe CLI access and read-only insp
   assert.equal(commands, 1);
   assert.deepEqual(await readScaffoldState(dir), taskState);
   assert.equal(await readFile(path.join(dir, '.scaffold', '.tasks.lock'), 'utf8'), '0');
+});
+
+test('clean is not an agent operation and old receipts cannot attach to a fresh instance', async t => {
+  assert.equal(OPERATIONS.includes('clean'), false);
+  assert.throws(() => buildCommand({operation:'clean',feature_id:'F1'}), /Unsupported|operation/i);
+  const dir = await fixture(t);
+  const stateDir = path.join(dir, '.scaffold');
+  await mkdir(stateDir);
+  const binding = {featureId:'F1',taskId:'T1',designRef:feature.design_ref};
+  const oldInstance = '1'.repeat(32), newInstance = '2'.repeat(32);
+  const stateFor = instance_id => ({
+    schema_version:2,
+    features: {F1: {...feature, workflow:{kind:'recursive-issues/v1',instance_id}, tasks:{T1:task()}}}
+  });
+  await writeFile(path.join(stateDir, 'tasks.json'),JSON.stringify(stateFor(oldInstance)));
+  const oldRef = await retainEvidence(dir, {
+    repository:dir,task:binding,attempt:3,featureInstanceId:oldInstance,
+    result:{status:'BLOCKED'},args:{task:binding}
+  });
+  // An operator cleans Scaffold state but intentionally preserves evidence in .git.
+  await writeFile(path.join(stateDir, 'tasks.json'),JSON.stringify(stateFor(newInstance)));
+  assert.doesNotThrow(() => requireCurrentFeatureReceipt(
+    stateFor(newInstance).features.F1,{featureInstanceId:newInstance}));
+  assert.throws(() => requireCurrentFeatureReceipt(
+    stateFor(newInstance).features.F1,{featureInstanceId:oldInstance}), /reinitialized/);
+  await assertLatestAttempt(dir,undefined,binding,0); // old attempt cannot block new feature
+  await assert.rejects(assertLatestAttempt(dir,oldRef,binding,3), /reinitialized/);
+  const newRef = await retainEvidence(dir, {
+    repository:dir,task:binding,attempt:1,featureInstanceId:newInstance,
+    result:{status:'BLOCKED'},args:{task:binding}
+  });
+  await assert.rejects(assertLatestAttempt(dir,undefined,binding,0), /newer task attempt/i);
+  await assertLatestAttempt(dir,newRef,binding,1);
 });
 
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
