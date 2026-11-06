@@ -69,7 +69,7 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
     'pi/agent/SYSTEM.md',
     'pi/agent/AGENTS.md',
     'pi/agent/skills/feature-delivery/SKILL.md',
-    'pi/agent/skills/execute-and-review/SKILL.md',
+    'pi/agent/skills/implement-task/SKILL.md',
   ]) {
     const text = read(name).replace(/\s+/g, ' ');
     assert.match(text, /Git\/GitHub publishing|Git and GitHub publishing/, name);
@@ -93,8 +93,9 @@ test('Pi executor guide uses the merged exact-text edit operation', () => {
     assert.ok(!guide.includes('| `patch` |'), name);
     assert.ok(guide.includes('occur exactly once'), name);
   }
-  assert.ok(read('pi/agent/skills/feature-delivery/SKILL.md').includes('Use `edit_file` for in-place text changes'));
-  assert.ok(read('pi/agent/skills/execute-and-review/SKILL.md').includes('removed `patch` variants'));
+  assert.ok(read('pi/agent/skills/implement-task/SKILL.md').includes('Use `edit_file` for in-place text changes'));
+  assert.doesNotMatch(read('pi/agent/skills/feature-delivery/SKILL.md'), /### Select checks for the current issue|#### Checkpoint recovery/);
+  assert.ok(read('pi/agent/skills/implement-task/SKILL.md').includes('removed `patch` variants'));
 });
 
 
@@ -125,7 +126,7 @@ test('native checkpoints, recovery and validation reuse the same durable directi
 });
 
 test('execution guides do not add a second approval after the overall direction', () => {
-  for (const file of ['pi/agent/skills/feature-delivery/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/execute-and-review/SKILL.md']) {
+  for (const file of ['pi/agent/skills/feature-delivery/SKILL.md', 'pi/agent/skills/executor/SKILL.md', 'pi/agent/skills/implement-task/SKILL.md']) {
     const text = read(file);
     assert.doesNotMatch(text, /After \*\*separate explicit execution approval|Explicitly ask the user whether to \*\*execute/);
     assert.match(text, /full operations on request/);
@@ -144,4 +145,26 @@ test('standalone design contract is independent of delivery orchestration', () =
   assert.match(delivery, /approve_feature_direction/);
   assert.match(delivery, /execute_and_review/);
   assert.match(read('pi/agent/SYSTEM.md'), /\/skill:feature-delivery/);
+});
+
+test('feature-delivery delegates exactly one task to implement-task without re-owning attempt internals', () => {
+  const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
+  const task = read('pi/agent/skills/implement-task/SKILL.md');
+  const system = read('pi/agent/SYSTEM.md');
+  assert.match(delivery, /\\/skill:implement-task/);
+  assert.match(delivery, /design-finish/);
+  assert.match(delivery, /validate_feature/);
+  assert.match(delivery, /discovery exit hatch/i);
+  assert.doesNotMatch(delivery, /#### Checkpoint recovery|### Select checks for the current issue/);
+  assert.match(task, /name: implement-task/);
+  assert.match(task, /featureId/);
+  assert.match(task, /taskId/);
+  assert.match(task, /execute_and_review/);
+  assert.match(task, /previousAttempt/);
+  assert.match(task, /checkpoint_verified_task/);
+  assert.match(task, /stage: COMMITTED/);
+  assert.match(task, /missing prerequisites|NEEDS_DECOMPOSITION/i);
+  assert.match(system, /\\/skill:implement-task/);
+  assert.match(read('pi/agent/skills/conductor/SKILL.md'), /\\/skill:implement-task/);
+  assert.match(read('pi/agent/extensions/execute-and-review/README.md'), /\\/skill:implement-task/);
 });
