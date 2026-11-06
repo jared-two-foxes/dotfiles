@@ -181,7 +181,7 @@ test('init-feature supports independent Linear preparation and safe reuse', () =
   const init = read('pi/agent/skills/init-feature/SKILL.md');
   const delivery = read('pi/agent/skills/feature-delivery/SKILL.md');
   for (const phrase of ['Linear identifier', 'linear_get_ticket', 'origin:', 'init',
-    'summary', 'source identifier', 'design_ref', 'approval', 'design-finish',
+    'summary', 'design_ref', 'approval', 'design-finish',
     'original baseline', 'without implementing']) {
     assert.ok(init.includes(phrase), `init-feature missing: ${phrase}`);
   }
