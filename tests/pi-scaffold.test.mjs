@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { scaffoldTasks, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
+import { scaffoldTasks, readScaffoldState, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const context = 'Approved feature context';
@@ -173,7 +173,23 @@ test('missing executable, cancellation and subprocess exceptions are structured 
   assert.equal(cancelled.ok, false);
 });
 
-test('requires a current repository and refuses state symlinks', async t => {
+test('requires a current repository and refuses task-state symlinks', async t => {
+  const dir = await fixture(t);
+  const outside = await mkdtemp(path.join(tmpdir(), 'pi-scaffold-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  for (const directory of [undefined, outside]) {
+    const result = await scaffoldTasks(params('list'), { directory }, { invokeScaffold: () => assert.fail('must not invoke') });
+    assert.equal(result.ok, false);
+  }
+  if (process.platform === 'win32') return; // symlink privileges vary on Windows
+  for (const suffix of ['.scaffold', '.scaffold/tasks.json', '.scaffold/.tasks.lock']) {
+    if (suffix !== '.scaffold') await mkdir(path.join(dir, '.scaffold'), { recursive: true });
+    const target = path.join(dir, suffix);
+    await symlink(outside, target);
+    const result = await scaffoldTasks(params('init'), { directory: dir }, { invokeScaffold: () => assert.fail('must not follow symlink') });
+    assert.equal(result.ok, false);
+    assert.match(result.message, /symlinks/);
+    assert.match(result.message, new RegExp(suffix.replace(/[.*+?^${}()|[\\]\\]/g, '\\test('requires a current repository and refuses state symlinks', async t => {
   const dir = await fixture(t);
   const outside = await mkdtemp(path.join(tmpdir(), 'pi-scaffold-outside-'));
   t.after(() => rm(outside, { recursive: true, force: true }));
@@ -191,6 +207,54 @@ test('requires a current repository and refuses state symlinks', async t => {
     assert.match(result.message, /symlinks/);
     await rm(target);
   }
+});')));
+    await assert.rejects(readScaffoldState(dir), /symlinks/);
+    await rm(target);
+  }
+});
+
+test('task-state preflight rejects non-directory state and non-file lock or JSON', async t => {
+  for (const [suffix, expected] of [
+    ['.scaffold', /must be a directory/],
+    ['.scaffold/tasks.json', /must be a regular file/],
+    ['.scaffold/.tasks.lock', /must be a regular file/],
+  ]) {
+    const dir = await fixture(t);
+    const target = path.join(dir, suffix);
+    if (suffix === '.scaffold') {
+      await writeFile(target, 'not a directory');
+    } else {
+      await mkdir(path.join(dir, '.scaffold'));
+      await mkdir(target);
+    }
+    const result = await scaffoldTasks(params('init'), { directory: dir }, {
+      invokeScaffold: () => assert.fail('must not invoke Scaffold on invalid state paths'),
+    });
+    assert.equal(result.ok, false, suffix);
+    assert.match(result.message, expected);
+    await assert.rejects(readScaffoldState(dir), expected);
+  }
+});
+
+test('regular task state and lock files allow safe CLI access and read-only inspection', async t => {
+  const dir = await fixture(t);
+  await mkdir(path.join(dir, '.scaffold'));
+  const taskState = { schema_version: 2, features: {} };
+  await writeFile(path.join(dir, '.scaffold', 'tasks.json'), JSON.stringify(taskState));
+  await writeFile(path.join(dir, '.scaffold', '.tasks.lock'), '0');
+
+  let commands = 0;
+  const result = await scaffoldTasks(params('list'), { directory: dir }, {
+    invokeScaffold: async (_program, args) => {
+      commands++;
+      assert.equal(args[0], 'tasks');
+      return response('list');
+    },
+  });
+  assert.equal(result.ok, true);
+  assert.equal(commands, 1);
+  assert.deepEqual(await readScaffoldState(dir), taskState);
+  assert.equal(await readFile(path.join(dir, '.scaffold', '.tasks.lock'), 'utf8'), '0');
 });
 
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
