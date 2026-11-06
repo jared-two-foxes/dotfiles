@@ -374,6 +374,7 @@ export async function sealVerification(plan) {
     };
     const record = {
       repository: plan.repository,
+      ...(plan.featureInstanceId ? { featureInstanceId: plan.featureInstanceId } : {}),
       task: plan.args.task,
       attempt: plan.attempt,
       args: plan.args,
@@ -402,10 +403,12 @@ export async function sealVerification(plan) {
 }
 
 export async function runPipeline(meta, feature, context, options = {}) {
+  const instanceId = feature?.workflow?.instance_id;
   const root = meta.workflow.request.output_directory;
   const plan = {
     schema: "pi.delivery-plan/v1",
     ...meta,
+    ...(instanceId ? { featureInstanceId: instanceId } : {}),
     feature: {
       branch: feature.branch,
       original_baseline: feature.original_baseline,
@@ -640,6 +643,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
       });
     const reference = await retainEvidence(meta.repository, {
       repository: meta.repository,
+      ...(plan.featureInstanceId ? { featureInstanceId: plan.featureInstanceId } : {}),
       task: meta.args.task,
       args: meta.args,
       before: meta.before,
