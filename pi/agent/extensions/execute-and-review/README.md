@@ -89,7 +89,7 @@ v1 runner responses are rejected without fallback. Pi loads `/skill:feature-deli
 invoke it explicitly for the complete approved feature workflow. It
 uses `/skill:executor` to author exact operations and the native
 `execute_and_review` tool to apply them under retained overall feature authority.
-`/skill:execute-and-review` covers task delivery and recovery.
+`/skill:implement-task` owns task-scoped implementation, correction and checkpoint recovery; the native `execute_and_review` tool remains one bounded Conductor attempt.
 `/skill:conductor` covers the standalone runner protocol. The legacy
 `/skill:tdd` direct-edit workflow has been retired; TDD remains an optional
 implementation strategy within Design.
