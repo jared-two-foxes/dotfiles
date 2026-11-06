@@ -542,35 +542,45 @@ test(
   },
 );
 
-test("workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals", async () => {
-  const design = await readFile(
+test("workflow guidance separates feature orchestration from task implementation and recovery", async () => {
+  const delivery = await readFile(
     new URL("../pi/agent/skills/feature-delivery/SKILL.md", import.meta.url),
+    "utf8",
+  );
+  const task = await readFile(
+    new URL("../pi/agent/skills/implement-task/SKILL.md", import.meta.url),
     "utf8",
   );
   for (const phrase of [
     "Mandatory decomposition",
-    "Before generating Executor",
     "approve_feature_direction",
     "Verification:",
     "ancestor dependencies",
     "original feature criteria",
-    "previousAttempt",
-    "inspect_conductor_evidence",
     "Oversized task",
     "completed descendants",
+    "Conversational memory is not authoritative",
+    "single approval",
+    "validate_feature",
+    "/skill:implement-task",
+  ]) {
+    assert.ok(delivery.includes(phrase), `delivery missing: ${phrase}`);
+  }
+  for (const phrase of [
+    "Before generating Executor",
+    "previousAttempt",
+    "inspect_conductor_evidence",
     "parent remains incomplete",
     "no per-issue attempt limit",
     "three equivalent substantive",
-    "Conversational memory is not authoritative",
     "checkpoint required",
-    "single approval",
+    "execute_and_review",
+    "checkpoint_verified_task",
   ]) {
-    assert.ok(design.includes(phrase), phrase);
+    assert.ok(task.includes(phrase), `implement-task missing: ${phrase}`);
   }
-  assert.ok(
-    design.indexOf("### Feature planning") <
-      design.indexOf("## 4. Prepare executor"),
-  );
+  assert.ok(delivery.indexOf("### Feature planning") <
+    delivery.indexOf("## 4. Delegate one issue"));
 });
 
 const approvedTaskDesign = [
