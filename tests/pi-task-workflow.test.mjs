@@ -544,7 +544,7 @@ test(
 
 test("workflow guidance covers handoff, task-scoped review, failure classification, recovery and approvals", async () => {
   const design = await readFile(
-    new URL("../pi/agent/skills/design/SKILL.md", import.meta.url),
+    new URL("../pi/agent/skills/feature-delivery/SKILL.md", import.meta.url),
     "utf8",
   );
   for (const phrase of [
