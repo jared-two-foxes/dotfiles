@@ -154,6 +154,99 @@ test(
     );
 
     await suite.test(
+      "explains why a feature initialized on main cannot be authorized",
+      async (context) => {
+        const { args, data, context: runtime, git } = await fixture(context);
+        git("branch", "-m", "main");
+        data.feature.branch = "main";
+        const denied = await approveFeatureDirection(args, data, runtime, {
+          confirmFeature: async () => assert.fail("Must not confirm on a protected branch"),
+        });
+        assert.equal(denied.ok, false);
+        assert.match(denied.message, /protected branch 'main'/);
+        assert.match(denied.message, /switching Git branches alone/);
+        await assert.rejects(
+          requireFeatureAuthorization(args, data, runtime),
+          /protected branch 'main'/,
+        );
+        assert.equal(await featureAuthorized(args, data, runtime), false);
+      },
+    );
+
+    await suite.test(
+      "rejects the remote default branch even when it is not named main",
+      async (context) => {
+        const { args, data, context: runtime, git } = await fixture(context);
+        git("branch", "-m", "release");
+        git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/release");
+        data.feature.branch = "release";
+        const result = await approveFeatureDirection(args, data, runtime, {
+          confirmFeature: async () => assert.fail("Must not confirm on default branch"),
+        });
+        assert.equal(result.ok, false);
+        assert.match(result.message, /protected branch 'release'/);
+      },
+    );
+
+    await suite.test(
+      "reports each invalid feature or task binding instead of a generic mismatch",
+      async (context) => {
+        const cases = [
+          {
+            name: "missing recorded branch",
+            mutate: ({ data }) => { data.feature.branch = ""; },
+            expected: /no feature branch recorded/,
+          },
+          {
+            name: "unsupported workflow",
+            mutate: ({ data }) => { data.feature.workflow.kind = "unrecognized"; },
+            expected: /unsupported issue workflow/,
+          },
+          {
+            name: "missing baseline",
+            mutate: ({ data }) => { data.feature.original_baseline = ""; },
+            expected: /original Git baseline is missing/,
+          },
+          {
+            name: "unknown task",
+            mutate: ({ data, args }) => {
+              args.task = { featureId: "F", taskId: "unknown", designRef: data.feature.design_ref };
+            },
+            expected: /does not exist in Scaffold feature F/,
+          },
+          {
+            name: "incorrect task feature",
+            mutate: ({ data, args }) => {
+              args.task = { featureId: "different", taskId: "F", designRef: data.feature.design_ref };
+            },
+            expected: /Task feature ID mismatch/,
+          },
+          {
+            name: "incorrect branch argument",
+            mutate: ({ args }) => { args.branch = "feature/elsewhere"; },
+            expected: /Feature branch argument mismatch/,
+          },
+          {
+            name: "incorrect baseline argument",
+            mutate: ({ args }) => { args.featureBaseRef = "f".repeat(40); },
+            expected: /Original feature baseline mismatch/,
+          },
+        ];
+        for (const testCase of cases) {
+          const local = await fixture(context);
+          testCase.mutate(local);
+          const result = await approveFeatureDirection(
+            local.args, local.data, local.context,
+            { confirmFeature: async () => assert.fail("Must fail before approval: " + testCase.name) },
+          );
+          assert.equal(result.ok, false, testCase.name);
+          assert.match(result.message, testCase.expected, testCase.name);
+          assert.doesNotMatch(result.message, /Feature authority scope mismatch/);
+        }
+      },
+    );
+
+    await suite.test(
       "requires recoverable supplied task history",
       async (context) => {
         const { args, data, context: runtime } = await fixture(context);
