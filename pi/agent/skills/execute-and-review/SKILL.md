@@ -7,7 +7,7 @@ description: >
 
 # Execute and Review
 
-Load /skill:design for the complete workflow. Obtain one approve_feature_direction
+Load /skill:feature-delivery for the complete workflow; /skill:design provides only the bounded engineering contract. Obtain one approve_feature_direction
 confirmation of the overall direction; it covers local design, implementation,
 checks, independent review, verified checkpoints and recovery across sessions.
 Do not ask again for individual designs, execution, commits or validation. Stop for
