@@ -1,10 +1,11 @@
-import { obligationsVerified } from "./delivery-context.mjs";
 // Shared bounded verification contracts for final validation and rebase recovery.
 import { watch } from "node:fs";
 import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
+import { createHash } from "node:crypto";
 import { git } from "./git-tree.mjs";
 import { digest } from "./evidence.mjs";
+import { obligationsVerified } from "./delivery-context.mjs";
 import { validateReviewResult, reviewSettings } from "../review/adapter.mjs";
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
