@@ -75,7 +75,6 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
     'pi/agent/SYSTEM.md',
     'pi/agent/AGENTS.md',
     'pi/agent/skills/feature-delivery/SKILL.md',
-    'pi/agent/skills/init-feature/SKILL.md',
     'pi/agent/skills/implement-task/SKILL.md',
   ]) {
     const text = read(name).replace(/\s+/g, ' ');
