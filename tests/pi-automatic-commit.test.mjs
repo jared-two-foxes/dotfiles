@@ -68,7 +68,7 @@ async function fixture(t) {
   await writeFile(
     path.join(bin, "scaffold"),
     "#!/usr/bin/env python3\nimport sys,os\n" +
-      'if os.environ.get("FAIL_SCAFFOLD_COMPLETE") and sys.argv[1:3] == ["tasks", "complete"]: sys.exit(9)\n' +
+      'if os.environ.get("FAIL_SCAFFOLD_COMPLETE") and sys.argv[1:2] == ["complete"]: sys.exit(9)\n' +
       "sys.path.insert(0, " +
       JSON.stringify(path.join(process.env.SCAFFOLD_SOURCE, "src")) +
       ")\nfrom scaffold_cli.cli import main\nmain()\n",
