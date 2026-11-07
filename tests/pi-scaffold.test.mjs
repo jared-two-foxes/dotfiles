@@ -56,7 +56,7 @@ test('every operation constructs one exact CLI invocation and JSON stdin', async
       invokeScaffold: async (program, args, options) => {
         calls++;
         assert.equal(program, 'scaffold');
-        const expected = ['tasks', operation, '--feature=F1'];
+        const expected = [operation, '--feature=F1'];
         if (request.task_id) expected.push('--task=T1');
         if (request.reason) expected.push('--reason=Explicit decision');
         if (request.payload) expected.push('--input', '-');
@@ -81,7 +81,7 @@ test('payloads and free-text arguments are literal, not shell interpolation', ()
   const built = buildCommand({ ...params('init'), payload });
   assert.equal(built.input, JSON.stringify(payload));
   assert.deepEqual(JSON.parse(built.input), payload);
-  assert.deepEqual(buildCommand({ ...params('list'), feature_id: '-literal' }).args, ['tasks', 'list', '--feature=-literal']);
+  assert.deepEqual(buildCommand({ ...params('list'), feature_id: '-literal' }).args, ['list', '--feature=-literal']);
   assert.deepEqual(buildCommand({ ...params('block'), reason: '--literal; $(x)' }).args.slice(-1), ['--reason=--literal; $(x)']);
 });
 
@@ -113,7 +113,7 @@ test('nonzero exits retain structured stderr and never retry or complete', async
   const dir = await fixture(t);
   for (const failure of [
     { code: 1, stdout: '', stderr: '{"schema_version":1,"error":"Unknown feature"}' },
-    { code: 2, stdout: '', stderr: 'usage: scaffold tasks ...' },
+    { code: 2, stdout: '', stderr: 'usage: scaffold summary ...' },
     { code: null, stdout: '', stderr: 'terminated' },
   ]) {
     let calls = 0;
@@ -232,7 +232,7 @@ test('regular task state and lock files allow safe CLI access and read-only insp
   const result = await scaffoldTasks(params('list'), { directory: dir }, {
     invokeScaffold: async (_program, args) => {
       commands++;
-      assert.equal(args[0], 'tasks');
+      assert.equal(args[0], 'list');
       return response('list');
     },
   });
