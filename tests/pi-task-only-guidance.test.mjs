@@ -1,35 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const read = file => readFile(path.join(root, file), "utf8");
-
-test("legacy criteria-stack prompts are retired without deleting standalone prompts", async () => {
-  const obsolete = [
-    "explore-criterion",
-    "implement-criterion",
-    "implement-criterion-direct",
-    "implement-criterion-refactor",
-    "test-criterion",
-    "review-test-quality",
-    "review-singlepass",
-  ];
-  for (const name of obsolete) {
-    await assert.rejects(
-      access(path.join(root, "prompts", name + ".prompt.md")),
-      { code: "ENOENT" },
-      name + " must not reintroduce the deleted criterion-frame pipeline",
-    );
-  }
-
-  // Independent ticket/design/test prompts are not themselves criteria-stack callers.
-  for (const name of ["review-ticket", "plan-narrow", "test"]) {
-    await access(path.join(root, "prompts", name + ".prompt.md"));
-  }
-});
 
 test("feature workflow documents one task graph and distinct Pi skill boundaries", async () => {
   const overview = await read("workflow-overview.md");

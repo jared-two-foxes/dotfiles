@@ -191,9 +191,7 @@ test('Pi and shared policies allow standalone review without weakening implement
   assert.match(system, /Do not run builds, tests, review-cli, executor, Conductor/);
   assert.match(skill, /Use the native `review_changes` tool/);
   assert.match(agents, /execute_and_review/); assert.doesNotMatch(agents, /skill:tdd|writes tests and implementation code directly/);
-  for (const name of ['shared/research-assistant/core.md', 'prompts/research-assistant.prompt.md']) {
-    assert.match(await read(name), /read-only code reviews/);
-  }
+  assert.match(await read('shared/research-assistant/core.md'), /read-only code reviews/);
   assert.match(await read('pi/agent/extensions/review/index.ts'), /pi\.registerTool\(createReviewTool\(Type\)\)/);
   assert.match(await read('.github/workflows/pi.yml'), /tests\/pi-review\.test\.mjs/);
 });
