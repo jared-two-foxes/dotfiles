@@ -5,20 +5,18 @@
  *
  *   linear_get_ticket     -- fetch an issue by its human-readable identifier
  *                           (e.g. SA-42) and return it as formatted markdown.
- *                           Read-only. Mirrors ticket-pipeline's
- *                           fetch_ticket.py (same query and rendering).
+ *                           Read-only; queries Linear directly without invoking Scaffold.
  *
  *   linear_update_ticket  -- mutate the title and/or description of an existing
  *                           issue via the issueUpdate mutation. One write
- *                           path against Linear in this extension, mirroring
- *                           ticket-pipeline's update_ticket.py: it first
+ *                           path against Linear in this extension: it first
  *                           resolves the issue's internal UUID from the
  *                           identifier (issueUpdate takes the UUID, not the
  *                           human-readable id), then applies the mutation.
  *                           Only the title/description are editable here --
  *                           Linear-managed metadata (state, priority,
  *                           assignee, labels) is intentionally not exposed,
- *                           same convention as update-ticket.py.
+ *                           no change to Linear-managed metadata.
  *
  *   linear_list_teams     -- list every team the authenticated user can see,
  *                           returning each team's UUID, display name and key.
@@ -28,8 +26,7 @@
  *                           the user needing to know the UUID.
  *
  *   linear_create_ticket  -- create a new Linear issue via the issueCreate
- *                           mutation, mirroring ticket-pipeline's
- *                           create_ticket(). The second write path. The
+ *                           mutation. The second write path. The
  *                           description must include a "## Acceptance
  *                           Criteria" section with "- [ ] ..." checkbox
  *                           bullets so the ticket is immediately consumable
@@ -91,7 +88,7 @@ function getApiKey(): string | undefined {
   return undefined;
 }
 
-// --- Linear GraphQL (mirrors fetch_ticket.py) ---
+// --- Linear GraphQL ---
 
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
