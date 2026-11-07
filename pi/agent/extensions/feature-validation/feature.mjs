@@ -14,7 +14,7 @@ import {
 import { snapshot } from '../../lib/git/snapshot.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
 import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
-import { scaffoldTasks, buildCommand, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
+import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
 import {
   planFor,
@@ -41,11 +41,14 @@ async function state(repository, featureId, options) {
 }
 async function lifecycle(repository, operation, featureId, payload, options) {
   await checkStatePaths(repository);
-  // Use the same validated CLI command contract as normal Pi task operations.
-  // A separate hard-coded prefix can drift when Scaffold changes its interface.
-  const command = buildCommand({ operation, feature_id: featureId, payload });
+  // Final-validation bookkeeping is an internal, bounded operation; do not
+  // expose it via the native scaffold_tasks allowlist. Scaffold's task CLI
+  // actions now live at the top level (no retired "tasks" prefix).
+  requireValue(['validation-start', 'validation-record', 'validation-invalidate'].includes(operation),
+    'Unsupported internal Scaffold validation transition');
   const response = await (options.scaffoldOptions?.invokeScaffold ?? invoke)('scaffold',
-    command.args, { cwd: repository, input: command.input });
+    [operation, '--feature=' + featureId, '--input', '-'],
+    { cwd: repository, input: JSON.stringify(payload) });
   requireValue(response.code === 0, 'Scaffold validation transition failed: ' + response.stderr?.slice(0, 4000));
   const data = JSON.parse(response.stdout);
   requireValue(data.schema_version === 2 && data.feature?.id === featureId && data.feature.validation,
