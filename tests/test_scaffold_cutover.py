@@ -86,7 +86,9 @@ def test_retired_commands_are_not_exposed_and_do_not_touch_legacy_state(workspac
     assert help_result.returncode == 0
     assert "stack" not in help_result.stdout
     assert "status" not in help_result.stdout
-    assert "summary" in help_result.stdout\n    assert "init" in help_result.stdout\n    assert "clean" in help_result.stdout
+    assert "summary" in help_result.stdout
+    assert "init" in help_result.stdout
+    assert "clean" in help_result.stdout
 
     for legacy in ("stack", "status", "tasks", "fetch-ticket"):
         rejected = command(directory, legacy, expected=2)
