@@ -66,10 +66,10 @@ Pi uses the native `scaffold_tasks` extension. To inspect the same graph from a
 terminal, use the supported task-only CLI:
 
 ```sh
-scaffold tasks summary --feature SA-585
-scaffold tasks issue --feature SA-585 --task SA-585
-scaffold tasks design-select --feature SA-585
-scaffold tasks select --feature SA-585
+scaffold summary --feature SA-585
+scaffold issue --feature SA-585 --task SA-585
+scaffold design-select --feature SA-585
+scaffold select --feature SA-585
 ```
 
 State lives only in `.scaffold/tasks.json` (schema version 2); the task-only

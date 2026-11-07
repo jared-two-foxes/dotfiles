@@ -5,20 +5,18 @@
  *
  *   linear_get_ticket     -- fetch an issue by its human-readable identifier
  *                           (e.g. SA-42) and return it as formatted markdown.
- *                           Read-only. Mirrors ticket-pipeline's
- *                           fetch_ticket.py (same query and rendering).
+ *                           Read-only; queries Linear directly without invoking Scaffold.
  *
  *   linear_update_ticket  -- mutate the title and/or description of an existing
  *                           issue via the issueUpdate mutation. One write
- *                           path against Linear in this extension, mirroring
- *                           ticket-pipeline's update_ticket.py: it first
+ *                           path against Linear in this extension: it first
  *                           resolves the issue's internal UUID from the
  *                           identifier (issueUpdate takes the UUID, not the
  *                           human-readable id), then applies the mutation.
  *                           Only the title/description are editable here --
  *                           Linear-managed metadata (state, priority,
  *                           assignee, labels) is intentionally not exposed,
- *                           same convention as update-ticket.py.
+ *                           no change to Linear-managed metadata.
  *
  *   linear_list_teams     -- list every team the authenticated user can see,
  *                           returning each team's UUID, display name and key.
@@ -28,8 +26,7 @@
  *                           the user needing to know the UUID.
  *
  *   linear_create_ticket  -- create a new Linear issue via the issueCreate
- *                           mutation, mirroring ticket-pipeline's
- *                           create_ticket(). The second write path. The
+ *                           mutation. The second write path. The
  *                           description must include a "## Acceptance
  *                           Criteria" section with "- [ ] ..." checkbox
  *                           bullets so the ticket is immediately consumable
@@ -91,7 +88,7 @@ function getApiKey(): string | undefined {
   return undefined;
 }
 
-// --- Linear GraphQL (mirrors fetch_ticket.py) ---
+// --- Linear GraphQL ---
 
 const LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql";
 
@@ -115,8 +112,7 @@ const TICKET_QUERY = `
 `;
 
 // issueUpdate takes the issue's internal UUID (the `id` field from
-// TICKET_QUERY), not its human-readable identifier. Mirrors
-// fetch_ticket.py's update_ticket() mutation exactly.
+// TICKET_QUERY), not its human-readable identifier.
 const UPDATE_MUTATION = `
   mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
     issueUpdate(id: $id, input: $input) {
@@ -142,8 +138,7 @@ const TEAMS_QUERY = `
   }
 `;
 
-// Creates a new issue. Mirrors fetch_ticket.py's create_ticket() mutation
-// exactly: `teamId` is the team's internal UUID (from TEAMS_QUERY), and
+// Creates a new issue: `teamId` is the team's internal UUID (from TEAMS_QUERY), and
 // `parentId`, if given, is the parent issue's internal UUID (not its
 // human-readable identifier) -- linear_create_ticket resolves that from the
 // parent identifier via TICKET_QUERY before the mutation, same pre-fetch
@@ -164,7 +159,7 @@ const PRIORITY_LABELS: Record<number, string> = {
 /** Shared POST-and-parse for every Linear GraphQL call -- query and mutation
  *  alike, since both are just a query string + variables over the same
  *  endpoint with the same auth header. Linear uses the raw API key as the
- *  Authorization header value (not "Bearer <key>"). Same as fetch_ticket.py. */
+ *  Authorization header value (not "Bearer <key>"). */
 async function linearGraphQL(
   query: string,
   variables: Record<string, unknown>,
@@ -376,7 +371,7 @@ export default function (pi: ExtensionAPI) {
 
         // 2. Build the IssueUpdateInput, only including fields the caller
         //    supplied so omitted fields are left untouched on the live
-        //    ticket (same convention as fetch_ticket.py's update_ticket).
+        //    ticket.
         const input: Record<string, string> = {};
         if (params.title !== undefined) input.title = params.title;
         if (params.description !== undefined) input.description = params.description;
@@ -533,7 +528,7 @@ export default function (pi: ExtensionAPI) {
         // Build the IssueCreateInput. teamId and title/description are
         // always present (required params); parentId is only added when
         // the caller supplied a parent identifier, mirroring
-        // fetch_ticket.py's create_ticket().
+        // the Linear API's issueCreate contract.
         const input: Record<string, string> = {
           teamId: params.team_id,
           title: params.title,

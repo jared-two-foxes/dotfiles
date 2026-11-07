@@ -49,7 +49,7 @@ def command(workspace, *args, payload=None, expected=0):
 
 
 def tasks(workspace, action, task_id=None, payload=None, expected=0):
-    args = ["tasks", action, "--feature", FEATURE_ID]
+    args = [action, "--feature", FEATURE_ID]
     if task_id is not None:
         args += ["--task", task_id]
     if payload is not None:
@@ -86,9 +86,11 @@ def test_retired_commands_are_not_exposed_and_do_not_touch_legacy_state(workspac
     assert help_result.returncode == 0
     assert "stack" not in help_result.stdout
     assert "status" not in help_result.stdout
-    assert "tasks" in help_result.stdout
+    assert "summary" in help_result.stdout
+    assert "init" in help_result.stdout
+    assert "clean" in help_result.stdout
 
-    for legacy in ("stack", "status"):
+    for legacy in ("stack", "status", "tasks", "fetch-ticket"):
         rejected = command(directory, legacy, expected=2)
         assert "unknown command" in rejected.stderr
     assert not (directory / ".scaffold" / "tasks.json").exists()

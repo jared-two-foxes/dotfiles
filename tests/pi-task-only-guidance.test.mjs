@@ -60,10 +60,10 @@ test("Scaffold guidance provides only task-state CLI inspection and no stack com
     await read("pi/agent/extensions/scaffold/README.md"),
   ];
   for (const body of documents) {
-    assert.match(body, /scaffold tasks summary --feature/);
-    assert.match(body, /scaffold tasks issue --feature/);
-    assert.match(body, /scaffold tasks design-select/);
-    assert.match(body, /scaffold tasks select --feature/);
+    assert.match(body, /scaffold summary --feature/);
+    assert.match(body, /scaffold issue --feature/);
+    assert.match(body, /scaffold design-select/);
+    assert.match(body, /scaffold select --feature/);
     assert.match(body, /scaffold_tasks/);
     for (const [, commands] of body.matchAll(/```(?:sh|bash|shell)?\n([\s\S]*?)```/g)) {
       assert.doesNotMatch(commands, /\bscaffold\s+(?:stack|status)\b/);

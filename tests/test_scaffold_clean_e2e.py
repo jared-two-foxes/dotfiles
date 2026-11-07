@@ -61,7 +61,7 @@ def feature(identifier, baseline):
 
 
 def tasks(workspace, operation, identifier, *, task=None, payload=None, expected=0):
-    arguments = ["tasks", operation, "--feature", identifier]
+    arguments = [operation, "--feature", identifier]
     if task is not None:
         arguments.extend(["--task", task])
     if payload is not None:

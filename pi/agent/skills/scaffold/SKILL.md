@@ -23,7 +23,7 @@ after dry-run/confirmation or with their own explicit `--yes`. It rewrites
 only the selected records in `.scaffold/tasks.json`: it leaves the lock,
 Git work, source files, retained receipts and historical criteria artifacts
 intact. Cleaning invalidates active Pi workflow authority, so stop stale
-sessions/handoffs. A new `tasks init` gets a distinct feature instance ID even
+sessions/handoffs. A new `scaffold init` gets a distinct feature instance ID even
 if the ticket, design and Git baseline are identical; complete
 `/skill:init-feature` and obtain *fresh* direction approval before work.
 Never treat earlier receipts as eligible for checkpoint or continuation.
@@ -33,9 +33,9 @@ There is **one** supported work-tracking model: the schema-v2 recursive
 feature/task graph. The former LIFO criteria stack is retired; never run
 `scaffold stack` or `scaffold status` or use `.criteria-stack.json` as an
 alternate state source. Historical stack files are not migrated or deleted.
-The task-only CLI supports `scaffold tasks summary --feature ID`,
-`scaffold tasks issue --feature ID --task ID`, `scaffold tasks design-select
---feature ID`, and `scaffold tasks select --feature ID`. Inside Pi, use the
+The task-only CLI supports `scaffold summary --feature ID`,
+`scaffold issue --feature ID --task ID`, `scaffold design-select
+--feature ID`, and `scaffold select --feature ID`. Inside Pi, use the
 matching native `scaffold_tasks` operations rather than shelling out.
  Native tools never automatically select the next
 issue, generate code, retry implementation or claim verification from bookkeeping.

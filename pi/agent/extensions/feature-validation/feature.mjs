@@ -41,8 +41,14 @@ async function state(repository, featureId, options) {
 }
 async function lifecycle(repository, operation, featureId, payload, options) {
   await checkStatePaths(repository);
+  // Final-validation bookkeeping is an internal, bounded operation; do not
+  // expose it via the native scaffold_tasks allowlist. Scaffold's task CLI
+  // actions now live at the top level (no retired "tasks" prefix).
+  requireValue(['validation-start', 'validation-record', 'validation-invalidate'].includes(operation),
+    'Unsupported internal Scaffold validation transition');
   const response = await (options.scaffoldOptions?.invokeScaffold ?? invoke)('scaffold',
-    ['tasks', operation, '--feature=' + featureId, '--input', '-'], { cwd: repository, input: JSON.stringify(payload) });
+    [operation, '--feature=' + featureId, '--input', '-'],
+    { cwd: repository, input: JSON.stringify(payload) });
   requireValue(response.code === 0, 'Scaffold validation transition failed: ' + response.stderr?.slice(0, 4000));
   const data = JSON.parse(response.stdout);
   requireValue(data.schema_version === 2 && data.feature?.id === featureId && data.feature.validation,

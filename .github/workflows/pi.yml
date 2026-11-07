@@ -16,13 +16,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Pinned merged Scaffold state-clean and feature-identity integration.
-          ref: a1f7d5272729f792b372448248ef97d0d6b3f0c8
+          # Always verify against the latest merged Scaffold CLI.
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned Scaffold and pytest
+      - name: Install Scaffold and pytest
         run: python -m pip install -e ./.ci-scaffold pytest
       - name: Verify native Scaffold task lifecycle (Linux)
         working-directory: .ci-scaffold
@@ -48,13 +48,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Verify the same merged Scaffold commit used on Linux.
-          ref: a1f7d5272729f792b372448248ef97d0d6b3f0c8
+          # Always verify against the latest merged Scaffold CLI.
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned Scaffold and pytest
+      - name: Install Scaffold and pytest
         run: python -m pip install -e ./.ci-scaffold pytest
       - name: Verify native Scaffold task lifecycle (Windows)
         working-directory: .ci-scaffold
