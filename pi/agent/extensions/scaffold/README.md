@@ -2,14 +2,14 @@
 
 `index.ts` registers one `scaffold_tasks` tool. `pi/agent/extensions/scaffold/adapter.mjs` validates requests,
 resolves Pi's current Git repository root, and invokes the requested
-`scaffold tasks OPERATION` command with explicit arguments and JSON stdin. Install
+`scaffold OPERATION` command with explicit arguments and JSON stdin. Install
 Scaffold with the schema-v2 issue graph API on Pi's PATH.
 The only supported persisted work model is the schema-v2 recursive task graph
 (`.scaffold/tasks.json`, `.scaffold/.tasks.lock`); no legacy criteria-stack
 commands, frame state, fallback or migration are supported. For human inspection
-use `scaffold tasks summary --feature ID`, `scaffold tasks issue --feature ID
---task ID`, `scaffold tasks design-select --feature ID` and
-`scaffold tasks select --feature ID`. In Pi, the native `scaffold_tasks`
+use `scaffold summary --feature ID`, `scaffold issue --feature ID
+--task ID`, `scaffold design-select --feature ID` and
+`scaffold select --feature ID`. In Pi, the native `scaffold_tasks`
 tool exposes the same scoped operations.
 
 Feature preparation flows from Linear or user requirements through
