@@ -309,9 +309,6 @@ The runs and receipts are local data and are not transferred by Git push/clone.
 
 ## Current limits
 
-- Pi's Docker launcher currently mounts only selected extensions and the
-  images do not ship Conductor. Native Pi is supported here; Docker needs
-  a separate binary provisioning decision.
 - Conductor does not yet prove tests executed or detect unexpected source
   modifications during verification. The adapter imposes a 30-minute overall
   workflow deadline by default, covering execution, formatting, checks and

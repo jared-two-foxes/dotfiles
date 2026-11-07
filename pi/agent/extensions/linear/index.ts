@@ -39,8 +39,7 @@
  *                           linear_update_ticket's pre-fetch).
  *
  * API key resolution (same order for all tools):
- *   1. LINEAR_API_KEY env var  ->  lets docker/compose inject the key via
- *      env_file without touching the image or auth store
+ *   1. LINEAR_API_KEY env var  ->  explicit environment configuration
  *   2. ~/.pi/agent/auth.json  ->  "linear" entry (pi's native auth store)
  *   3. ~/.secrets/linear-key  ->  plain-text file (ticket-pipeline's location)
  *
@@ -61,9 +60,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // --- API key ---
 
 function getApiKey(): string | undefined {
-  // 1. Env var -- primary source for the docker pi instance, where compose's
-  //    env_file injects LINEAR_API_KEY without baking a secret into the
-  //    image or needing an auth.json mount.
+  // 1. Explicit LINEAR_API_KEY environment override.
   const envKey = process.env.LINEAR_API_KEY;
   if (envKey && envKey.trim()) return envKey.trim();
 

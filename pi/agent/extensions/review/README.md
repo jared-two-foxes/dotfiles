@@ -29,7 +29,6 @@ Use a current binary supporting the optional limit flags. Provider credentials
 are inherited from the environment; an absent `OPENCODE_API_KEY` falls back to
 `~/.secrets/opencode-key`, without changing the parent process environment.
 Credentials and temporary request contents are not returned in tool results.
-Docker mounting and binary provisioning are not included in this integration.
 
 ## Requests
 
