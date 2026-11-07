@@ -112,8 +112,7 @@ const TICKET_QUERY = `
 `;
 
 // issueUpdate takes the issue's internal UUID (the `id` field from
-// TICKET_QUERY), not its human-readable identifier. Mirrors
-// fetch_ticket.py's update_ticket() mutation exactly.
+// TICKET_QUERY), not its human-readable identifier.
 const UPDATE_MUTATION = `
   mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
     issueUpdate(id: $id, input: $input) {
@@ -139,8 +138,7 @@ const TEAMS_QUERY = `
   }
 `;
 
-// Creates a new issue. Mirrors fetch_ticket.py's create_ticket() mutation
-// exactly: `teamId` is the team's internal UUID (from TEAMS_QUERY), and
+// Creates a new issue: `teamId` is the team's internal UUID (from TEAMS_QUERY), and
 // `parentId`, if given, is the parent issue's internal UUID (not its
 // human-readable identifier) -- linear_create_ticket resolves that from the
 // parent identifier via TICKET_QUERY before the mutation, same pre-fetch
@@ -161,7 +159,7 @@ const PRIORITY_LABELS: Record<number, string> = {
 /** Shared POST-and-parse for every Linear GraphQL call -- query and mutation
  *  alike, since both are just a query string + variables over the same
  *  endpoint with the same auth header. Linear uses the raw API key as the
- *  Authorization header value (not "Bearer <key>"). Same as fetch_ticket.py. */
+ *  Authorization header value (not "Bearer <key>"). */
 async function linearGraphQL(
   query: string,
   variables: Record<string, unknown>,
@@ -373,7 +371,7 @@ export default function (pi: ExtensionAPI) {
 
         // 2. Build the IssueUpdateInput, only including fields the caller
         //    supplied so omitted fields are left untouched on the live
-        //    ticket (same convention as fetch_ticket.py's update_ticket).
+        //    ticket.
         const input: Record<string, string> = {};
         if (params.title !== undefined) input.title = params.title;
         if (params.description !== undefined) input.description = params.description;
@@ -530,7 +528,7 @@ export default function (pi: ExtensionAPI) {
         // Build the IssueCreateInput. teamId and title/description are
         // always present (required params); parentId is only added when
         // the caller supplied a parent identifier, mirroring
-        // fetch_ticket.py's create_ticket().
+        // the Linear API's issueCreate contract.
         const input: Record<string, string> = {
           teamId: params.team_id,
           title: params.title,
