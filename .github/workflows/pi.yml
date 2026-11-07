@@ -16,13 +16,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Pin the exact flat-CLI Scaffold commit until the companion PR merges.
-          ref: 6af126d4d59dd90c14c3cdece4faaaef3380ef54
+          # Always verify against the latest merged Scaffold CLI.
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned Scaffold and pytest
+      - name: Install Scaffold and pytest
         run: python -m pip install -e ./.ci-scaffold pytest
       - name: Verify native Scaffold task lifecycle (Linux)
         working-directory: .ci-scaffold
@@ -48,13 +48,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Verify the same flat-CLI Scaffold commit used on Linux.
-          ref: 6af126d4d59dd90c14c3cdece4faaaef3380ef54
+          # Always verify against the latest merged Scaffold CLI.
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned Scaffold and pytest
+      - name: Install Scaffold and pytest
         run: python -m pip install -e ./.ci-scaffold pytest
       - name: Verify native Scaffold task lifecycle (Windows)
         working-directory: .ci-scaffold
