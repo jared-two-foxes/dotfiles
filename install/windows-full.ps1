@@ -356,14 +356,6 @@ Remove-DeprecatedPath `
     -Path  (Join-Path $env:USERPROFILE '.dotfiles\templates') `
     -Label 'template directory'
 
-# --- Copilot prompts -----------------------------------------
-Write-Host "
-[Copilot Prompts]" -ForegroundColor White
-
-New-Symlink `
-    -Target (Join-Path $RepoRoot 'prompts') `
-    -Link   (Join-Path $vsCodeUserDir 'prompts')
-
 # --- ticket-pipeline --------------------------------------------
 Write-Host "
 [ticket-pipeline]" -ForegroundColor White

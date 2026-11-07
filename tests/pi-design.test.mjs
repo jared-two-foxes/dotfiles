@@ -31,11 +31,9 @@ const publishingPolicy = name => {
   return text.slice(start).split('\n## ')[0].trim();
 };
 
-test('Git and GitHub publishing policy stays aligned across shared and runtime prompts', () => {
+test('Git and GitHub publishing policy stays aligned across shared core and Pi runtime', () => {
   const core = publishingPolicy('shared/research-assistant/core.md');
-  for (const name of ['pi/agent/SYSTEM.md', 'prompts/research-assistant.prompt.md']) {
-    assert.equal(publishingPolicy(name), core, name);
-  }
+  assert.equal(publishingPolicy('pi/agent/SYSTEM.md'), core);
 });
 
 test('Publishing permits scoped commits and PR publication without granting merge authority', () => {
@@ -84,9 +82,10 @@ test('Pi workflow guidance retains implementation gates without blanket publishi
     assert.match(text, /source edits/, name);
     assert.doesNotMatch(text, /do not commit or push|run build\/test commands, or commit|Feature branches may be created, committed to, pushed, rebased, and deleted freely|bash is for read-only inspection only|Bash access is for read-only discovery only/, name);
   }
-  for (const name of ['shared/research-assistant/core.md', 'prompts/research-assistant.prompt.md']) {
-    assert.doesNotMatch(read(name).replace(/\s+/g, ' '), /You do not implement changes, modify files, create commits/, name);
-  }
+  assert.doesNotMatch(
+    read('shared/research-assistant/core.md').replace(/\s+/g, ' '),
+    /You do not implement changes, modify files, create commits/,
+  );
 });
 
 test('Pi executor guide uses the merged exact-text edit operation', () => {
