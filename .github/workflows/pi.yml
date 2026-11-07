@@ -16,8 +16,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Pinned merged Scaffold state-clean and feature-identity integration.
-          ref: a1f7d5272729f792b372448248ef97d0d6b3f0c8
+          # Pin the exact flat-CLI Scaffold commit until the companion PR merges.
+          ref: 31c66e0dd3563bd9985c9abc7cbd158aab2d39a6
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
@@ -48,8 +48,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # Verify the same merged Scaffold commit used on Linux.
-          ref: a1f7d5272729f792b372448248ef97d0d6b3f0c8
+          # Verify the same flat-CLI Scaffold commit used on Linux.
+          ref: 31c66e0dd3563bd9985c9abc7cbd158aab2d39a6
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
