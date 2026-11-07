@@ -703,7 +703,7 @@ test(
       {
         scaffoldOptions: {
           invokeScaffold: async (program, args, ctx) =>
-            args[1] === "validation-record"
+            args[0] === "validation-record"
               ? { code: 1, stderr: "simulated handoff outage" }
               : invokeScaffold(program, args, ctx),
         },
