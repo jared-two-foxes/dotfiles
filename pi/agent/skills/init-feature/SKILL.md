@@ -15,7 +15,7 @@ A human may explicitly reset a feature using the separate administrative
 or offer it as a way to bypass blocked state or failed attempts. If the
 feature is missing after a clean, do not restore old approvals, task snapshots,
 execution receipts or checkpoint history from Git metadata. New Scaffold
-`tasks init` generates a different `workflow.instance_id`, so previously
+`scaffold init` generates a different `workflow.instance_id`, so previously
 retained approvals cannot authorize the new feature even with the same
 Linear ID, design, branch and original baseline. Re-run normal intake,
 inspect any surviving Git/source/evidence, present the direction and obtain
