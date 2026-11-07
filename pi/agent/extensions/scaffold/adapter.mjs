@@ -13,7 +13,7 @@ const guardedActions = new Set(["design-reopen", "checkpoint-record", "issue-res
 /** @param {import("../../lib/scaffold/contracts.mjs").ScaffoldRequest} params */
 export function buildCommand(params) {
   const { operation, feature_id, task_id, reason, payload } = validateRequest(params);
-  const args = ["tasks", operation, "--feature=" + feature_id];
+  const args = [operation, "--feature=" + feature_id];
   if (task_id !== undefined) args.push("--task=" + task_id);
   if (reason !== undefined) args.push("--reason=" + reason);
   if (payload !== undefined) args.push("--input", "-");
