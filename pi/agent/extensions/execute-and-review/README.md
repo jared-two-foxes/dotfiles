@@ -128,6 +128,30 @@ an executable/argv `command` array, and an optional executable/argv
 `successCondition` array.  Commands run sequentially from the repository root
 through Conductor.  Per-check timeout options are not supported.
 
+A first attempt may not use a bare full-suite check. `lib/verification/check-scope.mjs`
+recognizes a plain `cargo test` / `cargo nextest run`, `npm|pnpm|yarn|bun test`, `pytest`
+(also `python -m pytest`), `go test ./...`, `dotnet test`, `node --test`, `vitest`, `jest`,
+`mocha` and `ava` with nothing narrowing the run, and returns `BROAD_CHECK_UNJUSTIFIED`
+before any source operation. A test name, path, package, `--test`/`--lib`, `-k`/`-m`,
+`--filter` or similar selector makes a check targeted. When the whole suite is genuinely
+required, name the check and say why:
+
+```json
+{ "broadCheckJustifications": [
+  { "check": "integration", "reason": "The runner cannot select the affected tests individually" }
+] }
+```
+
+Each reason must be 20-2000 characters and name an existing check (`BROAD_CHECK_JUSTIFICATION_INVALID`
+otherwise). The reasons are retained with the receipt's `args`. Continuations and
+resumed issues with a retained plan inherit that plan and are not re-checked, so work
+in flight is never stranded. This is a guardrail against accidental cost, not a
+security boundary: shell-wrapped commands such as `sh -c "cargo test"` are not
+inspected, and anything that could be a selector is treated as targeted so that
+ambiguity never blocks a legitimate check. It is not applied when the design graph is
+finished, because designs are free text owned by Scaffold; the first attempt is where a
+structured plan first exists. The final `validate_feature` plan is full-project by design.
+
 Choose verification during task design and include the commands and their scope
 within the approved feature direction. Use focused tests for task changes and broader regression
 checks for the final `validate_feature` gate. Inspect output to confirm relevant

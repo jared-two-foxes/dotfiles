@@ -1762,6 +1762,10 @@ test(
             ? { ...check, command: ["pytest", "-q"], successCondition: ["fixture-test-evaluator"] }
             : check,
         ),
+        // A bare pytest run is a whole-suite check, so a first attempt must say why.
+        broadCheckJustifications: [
+          { check: "test", reason: "Fixture runner cannot select individual tests" },
+        ],
       };
     const previous = await f.run(args, "NEEDS_DESIGN");
     assert.equal(previous.status, "NEEDS_DESIGN", JSON.stringify(previous));
