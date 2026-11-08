@@ -11,6 +11,7 @@ import { executionSummary } from "./workflow.mjs";
 import { approveFeatureDirection } from "../scaffold/feature-authorization.mjs";
 import { inspectEvidence } from "./inspect-evidence.mjs";
 import { scaffoldCliUsage, scaffoldCliUsageSince } from "../scaffold/adapter.mjs";
+import { combineScaffoldUsage } from "../../lib/verification/timings.mjs";
 import { approveDeliveryAmendment } from "./context-amendment.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -370,7 +371,10 @@ export default function (pi: ExtensionAPI) {
           ...result,
           telemetry: {
             wall_ms: Date.now() - startedAt,
-            scaffold_cli: scaffoldCliUsageSince(scaffoldBefore),
+            scaffold_cli: combineScaffoldUsage(
+              scaffoldCliUsageSince(scaffoldBefore),
+              result?.telemetry?.finalization_scaffold_cli,
+            ),
           },
         },
       };

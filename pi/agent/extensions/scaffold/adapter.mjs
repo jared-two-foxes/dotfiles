@@ -29,9 +29,18 @@ export function scaffoldCliUsageSince(before) {
   return { calls: now.calls - before.calls, totalMs: Math.round((now.totalMs - before.totalMs) * 1000) / 1000 };
 }
 
+// Only Scaffold itself is accounted for; the Git repository probe that precedes
+// every operation is not a Scaffold CLI call.
+const isScaffold = program => path.basename(String(program)).replace(/\.(exe|cmd|bat)$/i, "") === "scaffold";
+
 export function invoke(program, args, { cwd, signal, input = "" }) {
   const startedAt = performance.now();
-  const record = () => { cliUsage.calls += 1; cliUsage.totalMs += performance.now() - startedAt; };
+  const counted = isScaffold(program);
+  const record = () => {
+    if (!counted) return;
+    cliUsage.calls += 1;
+    cliUsage.totalMs += performance.now() - startedAt;
+  };
   return new Promise((resolve, reject) => {
     const child = execFile(
       program,

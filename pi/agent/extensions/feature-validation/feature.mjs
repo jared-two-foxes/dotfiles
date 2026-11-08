@@ -124,11 +124,20 @@ export async function validateFeature(args, context = {}, options = {}) {
   const totalClock = stopwatch();
   const checkTimings = [], rechecks = { count: 0, ms: 0 };
   let reviewMs = null;
+  // Every full precondition derivation in this run is timed, including the initial
+  // and post-authorization ones, so the recorded cost is complete up to the last
+  // derivation before the receipt is retained.
+  const derive = async (...params) => {
+    const clock = stopwatch();
+    try { return await featurePreconditions(...params); }
+    finally { rechecks.count += 1; rechecks.ms += clock.elapsed(); }
+  };
+  const currentTimings = () => featureTimings({ checks: checkTimings, reviewMs, totalMs: totalClock.elapsed(), rechecks });
   try {
     context.abort?.throwIfAborted();
     const plan = planFor(args);
     repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
-    const pre = await featurePreconditions(repository, args, options);
+    const pre = await derive(repository, args, options);
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.featureBaseRef,
       head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision,
       plan_digest: digest(JSON.stringify(plan)) };
@@ -145,13 +154,13 @@ export async function validateFeature(args, context = {}, options = {}) {
       const current = pre.feature.validation;
       requireValue(current?.current === record.attemptId, 'Result is superseded; run a new validation');
       await lifecycle(repository, 'validation-record', args.featureId, handoff(record, args.resumeEvidenceRef), options);
-      const post = await featurePreconditions(repository, args, options);
+      const post = await derive(repository, args, options);
       requireValue(stable(pre.before, post.before) && equal(pre.feature.tasks, post.feature.tasks), 'Source/state changed during recovery');
       return { ...record.result, evidenceRef: args.resumeEvidenceRef, binding, recovered: true, checks: record.checks, review: record.review };
     }
     requireValue(await options.authorize?.({ repository, binding, plan }), 'Explicit feature verification authorization required');
     context.abort?.throwIfAborted();
-    const confirmed = await featurePreconditions(repository, args, options);
+    const confirmed = await derive(repository, args, options);
     requireValue(equal(confirmed.feature.tasks, pre.feature.tasks) && stable(pre.before, confirmed.before), 'Source/state changed during authorization');
     monitor = monitorTrackedInputs(repository);
     record = { attemptId: randomUUID(), binding, plan, reconciliationRef: args.reconciliationRef, tasks: pre.feature.tasks, requirements,
@@ -165,9 +174,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     const unchanged = async () => {
       monitor.assert();
       context.abort?.throwIfAborted();
-      const recheck = stopwatch();
-      const current = await featurePreconditions(repository, args, options);
-      rechecks.count += 1; rechecks.ms += recheck.elapsed();
+      const current = await derive(repository, args, options);
       requireValue(stable(pre.before, current.before) && equal(pre.feature.tasks, current.feature.tasks) &&
         current.feature.validation?.current === record.attemptId, 'Source, task graph or active validation changed; reconcile');
       record.after = current.before;
@@ -199,7 +206,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     await unchanged();
     await options.interrupt?.('beforeRetention');
     // Additive telemetry in its own top-level field; not part of any authenticated comparison.
-    record.timings = featureTimings({ checks: checkTimings, reviewMs, totalMs: totalClock.elapsed(), rechecks });
+    record.timings = currentTimings();
     reference = await retainFeatureEvidence(repository, record);
     await options.interrupt?.('afterRetention');
     await unchanged();
@@ -213,8 +220,9 @@ export async function validateFeature(args, context = {}, options = {}) {
     if (repository && started) {
       // Preserve diagnostics without overwriting a retained PASSED receipt needed for recovery.
       try {
+        // Failed and interrupted runs keep the timing evidence gathered so far.
         const failed = { ...record, result: result('BLOCKED', { message: error.message }),
-          after: await snapshot(repository) };
+          timings: currentTimings(), after: await snapshot(repository) };
         const failureRef = await retainFeatureEvidence(repository, failed);
         blocked.diagnosticEvidenceRef = failureRef;
         // A post-retention interruption may have succeeded; leave that intent recoverable.

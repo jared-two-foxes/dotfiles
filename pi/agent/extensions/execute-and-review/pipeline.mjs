@@ -319,6 +319,14 @@ async function existingProof(plan) {
   return candidates[0];
 }
 
+// Scaffold usage from the commit child process; absent or malformed means unknown.
+function finalizationTelemetry(committed) {
+  const usage = committed?.telemetry?.scaffold_cli;
+  return Number.isFinite(usage?.calls) && Number.isFinite(usage?.totalMs)
+    ? { telemetry: { finalization_scaffold_cli: { calls: usage.calls, totalMs: usage.totalMs } } }
+    : {};
+}
+
 export async function sealVerification(plan) {
   const sealClock = stopwatch();
   await requireFeatureAuthorization(plan.args, { directory: plan.repository });
@@ -610,6 +618,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
           evidence,
           checkpoint: { ...checkpoint, finalizationDirectory: root },
           nextBaseRef: checkpoint.nextBaseRef,
+          ...finalizationTelemetry(committed),
         };
       } catch (error) {
         return {

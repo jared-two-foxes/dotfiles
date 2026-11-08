@@ -724,9 +724,15 @@ Receipts written before this existed remain valid and report no timings.
   of the review ledger (`review_ledger_events`) and the attempt number.
 - A `validate_feature` receipt gains `timings` with each check's duration,
   `review_ms`, `total_ms` and how often (`precondition_checks`) and how long
-  (`precondition_ms`) preconditions were re-derived before retention.
+  (`precondition_ms`) full preconditions were derived, counting the initial and
+  post-authorization derivations as well as the re-checks, up to the last one before
+  retention. Failed and interrupted runs keep the timings gathered so far.
 - `execute_and_review` reports `telemetry` in the tool `details`: call wall time
-  and the Scaffold CLI calls and time it spent. The model-facing text is unchanged.
+  and the Scaffold CLI calls and time it spent. Only Scaffold invocations are
+  counted (not the Git repository probe). Scaffold is called from two processes,
+  Pi and the commit command Conductor launches, so the figure is their total
+  with each part shown; `complete: false` means the commit process's share is
+  unknown, as when finalization was blocked. The model-facing text is unchanged.
 - `inspect_conductor_evidence` returns `timingSummary`. To list every receipt in a
   checkout: `node pi/agent/extensions/execute-and-review/timing-summary.mjs [repo]`.
 

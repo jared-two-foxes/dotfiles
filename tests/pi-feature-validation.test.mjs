@@ -336,6 +336,13 @@ test(
     assert.equal(passed.status, "PASSED", JSON.stringify(passed));
     assert.equal(passed.binding.head, e.commit);
     assert.equal(passed.binding.baseline, f.base);
+    // Telemetry is retained beside, never inside, the authenticated fields.
+    const timed = await readFeatureEvidence(f.dir, passed.evidenceRef);
+    assert.equal(timed.timings.kind, "feature");
+    assert.ok(timed.timings.checks.length >= 1);
+    assert.ok(timed.timings.review_ms >= 0);
+    // initial + post-authorization + after the check(s) + after review + before retention
+    assert.ok(timed.timings.precondition_checks >= 5);
     capture = JSON.parse(await readFile(f.capture, "utf8"));
     assert.equal(capture.req.head_ref, e.commit);
     const feature = (await f.call("list")).feature;
@@ -554,6 +561,14 @@ test(
           (await f.call("list")).feature.validation.status,
           "verified",
         );
+        // Interrupted runs keep the timing evidence gathered so far: at least the
+        // initial and post-authorization precondition derivations.
+        const diagnostic = await readFeatureEvidence(
+          f.dir,
+          interrupted.diagnosticEvidenceRef,
+        );
+        assert.equal(diagnostic.timings.kind, "feature", point);
+        assert.ok(diagnostic.timings.precondition_checks >= 2, point);
         assert.equal(
           (
             await f.validate({

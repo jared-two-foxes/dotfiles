@@ -65,6 +65,20 @@ export async function readStageTimings(root, specs, attempted) {
   return stages;
 }
 
+// Scaffold CLI usage spans two processes: Pi's own calls, and the commit child
+// process that Conductor launches for sealing and checkpointing. Report the
+// total and both parts; a missing child figure is reported as unknown, not zero.
+export function combineScaffoldUsage(parent, finalization) {
+  const known = Number.isFinite(finalization?.calls) && Number.isFinite(finalization?.totalMs);
+  return {
+    calls: parent.calls + (known ? finalization.calls : 0),
+    totalMs: Math.round((parent.totalMs + (known ? finalization.totalMs : 0)) * 1000) / 1000,
+    pi_process: parent,
+    finalization_process: known ? finalization : null,
+    complete: known,
+  };
+}
+
 // Number of events the review engine appended to its ledger (a raw count; the
 // event vocabulary belongs to review-cli, so no event is interpreted here).
 export async function ledgerEventCount(file) {

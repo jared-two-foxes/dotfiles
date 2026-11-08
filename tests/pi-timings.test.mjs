@@ -7,8 +7,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { chmod } from "node:fs/promises";
+import { invoke, scaffoldCliUsage, scaffoldCliUsageSince } from "../pi/agent/extensions/scaffold/adapter.mjs";
 import {
   TIMINGS_SCHEMA,
+  combineScaffoldUsage,
   featureTimings,
   ledgerEventCount,
   readStageTimings,
@@ -176,4 +179,39 @@ test("receipts without telemetry are summarized as unavailable, not as errors", 
   await writeFile(path.join(dir, "not-a-receipt.json"), "{}");
   const rows = await repositoryTimings(dir);
   assert.deepEqual(rows.map((r) => [r.task, r.available]), [["SA-1", false], ["SA-2", true]]);
+});
+
+test("combineScaffoldUsage totals both processes and reports a missing child as unknown", () => {
+  const parent = { calls: 3, totalMs: 120.5 };
+  const both = combineScaffoldUsage(parent, { calls: 2, totalMs: 80.25 });
+  assert.equal(both.calls, 5);
+  assert.equal(both.totalMs, 200.75);
+  assert.equal(both.complete, true);
+  assert.deepEqual(both.pi_process, parent);
+  assert.deepEqual(both.finalization_process, { calls: 2, totalMs: 80.25 });
+  for (const missing of [undefined, null, {}, { calls: "2", totalMs: 1 }]) {
+    const partial = combineScaffoldUsage(parent, missing);
+    assert.equal(partial.calls, 3);
+    assert.equal(partial.complete, false);
+    assert.equal(partial.finalization_process, null);
+  }
+});
+
+test("Scaffold CLI accounting counts Scaffold invocations only, not Git probes", { skip: process.platform === "win32" }, async (t) => {
+  const dir = await directory(t);
+  const fake = path.join(dir, "scaffold");
+  await writeFile(fake, "#!/bin/sh\necho '{}'\n");
+  await chmod(fake, 0o755);
+  const before = scaffoldCliUsage();
+
+  await invoke("git", ["--version"], { cwd: dir });
+  await invoke(process.execPath, ["-e", ""], { cwd: dir });
+  assert.deepEqual(scaffoldCliUsageSince(before), { calls: 0, totalMs: 0 });
+
+  const result = await invoke(fake, ["summary", "--feature=F"], { cwd: dir });
+  assert.equal(result.code, 0);
+  await invoke(fake, ["issue", "--feature=F"], { cwd: dir });
+  const used = scaffoldCliUsageSince(before);
+  assert.equal(used.calls, 2);
+  assert.ok(used.totalMs > 0);
 });
