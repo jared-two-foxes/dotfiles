@@ -3,6 +3,7 @@
 import { readFile } from 'node:fs/promises';
 import { sealVerification } from './pipeline.mjs';
 import { commitVerifiedTask } from '../checkpoint/finalization.mjs';
+import { scaffoldCliUsage } from '../scaffold/adapter.mjs';
 let result;
 try {
   const input = JSON.parse(await readFile(process.argv[2], 'utf8'));
@@ -13,5 +14,8 @@ try {
     reconciliationRef: input.args.reconciliationRef };
   result = await commitVerifiedTask(args, { directory: process.cwd() });
 } catch (error) { result = { schema: 'pi.task-finalization/v1', ok: false, message: error.message }; }
+// Scaffold calls made here (authorization, completion, checkpoint) happen in this
+// child process, so report them back for the parent's telemetry. Telemetry only.
+result = { ...result, telemetry: { scaffold_cli: scaffoldCliUsage() } };
 console.log(JSON.stringify(result));
 process.exitCode = result.ok ? 0 : 1;

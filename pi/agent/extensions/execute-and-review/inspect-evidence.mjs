@@ -3,6 +3,7 @@ import { git } from "../../lib/git/tree.mjs";
 import { snapshot } from "../../lib/git/snapshot.mjs";
 import { readEvidence } from "../../lib/evidence/store.mjs";
 import { verifiedResult } from "../../lib/verification/result.mjs";
+import { summarizeTimings } from "../../lib/verification/timings.mjs";
 export async function inspectEvidence(reference, context) {
   try {
     const repository = path.resolve(
@@ -19,6 +20,7 @@ export async function inspectEvidence(reference, context) {
         current.head === record.after?.head &&
         current.digest === record.after?.digest,
       structurallyVerified: verifiedResult(record.result, record.args),
+      timingSummary: summarizeTimings(record),
     };
   } catch (error) {
     return { ok: false, message: error.message };
