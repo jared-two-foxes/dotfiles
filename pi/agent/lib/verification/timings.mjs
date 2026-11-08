@@ -6,6 +6,7 @@
 // compare field by field. Absence is always valid, so receipts written before
 // this module existed stay readable and authenticate unchanged.
 import { lstat, readFile, readdir } from "node:fs/promises";
+import { performance } from "node:perf_hooks";
 import path from "node:path";
 
 export const TIMINGS_SCHEMA = "pi.timings/v1";
