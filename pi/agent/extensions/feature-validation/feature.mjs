@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from '../../lib/git/tree.mjs';
+import { featureTimings, stopwatch } from '../../lib/verification/timings.mjs';
 import { reviewEvidence } from '../../lib/verification/review-evidence.mjs';
 import {
   digest,
@@ -120,6 +121,9 @@ function assembledRequirements(pre, args) {
 }
 export async function validateFeature(args, context = {}, options = {}) {
   let repository, startedReference, reference, record, monitor, started = false;
+  const totalClock = stopwatch();
+  const checkTimings = [], rechecks = { count: 0, ms: 0 };
+  let reviewMs = null;
   try {
     context.abort?.throwIfAborted();
     const plan = planFor(args);
@@ -161,13 +165,17 @@ export async function validateFeature(args, context = {}, options = {}) {
     const unchanged = async () => {
       monitor.assert();
       context.abort?.throwIfAborted();
+      const recheck = stopwatch();
       const current = await featurePreconditions(repository, args, options);
+      rechecks.count += 1; rechecks.ms += recheck.elapsed();
       requireValue(stable(pre.before, current.before) && equal(pre.feature.tasks, current.feature.tasks) &&
         current.feature.validation?.current === record.attemptId, 'Source, task graph or active validation changed; reconcile');
       record.after = current.before;
     };
     for (const check of plan.checks) {
+      const checkClock = stopwatch();
       const output = await runCheck(check.command, { cwd: repository, signal: context.abort, timeoutMs: plan.timeoutMs });
+      checkTimings.push({ name: check.name, started_at: checkClock.startedAt, duration_ms: checkClock.elapsed() });
       record.checks.push({ name: check.name, definition: check, ...output, meaningful: meaningful(check, output) });
       await unchanged();
       if (output.problem || output.exit_code === null) {
@@ -178,8 +186,10 @@ export async function validateFeature(args, context = {}, options = {}) {
     }
     if (record.checks.length === plan.checks.length && record.checks.every(c => c.meaningful)) {
       await options.interrupt?.('beforeReview');
+      const reviewClock = stopwatch();
       const review = await reviewChanges({ ...plan.review, repository, baseRef: binding.baseline, headRef: binding.head,
         requirements: reviewScope(requirements, record.checks) }, context, options.reviewOptions);
+      reviewMs = reviewClock.elapsed();
       record.review = { ...review, requirementsDigest: digest(reviewScope(requirements, record.checks)) };
       await unchanged();
       record.result = result(review.status === 'APPROVED' && featureObligationsVerified(reviewTasks, review) &&
@@ -188,6 +198,8 @@ export async function validateFeature(args, context = {}, options = {}) {
     }
     await unchanged();
     await options.interrupt?.('beforeRetention');
+    // Additive telemetry in its own top-level field; not part of any authenticated comparison.
+    record.timings = featureTimings({ checks: checkTimings, reviewMs, totalMs: totalClock.elapsed(), rechecks });
     reference = await retainFeatureEvidence(repository, record);
     await options.interrupt?.('afterRetention');
     await unchanged();

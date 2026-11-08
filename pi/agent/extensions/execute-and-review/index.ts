@@ -10,6 +10,7 @@ import { executeAndCheckpoint } from "./delivery.mjs";
 import { executionSummary } from "./workflow.mjs";
 import { approveFeatureDirection } from "../scaffold/feature-authorization.mjs";
 import { inspectEvidence } from "./inspect-evidence.mjs";
+import { scaffoldCliUsage, scaffoldCliUsageSince } from "../scaffold/adapter.mjs";
 import { approveDeliveryAmendment } from "./context-amendment.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -346,6 +347,8 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const scaffoldBefore = scaffoldCliUsage();
+      const startedAt = Date.now();
       const result = await executeAndCheckpoint(
         params,
         {
@@ -362,7 +365,14 @@ export default function (pi: ExtensionAPI) {
           },
         ],
         isError: result.status === "BLOCKED",
-        details: result,
+        // Telemetry for this call only; the model-facing text above is unchanged.
+        details: {
+          ...result,
+          telemetry: {
+            wall_ms: Date.now() - startedAt,
+            scaffold_cli: scaffoldCliUsageSince(scaffoldBefore),
+          },
+        },
       };
     },
   });

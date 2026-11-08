@@ -1,4 +1,10 @@
 import { reusePlan } from "../../lib/verification/stage-reuse.mjs";
+import {
+  ledgerEventCount,
+  readStageTimings,
+  stopwatch,
+  taskTimings,
+} from "../../lib/verification/timings.mjs";
 // One Conductor request, including the final Git commit command. Process receipts
 // make the verified prefix available inside that list, before Conductor returns.
 import path from "node:path";
@@ -314,6 +320,7 @@ async function existingProof(plan) {
 }
 
 export async function sealVerification(plan) {
+  const sealClock = stopwatch();
   await requireFeatureAuthorization(plan.args, { directory: plan.repository });
   const lockPath = path.join(
     plan.workflow.request.output_directory,
@@ -372,9 +379,25 @@ export async function sealVerification(plan) {
       stdout: JSON.stringify(conductor.runner),
       stderr: "",
     };
+    // Additive telemetry in its own top-level field; authenticators compare
+    // named fields only, so older receipts without it remain valid.
+    const outputDirectory = plan.workflow.request.output_directory;
+    const timings = taskTimings({
+      stages: await readStageTimings(
+        outputDirectory,
+        plan.workflow.request.commands,
+        plan.workflow.request.commands.length,
+      ),
+      ledgerEvents: await ledgerEventCount(
+        path.join(outputDirectory, "review-ledger.jsonl"),
+      ),
+      sealPrepMs: sealClock.elapsed(),
+      attempt: plan.attempt,
+    });
     const record = {
       repository: plan.repository,
       ...(plan.featureInstanceId ? { featureInstanceId: plan.featureInstanceId } : {}),
+      timings,
       task: plan.args.task,
       attempt: plan.attempt,
       args: plan.args,
