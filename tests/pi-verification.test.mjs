@@ -9,6 +9,7 @@ import { inspectEvidence } from "../pi/agent/extensions/execute-and-review/inspe
 import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { authenticateTaskEvidence } from "../pi/agent/extensions/checkpoint/commit.mjs";
 import { verificationChecks } from "../pi/agent/lib/verification/checks.mjs";
+import { ledgerFeature } from "./helpers/ledger-feature.mjs";
 
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-selected-verification-"));
@@ -24,11 +25,12 @@ async function fixture(t) {
   await writeFile(path.join(dir, "source.txt"), "before");
   git("add", ".");
   git("commit", "-qm", "baseline");
+  const ledger = await ledgerFeature(dir);
   const args = {
     input: '{"operations":[]}',
     baseRef: git("rev-parse", "HEAD"),
-    requirements: "Scoped change",
-    task: { featureId: "F", taskId: "T", designRef: "approved@1" },
+    requirements: await ledger.requirements("T", "Scoped change"),
+    task: ledger.binding("T"),
     checks: [
       {
         name: "compile",
@@ -112,7 +114,6 @@ async function respond(json, patch = {}) {
 
 test("forwards named commands in order without build/test defaults or shell interpretation", async (t) => {
   const f = await fixture(t);
-  delete f.args.task;
   f.args.checks = [
     {
       name: "filtered Rust tests",
@@ -130,8 +131,14 @@ test("forwards named commands in order without build/test defaults or shell inte
     {
       invokeConductor: async (json) => {
         calls++;
+        // The delivery pipeline may add a success condition to recognised test runners; the command is unchanged.
         assert.deepEqual(
-          JSON.parse(json).checks,
+          JSON.parse(json).checks.map(({ name, program, args }, i, all) => {
+            // The final check runs inside the source/index boundary wrapper; unwrap it to compare the command.
+            if (i < all.length - 1) return { name, program, args };
+            const { command } = JSON.parse(args[1]);
+            return { name, program: command[0], args: command.slice(1) };
+          }),
           f.args.checks.map((c) => ({
             name: c.name,
             program: c.command[0],
@@ -229,7 +236,9 @@ test("task receipts authenticate every selected check and snapshot only after th
     const altered = await retainEvidence(f.dir, {
       ...evidence.record,
       args: {
+        ...evidence.record.args, // the retained args carry the inherited delivery context
         ...f.args,
+        requirements: evidence.record.args.requirements,
         checks: f.args.checks.map((c, i) =>
           i ? c : { ...c, command: ["true"] },
         ),
@@ -279,6 +288,8 @@ test("corrections retain the complete ordered plan and reject scope changes", as
     },
   );
   assert.equal(first.status, "NEEDS_DESIGN");
+  // A continuation inherits its requirements from the retained receipts and Scaffold.
+  const { requirements: _inherited, ...continuation } = f.args;
   for (const checks of [
     f.args.checks.slice(1),
     [...f.args.checks].reverse(),
@@ -286,7 +297,7 @@ test("corrections retain the complete ordered plan and reject scope changes", as
     f.args.checks.map((c, i) => (i ? c : { ...c, name: "renamed" })),
   ]) {
     const result = await executeAndReview(
-      { ...f.args, checks, previousAttempt: first.evidence.reference },
+      { ...continuation, checks, previousAttempt: first.evidence.reference },
       { directory: f.dir },
       {
         invokeConductor: () => assert.fail("changed plan must not invoke"),
@@ -296,7 +307,7 @@ test("corrections retain the complete ordered plan and reject scope changes", as
     assert.match(result.message, /Verification plan mismatch/);
   }
   const corrected = await executeAndReview(
-    { ...f.args, previousAttempt: first.evidence.reference },
+    { ...continuation, previousAttempt: first.evidence.reference },
     { directory: f.dir },
     { invokeConductor: respond },
   );

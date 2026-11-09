@@ -8,6 +8,7 @@ import { executeAndReview } from "../pi/agent/extensions/execute-and-review/adap
 import { authenticateTaskEvidence } from "../pi/agent/lib/verification/task-evidence.mjs";
 import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { ledgerFeature } from "./helpers/ledger-feature.mjs";
 import { executionSummary } from "../pi/agent/extensions/execute-and-review/workflow.mjs";
 
 import { conductorFixture, executorFixture, reviewFixture } from "./helpers/conductor-executables.mjs";
@@ -82,6 +83,7 @@ test(
         await writeFile(path.join(directory, "source.txt"), "before");
         git("add", ".");
         git("commit", "-qm", "baseline");
+        const ledger = await ledgerFeature(directory);
         const binaries = {};
         for (const [name, source] of [
           ["conductor", conductorFixture],
@@ -114,9 +116,9 @@ test(
           }
         });
         const args = {
-          task: { featureId: "F", taskId: "T", designRef: "approved" },
+          task: ledger.binding("T"),
           baseRef: git("rev-parse", "HEAD"),
-          requirements: "Complete immutable review requirements",
+          requirements: await ledger.requirements("T", "Complete immutable review requirements"),
           input: JSON.stringify({
             operations: [
               {
@@ -152,7 +154,7 @@ test(
         );
         const record = await readEvidence(directory, result.evidence.reference);
         assert.equal(record.request.schema, "conductor.request/v2");
-        assert.equal(record.workflow.inputs.requirements, args.requirements);
+        assert.match(record.workflow.inputs.requirements, /Complete immutable review requirements/);
         if (mode !== "FAILED_CHECK") {
           const review = result.conductor.runner.commands.at(-1);
           assert.equal(review.stdout_truncated, true);

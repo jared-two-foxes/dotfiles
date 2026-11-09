@@ -7,7 +7,7 @@ import { git, assertNoGitOperation } from '../git/tree.mjs';
 import { digest, readEvidence } from '../evidence/store.mjs';
 import { taskReceipts } from '../evidence/attempts.mjs';
 import { snapshot } from '../git/snapshot.mjs';
-import { authenticateAttemptChain, assertLatestAttempt } from '../verification/attempt-chain.mjs';
+import { authenticateAttemptChain, assertLatestAttempt } from './attempt-chain.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 async function directory(repository, create = false) {
   const dir = workDirectory(repository, 'handoffs');
