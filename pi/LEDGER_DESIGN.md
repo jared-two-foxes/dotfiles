@@ -1,8 +1,12 @@
 # Design: one ledger per feature, owned by Scaffold
 
-**Status: proposal for review. No code has been written.**
+**Status: approved. Scaffold half implemented and under review
+([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)); Pi port in progress.**
 Describes the target that replaces the stores mapped in [`ARCHITECTURE.md`](ARCHITECTURE.md) section 4.
 Spans two repositories: `jared-two-foxes/scaffold` (Python CLI) and this one (`pi/agent`).
+
+Section 9 lists where the implementation differs from the first draft of this design.
+Where this document and section 9 disagree, section 9 and the Scaffold README are current.
 
 ## 1. Decisions already made
 
@@ -57,7 +61,9 @@ keep them consistent. The proposal removes the need by making them one record.
 One JSON object per line:
 
 ```json
-{"seq": 7, "prev": "<sha256 of entry 6>", "type": "attempt.recorded", "at": "<utc>", "body": { }, "hash": "<sha256 of this entry without hash>"}
+{"seq": 7, "prev": "<sha256 of entry 6>", "type": "attempt-record", "at": "<utc>",
+ "body": {"task": "T", "payload": { }}, "patch": [ ], "after": "<sha256 of resulting state>",
+ "hash": "<sha256 of this entry without hash>"}
 ```
 
 * `hash` is the SHA-256 of the canonical JSON of the entry without the `hash` field. Genesis `prev` is 64 zeros.
@@ -65,32 +71,42 @@ One JSON object per line:
   Scaffold already uses for `delivery-record`.
 * An entry is written as one `write` of `line + "\n"` followed by `fsync`. A trailing line with no
   newline is a torn write and is discarded. A hash mismatch anywhere else fails closed.
-* References between entries are entry hashes in the same ledger. A dangling reference is rejected at
-  append time, so dangling references cannot exist.
-* Large payloads (check output, review verdicts) are written to `artifacts/<sha256>` **before**
-  the entry that cites them. An orphaned artifact is harmless. Readers re-hash artifacts on use.
+* `type` is the Scaffold action name (`start`, `attempt-record`, `history-foreign`, ...). `body` keeps the
+  validated payload for audit. `patch` is the exact change to the feature state and `after` is the digest of
+  the state it produces. State is rebuilt by applying patches, **not** by replaying rules, so a later rule
+  change cannot make an old ledger unreadable. Every read verifies the chain and each `after`.
+* References are **artifact digests** (`sha256:<64 hex>`), not entry hashes: an entry cannot cite its own hash
+  because the hash is computed after the entry is built. An action that cites a reference is rejected unless the
+  artifact is already stored in the same ledger, so dangling references cannot exist.
+* Large payloads (receipts, check output, review verdicts, approvals, suspended source) are written to
+  `artifacts/<sha256>` **before** the entry that cites them. An orphaned artifact is harmless. Readers re-hash
+  artifacts on use. Pi stores one with `artifact-put` and reads it with `artifact-get`.
 
-### 3.3 Entry types
+### 3.3 Entry types (as implemented)
 
-Existing Scaffold events map straight across. New types replace Pi-side evidence kinds.
+The entry `type` is the action. Existing Scaffold actions are unchanged in meaning.
 
-| Entry | Replaces |
+| Action (entry type) | Replaces / purpose |
 |---|---|
-| `feature.initialized` {id, instance, title, objective, criteria, constraints, context, design_ref, baseline, branch} | `scaffold init`; the `original_baseline` field |
-| `direction.approved` {scope_digest, capabilities} | `feature-authorization` evidence |
-| `graph.*` (`issue.added`, `issue.decomposed`, `design.recorded`, `design.finished`, `design.reopened`) | existing graph actions, unchanged in meaning |
-| `task.started`, `task.blocked`, `task.failed`, `task.retried` | existing task history events |
-| `attempt.begun`, `attempt.recorded`, `attempt.handoff`, `context.revised` | delivery journal events and task receipts |
-| `task.completed` {task, attempt} | `complete` plus its evidence reference |
-| `checkpoint.recorded` {task, commit, parent, tree, attempt} | `checkpoint-record` plus the commit trailer facts |
-| `history.foreign` {from, to, kind, commits, approval} | `baseline-adoption`; also mid-flight user commits |
-| `history.rewritten` {old_head, new_head, mapping, verification} | `reconciliation` and rebase handoffs |
-| `issue.suspended`, `issue.resumed` | suspension and handoff evidence |
-| `amendment.approved` | `delivery-amendment` evidence |
-| `validation.started`, `validation.finished`, `validation.invalidated` | existing validation history and feature evidence |
-| `feature.closed` | `scaffold clean` |
+| `init` | feature creation; records baseline, branch, design ref, instance id, and starts `head` and `history` |
+| `direction-approve` `{scope_digest, capabilities?}` | `feature-authorization` evidence |
+| `add`, `decompose`, `design-record`, `design-finish`, `design-reopen` | existing graph and design actions |
+| `start`, `block`, `fail`, `retry` | existing task lifecycle events |
+| `attempt-record` `{attempt, status, receipt, base, tree}` | task attempt receipts |
+| `complete` `{.., reference}` | completion; `reference` must be the receipt of a recorded PASSED attempt of the task |
+| `checkpoint-record` `{commit, parent, tree, reference}` | checkpoint bookkeeping; chains from the recorded head |
+| `history-foreign` `{from, to, source, commits, approval}` | `baseline-adoption`; also mid-flight user commits |
+| `history-rewrite` `{old_head, new_head, history, verification}` | `reconciliation` and rebase handoffs |
+| `design-reopen` with a suspension reference, `issue-resume` | suspension and handoff evidence |
+| `delivery-record` | delivery journal events (references still opaque; see section 9) |
+| `validation-start`, `validation-record`, `validation-invalidate` | validation history and feature evidence |
+| `artifact-put`, `artifact-get` | store and read blobs (no entry is appended) |
+| `feature-close` | `scaffold clean` |
 
-`history.foreign` and `history.rewritten` are the two ways Git history may legitimately contain
+Not yet a separate entry type: `amendment.approved`. Pi's `delivery-amendment` evidence is stored as an
+artifact and cited by the delivery journal's `apply_amendment` update.
+
+`history-foreign` and `history-rewrite` are the two ways Git history may legitimately contain
 something that is not a task checkpoint. Everything that is currently a special case in
 `checkpointHistory()` (adoption, rebase, interrupted rebase, and the not-yet-handled mid-flight and
 merge cases) becomes one of these two entries.
@@ -99,22 +115,27 @@ merge cases) becomes one of these two entries.
 
 Scaffold's state machine becomes the home of rules now scattered across Pi.
 
-* `start` is refused unless a `direction.approved` entry exists whose `scope_digest` matches the
-  current feature definition. This removes `requireFeatureAuthorization` from every Pi call site.
-* `complete` requires an `attempt.recorded` entry for that task with result `PASSED`.
-* `checkpoint.recorded` requires that task's `task.completed`.
-* `validation.finished` (PASSED) requires every task completed and checkpointed.
-* Material changes to the feature definition after approval invalidate the approval (it no longer
-  matches), as exact-scope matching does today.
+* `direction-approve` takes the digest of the feature definition **and its instance**. Scaffold computes the
+  digest itself (exposed as `direction_scope` in responses) and rejects a mismatch. `start` is refused until
+  the approval matches. This removes `requireFeatureAuthorization` from every Pi call site.
+* `attempt-record` is accepted only for the active task, in sequence, and idempotently.
+* `complete` must cite the receipt of a recorded `PASSED` attempt of that task.
+* `checkpoint-record` requires the task completed and `parent` equal to the ledger's `head`, so
+  checkpoints form one chain from the original baseline.
+* `history-foreign` and `history-rewrite` are accepted only between tasks and must continue the chain.
+* `validation-start` requires the validated `head` to equal the recorded `head`, so the ledger accounts for
+  every commit; `validation-record` (PASSED) requires every task completed and checkpointed.
+* The feature definition is immutable, so an approval cannot silently stop matching; a recreated instance
+  has a different scope digest and needs its own approval.
 
 ### 3.5 What stays in Pi, and the limit of what is verified
 
 Pi still owns everything that needs Git, the Executor or the reviewer:
 
-* Before appending `checkpoint.recorded`, Pi confirms the tree and parent in Git.
-* Before appending `history.foreign` or `history.rewritten`, Pi confirms ancestry and mapping, and
-  obtains the user's approval through the UI.
-* Pi writes attempt records; Scaffold records what Pi submits.
+* Before appending `checkpoint-record`, Pi confirms the tree and parent in Git.
+* Before appending `history-foreign` or `history-rewrite`, Pi confirms ancestry and mapping, and
+  obtains the user's approval through the UI, and stores that approval as an artifact.
+* Pi stores each receipt as an artifact and records the attempt; Scaffold records what Pi submits.
 
 **Honest limit:** the chain makes edits to history detectable. It does not stop a process with
 write access to `.scaffold/` from appending a forged entry, and Scaffold cannot inspect the truth of
@@ -123,24 +144,25 @@ change this and is deliberately out of scope.
 
 ### 3.6 History verification (replaces `checkpointHistory`)
 
-Walk first-parent history from HEAD to the feature baseline. Every commit must be either:
+Scaffold keeps `feature.history`, the ordered segments from the original baseline to `feature.head`, and
+`feature.epochs`, the segment lists replaced by earlier rewrites. Each segment is a `checkpoint`
+(`task_id, commit, parent, tree`) or a `foreign` range (`from, to, source, commits`). Scaffold guarantees
+the segments form one unbroken chain and that nothing is recorded while a task is active.
 
-1. the commit of a `checkpoint.recorded` entry whose parent and tree match Git, or
-2. inside a range named by a `history.foreign` entry, or
-3. a commit that a `history.rewritten` entry maps from a recorded checkpoint.
-
-Anything else is drift, which `inspect_feature_drift` already reports. Every completed task must have a
+Pi verifies that chain **against Git**: walk first-parent history from HEAD to the original baseline; every
+commit must be a recorded checkpoint whose parent and tree match Git, or a commit inside a recorded foreign
+range. Anything else is drift, which `inspect_feature_drift` already reports. Every completed task must have a
 checkpoint, and checkpoint order must respect task prerequisites, as today.
 
-The commit trailer shrinks to `Pi-Checkpoint: <task>@<entry hash>`. Verification does not depend on it,
-but it survives a rebase and lets Pi propose the old-to-new mapping automatically.
+The commit trailer shrinks to `Pi-Checkpoint: <task>`. Verification does not depend on it, but it survives
+a rebase and lets Pi propose the old-to-new mapping automatically.
 
 Review scope is unchanged: final validation reviews baseline to HEAD, and the requirements list
-`history.foreign` ranges as unverified and in scope. Nothing is exempted.
+`history-foreign` ranges as unverified and in scope. Nothing is exempted.
 
 ### 3.7 Retention
 
-No `refs/pi-*` namespaces. Rebase records store old and new head SHAs and the mapping. Suspension
+No `refs/pi-*` namespaces. A rewrite stores the old and new history in the ledger (`epochs`). Suspension
 stores the saved source as an artifact (a patch or tar), not as a Git ref. Old commits that become
 unreachable may be garbage-collected; the ledger still records what was verified.
 
@@ -174,21 +196,25 @@ feature. The cost is accepted by the user.
 
 ## 6. Work plan (one coherent change, two repositories)
 
-1. **Scaffold:** ledger writer and reader, fold, schema v3, the state-machine rules in 3.4, CLI changes,
-   `clean` as `feature.closed`, tests (chain integrity, torn writes, concurrency, idempotency, every rule).
-2. **Pi, storage layer:** an adapter over the Scaffold CLI for ledger reads and appends; delete the evidence
-   store and refs.
-3. **Pi, verification:** ledger-based history verification (3.6), `checkpoint_verified_task`,
-   `execute_and_review`, `validate_feature` ported; tools for `history.foreign` and `history.rewritten`
-   replace `adopt_feature_baseline` and `reconcile_feature_rebase`; the interrupted-task rebase flow becomes
-   a combination of the two.
-4. **Docs and CI:** update `ARCHITECTURE.md`, `RECOVERY.md`, skills and `SYSTEM.md`.
+1. **Scaffold: done, in review ([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)).** Ledger,
+   schema v3, the rules in 3.4, artifact API, `clean` as `feature-close`, tests, README.
+2. **Pi, storage layer:** an adapter over the Scaffold CLI for ledger actions and artifacts. Evidence
+   receipts become artifacts; `retainEvidence`/`readEvidence` callers move to `artifact-put`/`artifact-get`.
+3. **Pi, verification:** ledger-based history verification (3.6) replaces `checkpointHistory`;
+   `checkpoint_verified_task`, `execute_and_review` and `validate_feature` ported;
+   `adopt_feature_baseline` and `reconcile_feature_rebase` replaced by tools that append `history-foreign`
+   and `history-rewrite`; the interrupted-task rebase flow becomes a combination of the two.
+4. **Pi, deletion:** the evidence store, every `refs/pi-*` family, `lib/authorization`, and the embedded
+   feature copies.
+5. **Docs and CI:** update `ARCHITECTURE.md`, `RECOVERY.md`, skills and `SYSTEM.md`; point this repository's CI
+   at the Scaffold branch until scaffold#22 merges.
 
-**Sequencing risk:** this repository's CI checks out the latest Scaffold `main`. Pi's pull request cannot pass
-until Scaffold's has merged, and the two must be released together. Land Scaffold first, then Pi.
+**Sequencing:** this repository's CI checks out the latest Scaffold `main`. The two pull requests are
+reviewed in parallel; merging Scaffold first leaves this repository's Pi integration tests failing until the
+Pi port merges. That is accepted.
 
-**Testing risk:** dozens of Pi tests (78 in my local run) are skipped unless real Scaffold is present. The new design depends on
-Scaffold more, so new integration tests must run against real Scaffold in CI.
+**Testing risk:** dozens of Pi tests (78 in my local run) are skipped unless real Scaffold is present. The new
+design depends on Scaffold more, so the ported integration tests must run against real Scaffold in CI.
 
 ## 7. Alternatives considered
 
@@ -205,6 +231,20 @@ Scaffold more, so new integration tests must run against real Scaffold in CI.
   without changing the format.
 * Moving a feature to another machine is not supported; a later `scaffold export` could bundle a ledger.
 * `.scaffold/` is per worktree. Pi's temporary verification worktrees must not read or write it.
-* I have not read Scaffold's issue-workflow rules (`issue_workflow.py`) line by line. This design leaves
-  the design-phase graph rules unchanged and swaps only storage.
-* The exact entry bodies need a schema pass before implementation; section 3.3 fixes names and intent, not fields.
+* Removal of the newest whole entries is not detectable by the chain. Only an external copy of the head hash
+  could notice. A test in Scaffold documents this limit.
+* Python 3.11 and Windows behaviour of the Scaffold ledger (file locking, symlink handling) is not yet verified.
+
+## 9. Changes from the first draft of this design
+
+| First draft | Implemented | Why |
+|---|---|---|
+| Entries reference other entries by hash | References are artifact digests (`sha256:`) | An entry cannot cite its own hash |
+| Entry types named `task.completed`, `history.foreign`, ... | Entry `type` is the action name (`complete`, `history-foreign`, ...) | Reuses Scaffold's existing action vocabulary and CLI |
+| `history.foreign` field `kind` | `source` | A payload `kind` overwrote the segment's own `kind` marker; found by a test |
+| `checkpoint.recorded` carried only the task and commit | Carries `commit, parent, tree, reference` | Lets Scaffold enforce one unbroken chain without seeing Git |
+| `history.rewritten` carried a commit mapping | Carries the complete replacement segment list | Scaffold can verify kind, task and chain continuity structurally |
+| `direction.approved {scope_digest, capabilities}` required | `capabilities` optional | The set is constant; kept only for audit |
+| Separate `amendment.approved` entry | Amendment evidence is an artifact cited by the delivery journal | Avoids reworking the journal before the Pi port shows what is needed |
+| Delivery journal events become attempt entries | Journal unchanged; its `reference` fields are still opaque | Decide when porting the Pi side |
+| `feature.closed` appended by `clean` | `feature-close` | Same, action-style name |
