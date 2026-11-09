@@ -1,14 +1,16 @@
-// Durable authority for one approved feature direction. Separate from verification evidence.
+// Feature direction approval. The approval itself is a ledger entry owned by Scaffold
+// (`direction-approve`); this module validates the feature, builds the scope shown to the
+// user, and checks whether Scaffold has recorded a matching approval. It stores nothing.
 import path from "node:path";
 import { isDeepStrictEqual as equal } from "node:util";
 import { git } from "../git/tree.mjs";
 import { approvedDesign } from "../verification/feature.mjs";
 import { featureInstanceId } from "../verification/feature-instance.mjs";
-import { retainFeatureEvidence, readFeatureEvidence, featureEvidenceReferences } from "../evidence/store.mjs";
+
 const requireValue = (ok, message) => {
   if (!ok) throw new Error(message);
 };
-const capabilities = [
+export const capabilities = [
   "design",
   "implementation",
   "checks",
@@ -17,6 +19,7 @@ const capabilities = [
   "issue-recovery",
   "rebase-verification",
 ];
+
 function scopeFor(args, f, context) {
   context.abort?.throwIfAborted();
   const repository = path.resolve(
@@ -82,9 +85,8 @@ function scopeFor(args, f, context) {
     !["main", "master", defaultBranch].includes(f.branch),
     "Feature " + featureId + " is bound to protected branch '" + f.branch +
       "'. Approval and implementation require an unprotected feature branch. " +
-      "If Scaffold was already initialized on this branch, switching Git branches " +
-      "alone will not change its recorded binding. Inspect and reconcile the " +
-      "existing feature; do not edit Scaffold state or reinitialize it to bypass this check.",
+      "Inspect and reconcile the existing feature; do not edit Scaffold state or " +
+      "reinitialize it to bypass this check.",
   );
   requireValue(
     !!f.original_baseline,
@@ -122,9 +124,8 @@ function scopeFor(args, f, context) {
     );
   }
   requireValue(
-    git(repository, ["symbolic-ref", "--short", "HEAD"]) === f.branch,
-    "Feature branch changed while validating authority; inspect the current " +
-      "checkout before retrying",
+    /^[a-f0-9]{64}$/.test(f.direction_scope ?? ""),
+    "Scaffold did not report the feature direction scope; Scaffold ledger schema 3 required",
   );
   return {
     repository,
@@ -138,56 +139,42 @@ function scopeFor(args, f, context) {
     acceptanceCriteria: f.acceptance_criteria,
     constraints: f.constraints ?? [],
     capabilities,
+    scopeDigest: f.direction_scope,
   };
 }
-async function existing(scope) {
-  for (const reference of await featureEvidenceReferences(scope.repository)) {
-    const record = await readFeatureEvidence(scope.repository, reference);
-    if (record.kind === "feature-authorization" && equal(record.scope, scope))
-      return reference;
-  }
-}
+
+/** True when Scaffold's recorded approval matches the feature definition it computed itself. */
+export const approved = (feature) =>
+  !!feature?.direction && feature.direction.scope_digest === feature.direction_scope;
+
 export async function featureAuthorized(args, { feature }, context = {}) {
   try {
-    return !!(await existing(scopeFor(args, feature, context)));
+    scopeFor(args, feature, context);
+    return approved(feature);
   } catch {
     return false;
   }
 }
-// Read-only: the retained authorization (if any) for this exact feature scope.
-export async function authorizationReference(args, { feature }, context = {}) {
-  const scope = scopeFor(args, feature, context);
-  return { scope, reference: await existing(scope) };
-}
-function requireRecoverableAuthority(tasks) {
+export async function requireFeatureAuthorization(args, { feature }, context = {}) {
+  scopeFor(args, feature, context);
   requireValue(
-    tasks && !Object.values(tasks).some((t) => t.delivery),
-    "EVIDENCE_RECOVERY_REQUIRED: original feature authorization is missing; restore evidence, never reapprove unchanged direction to reset execution history",
-  );
-}
-export async function requireFeatureAuthorization(
-  args,
-  { feature, tasks },
-  context = {},
-) {
-  const scope = scopeFor(args, feature, context);
-  if (!(await existing(scope))) requireRecoverableAuthority(tasks);
-  requireValue(
-    await existing(scope),
+    approved(feature),
     "Approve the overall feature direction once with approve_feature_direction before implementation. No per-issue approval is required within that scope",
   );
 }
+/**
+ * `options.confirmFeature(scope)` shows the scope to the user and returns the re-read feature
+ * (or a falsy value if declined). `options.record(payload)` appends the Scaffold ledger entry.
+ */
 export async function approveFeatureDirection(
   args,
-  { feature, tasks },
+  { feature },
   context = {},
   options = {},
 ) {
   try {
     const scope = scopeFor(args, feature, context);
-    const prior = await existing(scope);
-    if (prior) return { ok: true, reference: prior, scope, recovered: true };
-    requireRecoverableAuthority(tasks);
+    if (approved(feature)) return { ok: true, reference: scope.scopeDigest, scope, recovered: true };
     const confirmedFeature = await options.confirmFeature?.(scope);
     requireValue(confirmedFeature, "Feature direction approval required");
     context.abort?.throwIfAborted();
@@ -195,11 +182,8 @@ export async function approveFeatureDirection(
       equal(scope, scopeFor(args, confirmedFeature, context)),
       "Feature direction changed during approval",
     );
-    const reference = await retainFeatureEvidence(scope.repository, {
-      kind: "feature-authorization",
-      scope,
-    });
-    return { ok: true, reference, scope };
+    await options.record({ scope_digest: scope.scopeDigest, capabilities });
+    return { ok: true, reference: scope.scopeDigest, scope };
   } catch (error) {
     return { ok: false, message: error.message };
   }

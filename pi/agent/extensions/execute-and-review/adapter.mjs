@@ -2,7 +2,7 @@ import { checkEnvironment } from "../../lib/verification/stage-reuse.mjs";
 import { prepareDelivery, deliveryEvent } from "./delivery-context.mjs";
 import { stallDecision, infrastructureDecision, reviewEnvironment } from "./retry-policy.mjs";
 import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
-import { issueFeature, readScaffoldState } from "../scaffold/adapter.mjs";
+import { issueFeature, scaffoldFeatures } from "../scaffold/adapter.mjs";
 import { featureInstanceId } from "../../lib/verification/feature-instance.mjs";
 import { approvedIssue, issueDesignRequirements, issueRequirements } from "../../lib/scaffold/contracts.mjs";
 import { issueExecutionScope } from "../../lib/verification/issue-scope.mjs";
@@ -81,15 +81,9 @@ async function git(repository, args, signal) {
   return result.stdout.trim();
 }
 
-async function requireIssueBinding(directory) {
-  const state = await readScaffoldState(directory);
-  if (
-    Object.values(state?.features ?? {}).some(
-      (f) =>
-        f.workflow?.kind === "recursive-issues/v1" &&
-        f.validation?.status !== "verified",
-    )
-  ) {
+async function requireIssueBinding(directory, scaffoldOptions) {
+  const features = await scaffoldFeatures(directory, scaffoldOptions);
+  if (features.some((f) => f.validation_status !== "verified")) {
     throw new Error("An unfinished issue workflow requires explicit feature/issue binding; complete its design graph first");
   }
 }
@@ -182,7 +176,7 @@ async function executeAttempt(args, context = {}, options = {}) {
     repository = path.resolve(
       await git(directory, ["rev-parse", "--show-toplevel"], context.abort),
     );
-    if (!args.task) await requireIssueBinding(repository);
+    if (!args.task) await requireIssueBinding(repository, options.scaffoldOptions);
     const head = await git(repository, ["rev-parse", "HEAD"], context.abort);
     const base = await git(
       repository,

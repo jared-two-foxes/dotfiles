@@ -3,7 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { reconcileFeature } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase } from "./interrupted-rebase.mjs";
-import { adoptBaseline, inspectDrift } from "./baseline-adoption.mjs";
+import { adoptCommits, inspectDrift } from "./foreign-history.mjs";
 import { createRebaseInspectionTool } from "./rebase-inspection.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
@@ -270,29 +270,29 @@ export default function (pi: ExtensionAPI) {
     },
   });
   pi.registerTool({
-    name: "adopt_feature_baseline",
-    label: "Adopt execution baseline",
+    name: "adopt_foreign_commits",
+    label: "Record user commits in the ledger",
     description:
-      "For a feature in which NO task, attempt, checkpoint or validation has started: after the user committed unrelated changes, record an authenticated, user-approved execution baseline at the current clean HEAD. Requires explicit approval naming the concrete old and new commits (execution approval cannot substitute). The original baseline, authorization, requirements and designs are preserved; intervening commits are NOT checkpoints, remain in final-validation review scope and are named to the reviewer. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",
+      "After the user committed changes that are not verified task checkpoints (for example unrelated files committed to clear a dirty tree), record them in the Scaffold ledger between tasks. Requires explicit user approval naming the recorded head and the new head, a clean tree and index, and no active task. Records a history-foreign entry: the commits are NOT verified, are never treated as task checkpoints, and remain in final-validation review scope. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",
     parameters: Type.Object(
       {
         featureId: Type.String(),
-        originalBaseRef: Type.String({ description: "The feature's original baseline commit (full SHA)" }),
-        newBaseRef: Type.String({ description: "Current clean HEAD to adopt (full SHA)" }),
+        fromRef: Type.String({ description: "The head the ledger currently records (full SHA)" }),
+        toRef: Type.String({ description: "Current clean HEAD to record (full SHA)" }),
       },
       { additionalProperties: false },
     ),
     async execute(_id, params, signal, _update, ctx) {
-      const result = await adoptBaseline(
+      const result = await adoptCommits(
         params,
         { directory: ctx.cwd, abort: signal },
         {
           confirm: async (scope) =>
             ctx.hasUI === true &&
             (await ctx.ui.confirm(
-              "Adopt " + scope.adoptedBaseline.slice(0, 12) + " as the execution baseline (was " + scope.originalBaseline.slice(0, 12) + ")?",
+              "Record " + scope.commits.length + " commit(s) up to " + scope.to.slice(0, 12) + " (ledger head is " + scope.from.slice(0, 12) + ")?",
               JSON.stringify(scope, null, 2) +
-                "\nThese commits are NOT verified task checkpoints. They stay in the final validation review scope. The original baseline, authorization and designs are unchanged. This grants no other permission.",
+                "\nThese commits are NOT verified task checkpoints. They stay in the final validation review scope. The original baseline, approval and designs are unchanged. This grants no other permission.",
             )),
         },
       );

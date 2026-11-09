@@ -2,13 +2,10 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, mkdir, rm, chmod, symlink, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { scaffoldTasks, readScaffoldState, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
-import { retainEvidence } from '../pi/agent/lib/evidence/store.mjs';
-import { assertLatestAttempt } from '../pi/agent/lib/verification/attempt-chain.mjs';
-import { requireCurrentFeatureReceipt } from '../pi/agent/lib/verification/feature-instance.mjs';
+import { scaffoldTasks, checkStatePaths, buildCommand, OPERATIONS } from '../pi/agent/extensions/scaffold/adapter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
 const context = 'Approved feature context';
@@ -17,17 +14,25 @@ const definition = (id = 'T1') => ({ id, title: id, objective: 'Deliver task', a
 const task = (id = 'T1', status = 'pending') => ({ ...definition(id), feature_id: 'F1', parent_id: null, status, dependencies: [], history: [] });
 const evidence = { feature_id: 'F1', task_id: 'T1', result: 'PASSED', source: 'conductor', reference: 'retained-result-1', summary: 'Verified criteria' };
 const params = operation => ({ operation, feature_id: 'F1',
-  ...(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume', 'delivery-record'].includes(operation) ? { task_id: 'T1' } : {}),
+  ...(['issue', 'start', 'complete', 'block', 'fail', 'retry', 'decompose', 'design-record', 'checkpoint-record', 'issue-resume', 'delivery-record', 'attempt-record'].includes(operation) ? { task_id: 'T1' } : {}),
   ...(['block', 'fail', 'retry'].includes(operation) ? { reason: 'Explicit decision' } : {}),
   ...({ init: { payload: feature }, add: { payload: [definition()] }, complete: { payload: evidence }, decompose: { payload: [definition('child')] },
     'design-record': { payload: { summary: 'Approved', verification: 'Tests', approval: 'User confirmed', disposition: 'leaf' } },
     'design-reopen': { payload: { reason: 'Review finding' } },
-    'checkpoint-record': { payload: { commit: 'a'.repeat(40), reference: 'receipt' } },
+    'checkpoint-record': { payload: { commit: 'a'.repeat(40), parent: 'b'.repeat(40), tree: 'c'.repeat(40), reference: 'sha256:' + 'd'.repeat(64) } },
     'delivery-record': { payload: { expected_revision: 0, event: { kind: 'initialized', context: {}, head: null, sequence: 0 } } },
-    'issue-resume': { payload: { reference: 'suspension', handoff: 'handoff' } } }[operation] ?? {}),
+    'direction-approve': { payload: { scope_digest: 'd'.repeat(64), capabilities: ['design'] } },
+    'attempt-record': { payload: { attempt: 1, status: 'PASSED', receipt: 'sha256:' + 'a'.repeat(64), base: 'a'.repeat(40), tree: 'b'.repeat(40) } },
+    'history-foreign': { payload: { from: 'a'.repeat(40), to: 'b'.repeat(40), source: 'user-commits', approval: 'sha256:' + 'c'.repeat(64), commits: [{ commit: 'b'.repeat(40), parents: ['a'.repeat(40)], subject: 'user' }] } },
+    'history-rewrite': { payload: { old_head: 'a'.repeat(40), new_head: 'b'.repeat(40), history: [], verification: 'sha256:' + 'c'.repeat(64) } },
+    'artifact-put': { payload: { receipt: 1 } },
+    'artifact-get': { payload: { reference: 'sha256:' + 'c'.repeat(64) } },
+    'issue-resume': { payload: { reference: 'sha256:' + 'e'.repeat(64), handoff: 'sha256:' + 'f'.repeat(64) } } }[operation] ?? {}),
 });
-const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 2, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
+const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 3, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,direction_scope:'d'.repeat(64),head:data.feature.baseline,history:[],workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
 function response(operation) {
+  if (operation === 'artifact-put') return { code: 0, stdout: JSON.stringify({ schema_version: 3, reference: 'sha256:' + 'c'.repeat(64) }), stderr: '' };
+  if (operation === 'artifact-get') return { code: 0, stdout: JSON.stringify({ schema_version: 3, artifact: { receipt: 1 } }), stderr: '' };
   if (['summary', 'issue', 'select', 'design-select'].includes(operation)) {
     const summary = { id: 'F1', design_ref: feature.design_ref, phase: 'implement', task_revision: 1, state_digest: 'a'.repeat(64), counts: { pending: 1 }, baseline: feature.baseline, branch: feature.branch };
     return success({ summary, ...(operation === 'summary' ? {} : { context: { schema: 'scaffold.issue-context/v1', feature: summary, issue: { ...task(), constraints: [] }, ancestors: [], prerequisites: [], children: [] } }) });
@@ -53,7 +58,10 @@ test('every operation constructs one exact CLI invocation and JSON stdin', async
     let calls = 0;
     const request = params(operation);
     const result = await scaffoldTasks(request, { directory: subdirectory }, {
+      authorizeIssueMutation: async () => {},
       invokeScaffold: async (program, args, options) => {
+        // Guarded operations first read the feature through the CLI (Pi never reads Scaffold files).
+        if (args[0] === 'list' && operation !== 'list') return response('list');
         calls++;
         assert.equal(program, 'scaffold');
         const expected = [operation, '--feature=F1'];
@@ -133,7 +141,7 @@ test('malformed, unsupported, mismatched and incomplete responses fail safely', 
   const dir = await fixture(t);
   const base = JSON.parse(response('select').stdout);
   const invalid = ['not json', 'null', '[]', '{}',
-    JSON.stringify({ ...base, schema_version: 3 }),
+    JSON.stringify({ ...base, schema_version: 2 }),
     JSON.stringify({ ...base, schema_version: 1 }),
     JSON.stringify({ ...base, schema_version: '1' }),
     JSON.stringify({ ...base, error: 'failure' }),
@@ -185,7 +193,7 @@ test('requires a current repository and refuses task-state symlinks', async t =>
     assert.equal(result.ok, false);
   }
   if (process.platform === 'win32') return; // symlink privileges vary on Windows
-  for (const suffix of ['.scaffold', '.scaffold/tasks.json', '.scaffold/.tasks.lock']) {
+  for (const suffix of ['.scaffold', '.scaffold/features', '.scaffold/.tasks.lock']) {
     if (suffix !== '.scaffold') await mkdir(path.join(dir, '.scaffold'), { recursive: true });
     const target = path.join(dir, suffix);
     await symlink(outside, target);
@@ -193,7 +201,7 @@ test('requires a current repository and refuses task-state symlinks', async t =>
     assert.equal(result.ok, false);
     assert.match(result.message, /symlinks/);
     assert.ok(result.message.includes(suffix));
-    await assert.rejects(readScaffoldState(dir), /symlinks/);
+    await assert.rejects(checkStatePaths(dir), /symlinks/);
     await rm(target);
   }
 });
@@ -201,12 +209,13 @@ test('requires a current repository and refuses task-state symlinks', async t =>
 test('task-state preflight rejects non-directory state and non-file lock or JSON', async t => {
   for (const [suffix, expected] of [
     ['.scaffold', /must be a directory/],
-    ['.scaffold/tasks.json', /must be a regular file/],
+    ['.scaffold/features', /must be a directory/],
     ['.scaffold/.tasks.lock', /must be a regular file/],
   ]) {
     const dir = await fixture(t);
     const target = path.join(dir, suffix);
-    if (suffix === '.scaffold') {
+    if (suffix === '.scaffold' || suffix === '.scaffold/features') {
+      if (suffix !== '.scaffold') await mkdir(path.join(dir, '.scaffold'));
       await writeFile(target, 'not a directory');
     } else {
       await mkdir(path.join(dir, '.scaffold'));
@@ -217,15 +226,13 @@ test('task-state preflight rejects non-directory state and non-file lock or JSON
     });
     assert.equal(result.ok, false, suffix);
     assert.match(result.message, expected);
-    await assert.rejects(readScaffoldState(dir), expected);
+    await assert.rejects(checkStatePaths(dir), expected);
   }
 });
 
-test('regular task state and lock files allow safe CLI access and read-only inspection', async t => {
+test('regular ledger directory and lock file allow safe CLI access', async t => {
   const dir = await fixture(t);
-  await mkdir(path.join(dir, '.scaffold'));
-  const taskState = { schema_version: 2, features: {} };
-  await writeFile(path.join(dir, '.scaffold', 'tasks.json'), JSON.stringify(taskState));
+  await mkdir(path.join(dir, '.scaffold', 'features'), { recursive: true });
   await writeFile(path.join(dir, '.scaffold', '.tasks.lock'), '0');
 
   let commands = 0;
@@ -238,41 +245,14 @@ test('regular task state and lock files allow safe CLI access and read-only insp
   });
   assert.equal(result.ok, true);
   assert.equal(commands, 1);
-  assert.deepEqual(await readScaffoldState(dir), taskState);
+  await checkStatePaths(dir);
   assert.equal(await readFile(path.join(dir, '.scaffold', '.tasks.lock'), 'utf8'), '0');
 });
 
-test('clean is not an agent operation and old receipts cannot attach to a fresh instance', async t => {
+test('clean is not an agent operation', () => {
+  // Old receipts can no longer attach to a fresh instance: each instance has its own ledger directory.
   assert.equal(OPERATIONS.includes('clean'), false);
   assert.throws(() => buildCommand({operation:'clean',feature_id:'F1'}), /Unsupported|operation/i);
-  const dir = await fixture(t);
-  const stateDir = path.join(dir, '.scaffold');
-  await mkdir(stateDir);
-  const binding = {featureId:'F1',taskId:'T1',designRef:feature.design_ref};
-  const oldInstance = '1'.repeat(32), newInstance = '2'.repeat(32);
-  const stateFor = instance_id => ({
-    schema_version:2,
-    features: {F1: {...feature, workflow:{kind:'recursive-issues/v1',instance_id}, tasks:{T1:task()}}}
-  });
-  await writeFile(path.join(stateDir, 'tasks.json'),JSON.stringify(stateFor(oldInstance)));
-  const oldRef = await retainEvidence(dir, {
-    repository:dir,task:binding,attempt:3,featureInstanceId:oldInstance,
-    result:{status:'BLOCKED'},args:{task:binding}
-  });
-  // An operator cleans Scaffold state but intentionally preserves evidence in .git.
-  await writeFile(path.join(stateDir, 'tasks.json'),JSON.stringify(stateFor(newInstance)));
-  assert.doesNotThrow(() => requireCurrentFeatureReceipt(
-    stateFor(newInstance).features.F1,{featureInstanceId:newInstance}));
-  assert.throws(() => requireCurrentFeatureReceipt(
-    stateFor(newInstance).features.F1,{featureInstanceId:oldInstance}), /reinitialized/);
-  await assertLatestAttempt(dir,undefined,binding,0); // old attempt cannot block new feature
-  await assert.rejects(assertLatestAttempt(dir,oldRef,binding,3), /reinitialized/);
-  const newRef = await retainEvidence(dir, {
-    repository:dir,task:binding,attempt:1,featureInstanceId:newInstance,
-    result:{status:'BLOCKED'},args:{task:binding}
-  });
-  await assert.rejects(assertLatestAttempt(dir,undefined,binding,0), /newer task attempt/i);
-  await assertLatestAttempt(dir,newRef,binding,1);
 });
 
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
@@ -312,6 +292,11 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   for (const task_id of ['F1','T1','T2']) await call({operation:'design-record',feature_id:'F1',task_id,payload:{summary:'Approved', verification:'Checks', approval:'User confirmed', disposition:task_id === 'F1' ? 'decomposed' : 'leaf'}});
   await call({operation:'design-finish',feature_id:'F1'});
   assert.equal((await call(params('select'))).context.issue.id, 'T1');
+  const scope = (await call(params('list'))).feature.direction_scope;
+  const refused = await scaffoldTasks(params('start'), { directory: dir });
+  assert.equal(refused.ok, false);
+  assert.match(refused.scaffold_error.error, /Approve the feature direction/);
+  await call({ operation: 'direction-approve', feature_id: 'F1', payload: { scope_digest: scope } });
   await call(params('start'));
   // Fresh module instance, no previous conversation or adapter memory.
   const fresh = await import('../pi/agent/extensions/scaffold/adapter.mjs?new-session');
@@ -322,9 +307,16 @@ test('real Scaffold CLI lifecycle persists dependent tasks and resumes in a new 
   assert.equal((await call(params('select'))).context, null);
   const premature = await scaffoldTasks({ ...params('start'), task_id: 'T2' }, { directory: dir });
   assert.equal(premature.ok, false);
-  await call(params('complete'));
+  const receipt = (await call({ operation: 'artifact-put', feature_id: 'F1', payload: { receipt: 'T1' } })).reference;
+  const unrecorded = await scaffoldTasks({ ...params('complete'), payload: { ...evidence, reference: receipt } }, { directory: dir });
+  assert.equal(unrecorded.ok, false); // completion must cite a recorded PASSED attempt
+  assert.match(unrecorded.scaffold_error.error, /recorded PASSED attempt/);
+  await call({ operation: 'attempt-record', feature_id: 'F1', task_id: 'T1',
+    payload: { attempt: 1, status: 'PASSED', receipt, base: 'a'.repeat(40), tree: 'b'.repeat(40) } });
+  const passed = { ...evidence, reference: receipt };
+  await call({ ...params('complete'), payload: passed });
   const listed = await call(params('list'));
-  assert.deepEqual(listed.feature.tasks.T1.history.at(-1).evidence, evidence);
+  assert.deepEqual(listed.feature.tasks.T1.history.at(-1).evidence, passed);
   assert.equal((await call(params('select'))).context, null); // missing checkpoint blocks every next issue
   const blocked = await scaffoldTasks({...params('start'),task_id:'T2'}, {directory:dir});
   assert.equal(blocked.ok, false); assert.match(blocked.scaffold_error.error, /checkpoint/);
@@ -348,15 +340,18 @@ test('real Scaffold clean invalidates old feature state and reinit changes ident
   assert.match(instance1,/^[a-f0-9]{32}$/);
   const dry = execFileSync('python3',['-c',script,source,'clean','--feature','F1','--dry-run'],{cwd:dir,encoding:'utf8'});
   assert.match(dry,/Affected features: 1/);
-  assert.equal((await readScaffoldState(dir)).features.F1.workflow.instance_id,instance1);
+  assert.equal((await call('list')).data.feature.workflow.instance_id,instance1);
   execFileSync('python3',['-c',script,source,'clean','--feature','F1','--yes'],{cwd:dir});
-  assert.equal((await readScaffoldState(dir)).features.F1,undefined);
+  // Nothing is deleted: the closed instance's ledger stays on disk for audit.
+  assert.equal((await readdir(path.join(dir,'.scaffold','features'))).length,1);
   const afterClean = await call('list');
   assert.equal(afterClean.ok,false);
   assert.equal(afterClean.reason,'COMMAND_FAILED');
   const next = await call('init');
   assert.equal(next.ok,true,JSON.stringify(next));
   assert.notEqual(next.data.feature.workflow.instance_id,instance1);
+  assert.equal((await readdir(path.join(dir,'.scaffold','features'))).length,2);
+  assert.notEqual(next.data.feature.direction_scope,first.data.feature.direction_scope);
   assert.equal(next.data.feature.design_ref,first.data.feature.design_ref);
 });
 

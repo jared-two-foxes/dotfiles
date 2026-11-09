@@ -2,7 +2,6 @@
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git } from '../git/tree.mjs';
 import { authenticateTaskEvidence } from './task-evidence.mjs';
-import { findAdoption } from './baseline-adoption.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -21,13 +20,8 @@ export async function checkpointHistory(repository, feature, { head, baseline, b
     for (const [id, task] of Object.entries(anchor.tasks))
       requireValue(equal(tasks[id], task), 'Reconciled task changed or lost completion evidence');
   }
-  // An authenticated baseline adoption moves only where checkpoints begin; the
-  // original baseline stays in every checkpoint's provenance. v1 does not combine it with rebase anchors.
-  const adoption = await findAdoption(repository, feature);
-  requireValue(!(adoption && anchor), 'Baseline adoption cannot be combined with rebase reconciliation yet; do not rebase an adopted feature');
-  requireValue(!adoption || (adoption.original === baseline && feature.branch === branch), 'Baseline adoption does not match this feature scope');
   let cursor = head;
-  const stop = anchor?.head ?? adoption?.baseline ?? baseline;
+  const stop = anchor?.head ?? baseline;
   while (cursor !== stop) {
     requireValue(checkpoints.length < identifiers.length, 'Unrelated or duplicate commits in checkpoint history');
     const parents = git(repository, ['show', '-s', '--format=%P', cursor]).split(' ');
@@ -36,7 +30,7 @@ export async function checkpointHistory(repository, feature, { head, baseline, b
     requireValue(p.schema === 'pi.task-checkpoint/v1' && p.featureId === feature.id && p.designRef === feature.design_ref &&
       p.branch === branch && p.featureBaseRef === baseline && p.baseRef === parents[0] &&
       p.tree === git(repository, ['rev-parse', cursor + '^{tree}']) && tasks[p.taskId]?.status === 'completed' && !seen.has(p.taskId) &&
-      (p.reconciliationRef ?? null) === (anchor?.reference ?? null) && (p.adoptionRef ?? null) === (adoption?.reference ?? null),
+      (p.reconciliationRef ?? null) === (anchor?.reference ?? null),
     'Checkpoint lineage, identity or Git tree mismatch');
     const completion = tasks[p.taskId].history.at(-1);
     requireValue(completion?.to === 'completed' && completion.evidence?.reference === p.evidenceRef &&

@@ -9,7 +9,8 @@ export { OPERATIONS } from "../../lib/scaffold/contracts.mjs";
 const text = x => typeof x === "string" && !!x.trim() && !x.includes("\0");
 const object = x => x !== null && typeof x === "object" && !Array.isArray(x);
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
-const guardedActions = new Set(["design-reopen", "checkpoint-record", "issue-resume"]);
+// checkpoint-record is validated by Scaffold itself (reference, chain, parent and tree).
+const guardedActions = new Set(["design-reopen", "issue-resume"]);
 
 /** @param {import("../../lib/scaffold/contracts.mjs").ScaffoldRequest} params */
 export function buildCommand(params) {
@@ -78,7 +79,7 @@ export function invoke(program, args, { cwd, signal, input = "" }) {
 export async function checkStatePaths(repository) {
   for (const [suffix, kind] of [
     [".scaffold", "directory"],
-    [".scaffold/tasks.json", "file"],
+    [".scaffold/features", "directory"],
     [".scaffold/.tasks.lock", "file"],
   ]) {
     try {
@@ -98,16 +99,37 @@ export async function checkStatePaths(repository) {
   }
 }
 
-export async function readScaffoldState(repository) {
+// Pi never reads Scaffold's files. State is read only through the Scaffold CLI.
+const unknownFeature = (response) =>
+  /Unknown feature/.test(String(response.scaffold_error?.error ?? "")) ||
+  /Unknown feature/.test(String(response.stderr ?? ""));
+
+/** The open feature instance with this id, or null when Scaffold has none. */
+export async function scaffoldFeatureOrNull(repository, featureId, options = {}) {
+  const response = await scaffoldTasks(
+    { operation: "list", feature_id: featureId },
+    { directory: repository },
+    options,
+  );
+  if (response.ok) return response.data.feature;
+  if (response.reason === "COMMAND_FAILED" && unknownFeature(response)) return null;
+  throw new Error("Cannot inspect Scaffold: " + response.message);
+}
+
+/** Summaries of every open feature instance in the repository. */
+export async function scaffoldFeatures(repository, options = {}) {
   await checkStatePaths(repository);
-  try {
-    return JSON.parse(
-      await readFile(path.join(repository, ".scaffold", "tasks.json"), "utf8"),
-    );
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
+  const response = await (options.invokeScaffold ?? invoke)("scaffold", ["features"], {
+    cwd: repository,
+    input: "",
+  });
+  requireValue(response.code === 0, "Cannot list Scaffold features: " + String(response.stderr).slice(0, 500));
+  const data = JSON.parse(response.stdout);
+  requireValue(
+    object(data) && data.schema_version === 3 && Array.isArray(data.features),
+    "Unsupported Scaffold features response; Scaffold ledger schema 3 required",
+  );
+  return data.features;
 }
 
 async function loadIssueFeature(repository, featureId, designRef, options) {
@@ -130,8 +152,8 @@ async function loadIssueFeature(repository, featureId, designRef, options) {
 }
 
 export async function issueFeature(repository, binding, options = {}) {
-  const stored = await readScaffoldState(repository);
-  if (!stored?.features?.[binding.featureId]?.workflow) return null;
+  const stored = await scaffoldFeatureOrNull(repository, binding.featureId, options.scaffoldOptions);
+  if (!stored?.workflow) return null;
   return loadIssueFeature(
     repository,
     binding.featureId,
@@ -171,15 +193,13 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
     const repository = await realpath(git.stdout.trim());
     await checkStatePaths(repository);
     if (guardedActions.has(params.operation)) {
-      const stored = await readScaffoldState(repository);
-      const storedFeature = stored?.features?.[params.feature_id];
+      const storedFeature = await scaffoldFeatureOrNull(repository, params.feature_id, options);
       if (storedFeature?.workflow) {
-        const feature = await loadIssueFeature(
-          repository,
-          params.feature_id,
-          storedFeature.design_ref,
-          options,
+        requireValue(
+          storedFeature.workflow.kind === "recursive-issues/v1",
+          "Issue workflow/design mismatch",
         );
+        const feature = storedFeature;
         requireValue(
           typeof options.authorizeIssueMutation === "function",
           "Issue transition requires delivery authorization",

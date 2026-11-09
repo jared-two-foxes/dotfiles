@@ -35,9 +35,10 @@ export async function assertLatestAttempt(repository, reference, binding, attemp
   // Old evidence remains in Git metadata after an operator runs scaffold clean.
   // It must not block the first attempt in a *new* feature instance, or serve as
   // a continuation reference for that instance.
-  const { readScaffoldState } = await import('../../extensions/scaffold/adapter.mjs');
-  const state = await readScaffoldState(repository);
-  const current = state?.features?.[binding.featureId];
+  // Stopgap until receipts and attempts move into the ledger (slice 2), where the latest attempt
+  // is simply the last entry of `feature.tasks[id].attempts`.
+  const { scaffoldFeatureOrNull } = await import('../../extensions/scaffold/adapter.mjs');
+  const current = await scaffoldFeatureOrNull(repository, binding.featureId);
   const instanceId = featureInstanceId(current);
   if (reference && current) {
     const receipt = await readEvidence(repository, reference);

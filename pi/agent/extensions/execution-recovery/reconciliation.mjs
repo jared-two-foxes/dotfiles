@@ -11,7 +11,6 @@ import {
   readFeatureEvidence,
   featureEvidenceReferences,
 } from '../../lib/evidence/store.mjs';
-import { findAdoption } from '../../lib/verification/baseline-adoption.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
 import { planFor, meaningful, reviewScope } from '../../lib/verification/feature.mjs';
@@ -67,7 +66,6 @@ export async function reconcileFeature(args, context = {}, options = {}) {
       requireValue(Object.values(feature.tasks).every(t => ['pending', 'completed', 'decomposed'].includes(t.status) ||
         (t.id === options.interruptedTask?.taskId && ['in_progress', 'blocked', 'failed'].includes(t.status))),
         'Finish or explicitly recover active, blocked or failed task loops before rebasing');
-      requireValue(!(await findAdoption(repository, feature)), 'Rebase reconciliation is not supported for a feature with an adopted baseline yet');
       const prior = args.previousReconciliationRef
         ? await readReconciliation(repository, args.previousReconciliationRef, feature, args) : undefined;
       const source = await checkpointHistory(repository, feature,
