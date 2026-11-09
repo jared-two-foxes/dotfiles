@@ -11,9 +11,12 @@ import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
 import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
 import { approveFeatureDirection } from "../pi/agent/extensions/scaffold/feature-authorization.mjs";
 import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
-import { readEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { recoverAttempt } from "../pi/agent/lib/evidence/attempts.mjs";
 import { assertLatestAttempt } from "../pi/agent/lib/verification/attempt-chain.mjs";
 import { verifyHistory } from "../pi/agent/lib/verification/history.mjs";
+import { authenticatedCheckpoints } from "../pi/agent/lib/verification/checkpoints.mjs";
+import { rewriteFeatureHistory } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import { requirementsFor } from "./helpers/issue-plan.mjs";
 
@@ -182,4 +185,75 @@ test("execution is refused while HEAD has commits the ledger has not recorded", 
   assert.equal(result.status, "BLOCKED");
   assert.match(JSON.stringify(result), /ledger has not recorded|recorded head/);
   assert.equal((await f.feature()).tasks.a.attempts?.length ?? 0, 0);
+});
+
+test("receipts still authenticate after a rebase is recorded as a history-rewrite", real, async (t) => {
+  const f = await fixture(t);
+  for (const id of ["a", "b"]) {
+    await f.call("start", undefined, id);
+    const result = await f.attempt(id);
+    await f.call("complete", { feature_id: "F1", task_id: id, result: "PASSED", source: "conductor",
+      reference: result.evidence.reference, summary: "ok" }, id);
+    assert.equal((await f.checkpoint(id, result.evidence.reference)).ok, true);
+  }
+  const before = await f.feature();
+  await authenticatedCheckpoints(f.dir, before);
+
+  f.g("switch", "-q", "main");
+  await writeFile(path.join(f.dir, "upstream.txt"), "upstream\n");
+  f.g("add", ".");
+  f.g("commit", "-qm", "upstream");
+  f.g("switch", "-q", "feature/delivery");
+  f.g("rebase", "-q", "main");
+
+  const node = process.execPath;
+  const reviewScript = path.join(f.dir, "..", "fake-review-" + path.basename(f.dir) + ".mjs");
+  t.after(() => rm(reviewScript, { force: true }));
+  await writeFile(reviewScript, "console.log(JSON.stringify({schema:'review.result/v1',review_id:'fixture',completed_at:'2026-11-01T00:00:00Z',status:'APPROVED',reason:'REVIEW_COMPLETED',findings:[],obligation_assessments:[]}));");
+  const rewritten = await rewriteFeatureHistory({
+    featureId: "F1", designRef: f.designRef, branch: "feature/delivery", oldHeadRef: before.head,
+    upstreamBaseRef: f.g("rev-parse", "main"), headRef: f.g("rev-parse", "HEAD"), defaultBranch: "main", protectedBranches: [],
+    buildCommand: [node, "-e", "console.log('built')"], testCommand: [node, "-e", "console.log('2 tests passed')"],
+    testSuccessPattern: "2 tests passed",
+  }, f.context, { reviewOptions: { executable: node, prefixArgs: [reviewScript] } });
+  assert.equal(rewritten.status, "PASSED", JSON.stringify(rewritten));
+
+  // The checkpoints now have new commits, parents and trees; their receipts describe the original history.
+  const after = await f.feature();
+  assert.notEqual(after.history[0].commit, before.history[0].commit);
+  const checkpoints = await authenticatedCheckpoints(f.dir, after);
+  assert.deepEqual(checkpoints.map((c) => [c.taskId, c.commit, c.parent, c.tree]),
+    after.history.map((s) => [s.task_id, s.commit, s.parent, s.tree]));
+
+  // A retained rewrite verification that is missing or wrong is rejected.
+  const forged = structuredClone(after);
+  forged.epochs[0].verification = "sha256:" + "0".repeat(64);
+  await assert.rejects(authenticatedCheckpoints(f.dir, forged));
+  // A rewritten checkpoint that differs from what the retained verification covered is rejected.
+  const wrong = structuredClone(after);
+  wrong.history[0].tree = after.history[1].tree;
+  await assert.rejects(authenticatedCheckpoints(f.dir, wrong), /does not cover the recorded history/);
+});
+
+test("a terminal receipt stored before its attempt was recorded can be finished, once and only for its task", real, async (t) => {
+  const f = await fixture(t);
+  await f.call("start", undefined, "a");
+  const first = await f.attempt("a", { status: "NEEDS_DESIGN", phase: "verification" });
+  const record = await readEvidence(f.dir, first.evidence.reference);
+  const binding = { featureId: "F1", taskId: "a", designRef: f.designRef };
+
+  // Simulate a crash after the artifact was stored but before `attempt-record` ran.
+  const orphan = await retainEvidence(f.dir, { ...record, attempt: 2, startedReference: undefined });
+  assert.equal((await f.feature()).tasks.a.attempts.length, 1);
+  const recovered = await recoverAttempt(f.dir, orphan, binding);
+  assert.equal(recovered.reference, orphan);
+  assert.equal((await f.feature()).tasks.a.attempts.length, 2);
+  await recoverAttempt(f.dir, orphan, binding); // idempotent
+  assert.equal((await f.feature()).tasks.a.attempts.length, 2);
+
+  // Another task's receipt, or an out-of-sequence attempt, is refused.
+  await assert.rejects(recoverAttempt(f.dir, orphan, { ...binding, taskId: "b" }), /different task|task/i);
+  const skipped = await retainEvidence(f.dir, { ...record, attempt: 9, startedReference: undefined });
+  await assert.rejects(recoverAttempt(f.dir, skipped, binding), /sequence/i);
+  assert.equal((await f.feature()).tasks.a.attempts.length, 2);
 });

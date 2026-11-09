@@ -30,7 +30,7 @@ const parameters = Type.Object({
   payload: Type.Optional(Type.Union([feature, Type.Array(task, { minItems: 1 }), evidence,
     Type.Object({ summary: text(), verification: text(), approval: text(), disposition: Type.Union([Type.Literal("leaf"), Type.Literal("decomposed")]) }, { additionalProperties: false }),
     Type.Object({ reason: text(), reference: Type.Optional(text()) }, { additionalProperties: false }),
-    Type.Object({ commit: text(), reference: text() }, { additionalProperties: false }),
+    Type.Object({ commit: text(), parent: text(), tree: text(), reference: text() }, { additionalProperties: false }),
     Type.Object({ reference: text(), handoff: text() }, { additionalProperties: false })])),
   reason: Type.Optional(text()),
 }, { additionalProperties: false });
