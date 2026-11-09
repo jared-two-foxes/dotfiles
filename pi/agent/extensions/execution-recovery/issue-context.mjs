@@ -3,8 +3,8 @@ import {
   prepareIssueHandoff as prepare,
   inspectIssueHandoff as inspect,
   readIssueHandoff,
-} from "../../lib/delivery-state/issue-context.mjs";
-export { inspectIssueAttempt } from "../../lib/delivery-state/issue-context.mjs";
+} from "../../lib/verification/issue-handoff.mjs";
+export { inspectIssueAttempt } from "../../lib/verification/issue-handoff.mjs";
 
 async function scoped(featureId, taskId, context, options) {
   const response = await scaffoldTasks(

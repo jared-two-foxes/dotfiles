@@ -1,130 +1,59 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import {
   createPreconditionCache,
-  evidenceFingerprint,
   memoizePreconditions,
   preconditionCacheStats,
 } from "../pi/agent/lib/verification/precondition-cache.mjs";
 import { featureTimings } from "../pi/agent/lib/verification/timings.mjs";
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function repository(t) {
-  const dir = await mkdtemp(path.join(tmpdir(), "pi-precondition-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  execFileSync("git", ["init", "-q", dir]);
-  const evidence = path.join(dir, ".git", "pi-conductor-evidence");
-  return { dir, evidence, create: () => mkdir(evidence) };
-}
-
-test("evidence fingerprint is stable until a file is added, removed, renamed or edited", async (t) => {
-  const r = await repository(t);
-  assert.equal(await evidenceFingerprint(r.dir), "absent");
-  await r.create();
-  const empty = await evidenceFingerprint(r.dir);
-  assert.equal(await evidenceFingerprint(r.dir), empty, "untouched directory is stable");
-
-  const one = path.join(r.evidence, "a".repeat(64) + ".json");
-  await writeFile(one, '{"v":1}');
-  const withOne = await evidenceFingerprint(r.dir);
-  assert.notEqual(withOne, empty, "added file");
-  assert.equal(await evidenceFingerprint(r.dir), withOne);
-
-  await sleep(20);
-  await writeFile(one, '{"v":2}'); // same size, different content
-  const edited = await evidenceFingerprint(r.dir);
-  assert.notEqual(edited, withOne, "in-place edit of the same size");
-
-  const second = path.join(r.evidence, "b".repeat(64) + ".json");
-  await rename(one, second);
-  const renamed = await evidenceFingerprint(r.dir);
-  assert.notEqual(renamed, edited, "rename");
-
-  await rm(second);
-  assert.equal(await evidenceFingerprint(r.dir), empty, "removal returns to the empty directory");
-});
-
-test("an edit that restores the file's modification time is still detected", async (t) => {
-  const r = await repository(t);
-  await r.create();
-  const file = path.join(r.evidence, "c".repeat(64) + ".json");
-  const fixed = 1_700_000_000; // whole seconds, so the restored mtime is bit-for-bit identical
-  await writeFile(file, '{"v":1}');
-  await utimes(file, fixed, fixed);
-  const before = await evidenceFingerprint(r.dir);
-  const first = await stat(file);
-  await sleep(20);
-  await writeFile(file, '{"v":2}'); // same size, same inode
-  await utimes(file, fixed, fixed); // put mtime back exactly; ctime cannot be restored
-  const second = await stat(file);
-  assert.equal(second.mtimeMs, first.mtimeMs, "test premise: mtime is identical");
-  assert.equal(second.size, first.size);
-  assert.equal(second.ino, first.ino);
-  assert.notEqual(await evidenceFingerprint(r.dir), before);
-});
+// The cache key holds the feature state, which includes every recorded attempt, checkpoint and
+// history entry. The ledger's artifacts are content-addressed and immutable, so no evidence
+// fingerprint is needed: a change that matters changes the key.
+const repository = "/unused";
 
 function counter(value = { tasks: ["one"] }) {
   const state = { calls: 0 };
   return { state, compute: async () => { state.calls += 1; return structuredClone(value); } };
 }
 
-test("without a cache every call computes", async (t) => {
-  const r = await repository(t);
+test("without a cache every call computes", async () => {
   const { state, compute } = counter();
-  await memoizePreconditions(undefined, r.dir, ["k"], compute);
-  await memoizePreconditions(undefined, r.dir, ["k"], compute);
+  await memoizePreconditions(undefined, repository, ["k"], compute);
+  await memoizePreconditions(undefined, repository, ["k"], compute);
   assert.equal(state.calls, 2);
   assert.equal(preconditionCacheStats(undefined), null);
 });
 
-test("an unchanged key and evidence directory reuse the earlier result", async (t) => {
-  const r = await repository(t);
+test("an unchanged key reuses the earlier result", async () => {
   const cache = createPreconditionCache();
   const { state, compute } = counter();
-  const first = await memoizePreconditions(cache, r.dir, ["k"], compute);
-  const second = await memoizePreconditions(cache, r.dir, ["k"], compute);
+  assert.deepEqual(await memoizePreconditions(cache, repository, ["k"], compute), { tasks: ["one"] });
+  assert.deepEqual(await memoizePreconditions(cache, repository, ["k"], compute), { tasks: ["one"] });
   assert.equal(state.calls, 1);
-  assert.deepEqual(second, first);
   assert.deepEqual(preconditionCacheStats(cache), { hits: 1, misses: 1, fresh: 0 });
 });
 
-test("a changed key part or changed evidence forces a recompute", async (t) => {
-  const r = await repository(t);
-  await r.create();
+test("a changed key part, such as a new recorded attempt or history entry, forces a recompute", async () => {
   const cache = createPreconditionCache();
   const { state, compute } = counter();
-  await memoizePreconditions(cache, r.dir, ["k", { tasks: 1 }], compute);
-  await memoizePreconditions(cache, r.dir, ["k", { tasks: 2 }], compute); // feature state changed
+  await memoizePreconditions(cache, repository, [{ attempts: 1 }], compute);
+  await memoizePreconditions(cache, repository, [{ attempts: 2 }], compute);
+  await memoizePreconditions(cache, repository, [{ attempts: 1 }], compute);
   assert.equal(state.calls, 2);
-  await memoizePreconditions(cache, r.dir, ["k", { tasks: 2 }], compute);
-  assert.equal(state.calls, 2, "same key again is a hit");
-
-  await writeFile(path.join(r.evidence, "d".repeat(64) + ".json"), "{}");
-  await memoizePreconditions(cache, r.dir, ["k", { tasks: 2 }], compute); // evidence added
-  assert.equal(state.calls, 3);
-  await memoizePreconditions(cache, r.dir, ["k", { tasks: 2 }], compute);
-  assert.equal(state.calls, 3, "and it is reusable again afterwards");
 });
 
-test("fresh always recomputes and refreshes the entry", async (t) => {
-  const r = await repository(t);
+test("fresh always recomputes and refreshes the entry", async () => {
   const cache = createPreconditionCache();
   const { state, compute } = counter();
-  await memoizePreconditions(cache, r.dir, ["k"], compute);
-  await memoizePreconditions(cache, r.dir, ["k"], compute, { fresh: true });
-  assert.equal(state.calls, 2, "a cached entry never satisfies a fresh request");
-  await memoizePreconditions(cache, r.dir, ["k"], compute);
-  assert.equal(state.calls, 2, "the fresh result is stored for later reuse");
+  await memoizePreconditions(cache, repository, ["k"], compute);
+  await memoizePreconditions(cache, repository, ["k"], compute, { fresh: true });
+  await memoizePreconditions(cache, repository, ["k"], compute);
+  assert.equal(state.calls, 2);
   assert.deepEqual(preconditionCacheStats(cache), { hits: 1, misses: 1, fresh: 1 });
 });
 
-test("failures are never cached", async (t) => {
-  const r = await repository(t);
+test("failures are never cached", async () => {
   const cache = createPreconditionCache();
   let calls = 0;
   const flaky = async () => {
@@ -132,76 +61,22 @@ test("failures are never cached", async (t) => {
     if (calls === 1) throw new Error("Evidence digest mismatch");
     return { ok: true };
   };
-  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], flaky), /digest mismatch/);
-  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], flaky), { ok: true });
+  await assert.rejects(memoizePreconditions(cache, repository, ["k"], flaky), /digest mismatch/);
+  assert.deepEqual(await memoizePreconditions(cache, repository, ["k"], flaky), { ok: true });
   assert.equal(calls, 2);
-  await memoizePreconditions(cache, r.dir, ["k"], flaky);
+  await memoizePreconditions(cache, repository, ["k"], flaky);
   assert.equal(calls, 2);
 });
 
-test("evidence corrupted after a result was cached is rejected on the next lookup and by a fresh one", async (t) => {
-  const r = await repository(t);
-  await r.create();
-  const file = path.join(r.evidence, "e".repeat(64) + ".json");
-  const body = '{"task":"one"}';
-  await writeFile(file, body);
-  // Stands in for authentication: it re-reads the receipt and verifies it is intact.
-  let reads = 0;
-  const authenticate = async () => {
-    reads += 1;
-    if ((await readFile(file, "utf8")) !== body) throw new Error("Evidence digest mismatch");
-    return { authenticated: true };
-  };
-  const cache = createPreconditionCache();
-  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], authenticate), { authenticated: true });
-  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], authenticate), { authenticated: true });
-  assert.equal(reads, 1, "second lookup was served from the cache");
-
-  await sleep(20);
-  await appendFile(file, " "); // corrupt it after it was cached
-  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate), /digest mismatch/);
-  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate, { fresh: true }), /digest mismatch/);
-  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate), /digest mismatch/);
-  assert.equal(cache.entries.size, 1, "the earlier success is stale but never served");
-  assert.equal(reads, 4, "every lookup after the corruption re-authenticated");
-});
-
-test("an unrelated receipt changing still invalidates the cache, as it could affect the result", async (t) => {
-  const r = await repository(t);
-  await r.create();
-  const cache = createPreconditionCache();
-  const { state, compute } = counter();
-  await memoizePreconditions(cache, r.dir, ["k"], compute);
-  await writeFile(path.join(r.evidence, "f".repeat(64) + ".json"), "{}");
-  await memoizePreconditions(cache, r.dir, ["k"], compute);
-  assert.equal(state.calls, 2);
-});
-
-test("callers cannot corrupt a cached result by mutating what they were given", async (t) => {
-  const r = await repository(t);
+test("callers cannot corrupt a cached result by mutating what they were given", async () => {
   const cache = createPreconditionCache();
   const { compute } = counter({ tasks: { one: { status: "completed" } } });
-  const first = await memoizePreconditions(cache, r.dir, ["k"], compute);
+  const first = await memoizePreconditions(cache, repository, ["k"], compute);
   first.tasks.one.status = "mutated";
-  const hit = await memoizePreconditions(cache, r.dir, ["k"], compute);
+  const hit = await memoizePreconditions(cache, repository, ["k"], compute);
   assert.equal(hit.tasks.one.status, "completed");
   hit.tasks.one.status = "mutated again";
-  assert.equal((await memoizePreconditions(cache, r.dir, ["k"], compute)).tasks.one.status, "completed");
-});
-
-test("a result computed while evidence changed is returned but never reused", async (t) => {
-  const r = await repository(t);
-  await r.create();
-  const cache = createPreconditionCache();
-  let calls = 0;
-  const racing = async () => {
-    calls += 1;
-    await writeFile(path.join(r.evidence, `${calls}`.repeat(64) + ".json"), "{}");
-    return { calls };
-  };
-  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], racing), { calls: 1 });
-  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], racing), { calls: 2 });
-  assert.equal(cache.entries.size, 0);
+  assert.equal((await memoizePreconditions(cache, repository, ["k"], compute)).tasks.one.status, "completed");
 });
 
 test("feature timings report how the precondition cache was used", () => {

@@ -194,9 +194,9 @@ and requires `APPROVED` with no blocking findings before the commit entry runs.
 
 ```json
 [
-  {"name": "executor", "program": "executor", "args": ["apply", "/repo/.git/pi-conductor-runs/attempt-unique/executor.json"]},
+  {"name": "executor", "program": "executor", "args": ["apply", "/repo/.scaffold/work/runs/attempt-unique/executor.json"]},
   {"name": "invoice tests", "program": "cargo", "args": ["test", "--lib", "invoices::"]},
-  {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.git/pi-conductor-runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.git/pi-conductor-runs/attempt-unique/review-ledger.jsonl"]}
+  {"name": "review", "program": "review-cli", "args": ["run", "--request", "/repo/.scaffold/work/runs/attempt-unique/review.json", "--format", "json", "--model", "opencode/gpt-6.1-sol", "--wall-clock-budget-secs", "180", "--max-turns", "20", "--ledger", "/repo/.scaffold/work/runs/attempt-unique/review-ledger.jsonl"]}
 ]
 ```
 
@@ -242,12 +242,12 @@ like this (paths are illustrative):
 {
   "schema": "conductor.request/v2",
   "working_directory": "/repo",
-  "output_directory": "/repo/.git/pi-conductor-runs/attempt-unique",
+  "output_directory": "/repo/.scaffold/work/runs/attempt-unique",
   "commands": [
-    {"name": "executor", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/0.stage.json"]},
-    {"name": "invoice tests", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/1.stage.json"]},
-    {"name": "review", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/2.stage.json"]},
-    {"name": "git commit verified task", "program": "/path/to/node", "args": ["/extension/commit-task.mjs", "/repo/.git/pi-conductor-runs/attempt-unique/delivery.json"]}
+    {"name": "executor", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.scaffold/work/runs/attempt-unique/0.stage.json"]},
+    {"name": "invoice tests", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.scaffold/work/runs/attempt-unique/1.stage.json"]},
+    {"name": "review", "program": "/path/to/node", "args": ["/extension/command-stage.mjs", "/repo/.scaffold/work/runs/attempt-unique/2.stage.json"]},
+    {"name": "git commit verified task", "program": "/path/to/node", "args": ["/extension/commit-task.mjs", "/repo/.scaffold/work/runs/attempt-unique/delivery.json"]}
   ]
 }
 ```
@@ -481,136 +481,38 @@ full cumulative reviews and idempotent interruption recovery.
 
 ## Continue development after rebasing
 
-A completed rebase changes checkpoint parents and usually trees. Historical task
-receipts remain valid for the old history; they cannot verify conflict resolutions
-or rewritten trees. Do not edit their SHAs, checkpoint trailers, approved design,
-Scaffold completion records or original `featureBaseRef` to force a match.
+The user rebases the feature branch; Pi never does. `rewrite_feature_history` then verifies the rebased result
+and records it in the Scaffold ledger. **Rebase between tasks only.** If a task is active, suspend it first
+(`suspend_issue`), rewrite, then resume it (`resume_issue`); a resume restores the saved work onto the current head.
 
-Use `reconcile_feature_rebase` **between tasks**, after all started tasks have
-finished and been checkpointed. The user performs the separately authorized Git
-rebase; this tool never rebases or edits source. Capture the old feature HEAD
-before rebasing (or recover and inspect it from the reflog), and preserve empty
-checkpoints/task ordering, for example with Git's `--empty=keep` option. Squashed,
-dropped, reordered, extra or merged commits are rejected; a task already present
-upstream still needs its checkpoint preserved, using `--reapply-cherry-picks`
-when appropriate. Finish conflict resolution before requesting reconciliation.
+The ledger keeps the ordered history from its **base** to its **head**: task checkpoints and user-approved foreign
+commits. `original_baseline` is the immutable fork point. `base` is where the *current* history starts: the fork
+point until a rewrite moves it onto the commit the branch was rebased onto.
 
-Inputs extend `validate_feature`'s explicit full-project build/test commands,
-literal success markers, integration checks and bounded Review settings with:
+Inputs: `featureId`, `designRef`, `branch`, `oldHeadRef` (the head the ledger records), `upstreamBaseRef` (what the
+branch was rebased onto), `headRef` (current HEAD), `defaultBranch`, `protectedBranches`, the same build/test/integration
+checks and review settings as `validate_feature`, and optionally `resumeEvidenceRef`.
 
-- `featureBaseRef`: the immutable **original** feature-start full SHA.
-- `oldHeadRef`: the last checkpointed HEAD before this rebase.
-- `upstreamBaseRef`: the new upstream full SHA onto which the feature was rebased.
-- `headRef`, `branch`, `featureId`, `designRef`: the actual rebased feature identity.
-- `defaultBranch`, `protectedBranches`: known branch protection scope, as for checkpoints.
-- `previousReconciliationRef`: the preceding successful receipt for a second or later rebase.
+What it does, in order:
 
-The tool requires clean HEAD/index/worktree, ignored/untracked Scaffold, no active
-Git operation, and no in-progress, failed or blocked task loop. It authenticates
-all completed old checkpoints and receipt chains, matches their task identities
-and ordering to the rebased commits, and requires the new upstream to descend
-from the preceding baseline. Fresh meaningful checks and independent Review of
-the completed prefix against `upstreamBaseRef` must pass before it returns PASSED.
-Pending feature criteria remain deferred, while original design/constraints and
-completed tasks' retained requirements are supplied to Review.
+1. Requires a clean feature branch, an approved feature direction, no active task, HEAD equal to `headRef`, and
+   `oldHeadRef` equal to the ledger's recorded head. The pre-rebase chain must still match Git (those commits remain in
+   the object store until garbage collected).
+2. Maps every recorded checkpoint and foreign commit onto the rebased commits, in order, on top of `upstreamBaseRef`.
+   A checkpoint is recognized by its `Pi-Checkpoint: <task>` trailer, a foreign commit by its subject. A rebase that
+   **drops, squashes, splits, reorders or adds** a recorded commit, or that contains merges, is refused.
+3. Runs fresh full-project checks and an independent review of `upstreamBaseRef..HEAD`. Earlier receipts are
+   historical and do not verify the rewritten trees.
+4. Retains the verification (checks, review, the new history) as a ledger artifact, then records a `history-rewrite`
+   entry. The previous history, its base and the verification reference stay in the ledger (`epochs`).
 
-Retain the returned `evidenceRef` and pass it as `reconciliationRef` to **every
-subsequent** `checkpoint_verified_task` and `validate_feature` call. Capture the
-rebased HEAD as the next task's new `baseRef`; its correction-loop baseline still
-cannot change. The checkpoint scope includes this authenticated reconciliation. The overall
-feature grant remains bound to the original direction, branch and baseline. Final feature
-validation still reviews from the immutable original feature baseline, satisfying
-Scaffold's existing lifecycle contract, and additionally authenticates the rebase
-receipt and all subsequent checkpoints. No Scaffold or Rust Conductor update is
-required. No task is automatically selected, retried or marked complete.
+`PASSED` is returned only after the entry is recorded. Any other status records nothing; the evidence of a rejected
+review or failed check is retained for diagnosis. A repeat, or a retry after a lost response, returns the same
+record without needing a clean tree; pass the retained `evidenceRef` as `resumeEvidenceRef` to record a verification
+that passed but whose entry was not recorded. Final validation then binds to the new base.
 
-`inspect_rebase_evidence` discovers feature reconciliation receipts with
-`featureId` or reads a specific `reference`, reporting applicability against
-actual Git and Scaffold. A task receipt reference selects interrupted-task rebase
-inspection automatically. Both forms return `results` entries with `kind`,
-`record`, and `applicable`; task handoffs also include `consumedAttempts`.
-Evidence uses the existing content-addressed `pi-feature-evidence:sha256:...`
-namespace with `kind: reconciliation` and a `pi.feature-reconciliation/v1` outcome;
-feature-validation inspection excludes it. Intents and failures never authorize
-continuation. If success was retained before interruption, call reconciliation
-with the exact original inputs/plan plus `resumeEvidenceRef`; this authenticates
-and returns the success without rerunning checks or requesting execution authority.
-Changed plans/revisions require fresh verification.
-
-Evidence and both sides of Git history are retained locally, using audit refs
-under `refs/pi-reconciliations/<receipt-hash>/{before,after}` to survive Git garbage
-collection. Ordinary pushes/clones do not transfer this local evidence. Preserve
-it with the checkout. Hashes detect corruption, not hostile local rewriting.
-Rebases during an active task remain blocked: explicitly stop/recover that loop
-first, without resetting work or treating unverified edits as a fresh baseline.
-
-## Rebase after a task has already started
-
-Use `recover_interrupted_task_rebase` for an existing `in_progress`, `blocked` or
-`failed` task whose baseline was rewritten while its uncommitted work remains.
-This is the explicit interrupted-loop recovery referenced above; the ordinary
-between-task tool keeps its clean-tree restrictions. Never stash/reset the source
-checkout, rename the task, edit receipts or reset its consumed attempts to make
-that tool accept the state.
-
-Pass the same feature/rebase/branch/protection fields and completed-prefix
-verification plan as `reconcile_feature_rebase`, plus:
-
-- `task: {featureId, taskId, designRef}`: the original interrupted task identity.
-- `previousAttempt`: its latest real retained receipt, linking every earlier attempt.
-- `oldHeadRef`: that task's original fixed `baseRef`, not a new or inferred baseline.
-- `previousReconciliationRef`: the preceding feature rebase receipt for a later rebase.
-
-The retained overall feature authority covers both completed-prefix verification and the
-baseline handoff. Recovery authenticates the entire receipt chain and consumed
-attempt count, and uses Git object-only three-way merging to prove the current
-implementation tree equals the retained task tree transplanted onto rebased HEAD.
-It never applies that merge to the source checkout. Conflicts, extra/missing edits,
-missing receipts/objects, divergent staged variants and stale execution history block recovery rather than guessing. A clean index at HEAD or an index
-containing the entire current task tree is supported; other staged variants need
-explicit reconciliation. Git must support `merge-tree --write-tree --merge-base`.
-
-Completed-prefix commands and independent review run in a disposable detached
-worktree at rebased HEAD, without the interrupted task's source files. Both that
-worktree and the real source checkout are checked for concurrent changes. The
-real working tree, index, branch and Scaffold status stay unchanged. Select
-checks appropriate to the completed prefix; pending task-specific tests may not
-exist there yet. No dependency install or source repair is run automatically.
-
-A successful result is **READY**, never task PASSED. It returns:
-
-- `handoffRef`: a content-addressed task receipt with `kind: rebase-handoff`.
-- `reconciliationRef`: successful fresh evidence for the completed prefix.
-- `consumedAttempts` / `remainingAttempts`: unchanged task-wide budget.
-- `resume`: fixed original task/check settings, new `baseRef`, additive original
-  criteria/retained findings, and `previousAttempt: handoffRef`. It intentionally
-  omits `input`, so old source operations cannot be blindly replayed.
-
-For example, three consumed attempts remain three; the next Conductor invocation
-is attempt four and at most two attempts remain. The handoff links the old three
-receipts unchanged, retains all original requests/responses and diagnostics, and
-retains unresolved review findings and prior context revisions. Ordinary retries
-inherit them automatically; structured repairs and added checks preserve coverage.
-Later rebases preserve the same invocation history.
-
-Inspect the handoff through `inspect_rebase_evidence` with its `reference`, or
-`inspect_conductor_evidence`. If the task is blocked/failed, explicitly reconcile
-its Scaffold lifecycle with `retry` and `start`, recording the handoff reference
-and consumed count in the reason; recovery does not do this automatically.
-Author the actual correction from current source, stay within the retained feature authority, then call `execute_and_review` with `resume` plus new exact `input`.
-Only a real subsequent successful Conductor attempt can complete the task. Pass
-`reconciliationRef` to its checkpoint and final feature validation as usual.
-
-On interruption, `prefixEvidenceRef` reuses an authentic complete matching prefix
-result; `resumeHandoffRef` recovers an already retained matching handoff without
-running checks again. Changed source/state/plan must not reuse old authorization.
-Read-only inspection reports applicability; historical READY is not task approval.
-Git audit refs under `refs/pi-task-recoveries/<receipt-hash>/` preserve every old
-and recovered snapshot against garbage collection; interrupted audit-ref writes
-are idempotently repaired without replacing unexpected existing refs. Keep all
-local evidence with the checkout. A killed process can leave a temporary worktree;
-inspect ownership before removing it, never clean the real source checkout.
-
+Commits made after the last recorded head that are not part of a rebase (for example unrelated files the user
+committed) are recorded with `adopt_foreign_commits`, not here.
 
 ## Recursive issues: design then implement
 
@@ -645,7 +547,7 @@ includes the original ticket and retained issue design contracts.
 
 `suspend_issue` explicitly parks unfinished work for newly discovered issues.
 Inputs: task binding, latest `previousAttempt`, reason, original featureBaseRef,
-branch/default/protected scope and optional reconciliationRef. Retained feature authority covers
+branch/default/protected scope. Retained feature authority covers
 saved snapshots/index refs and a retained stash including untracked source; it
 never publishes, completes an issue or resets attempts. A content-addressed intent
 is retained first and returned as suspensionRef, including on failure. Retry that
@@ -677,10 +579,8 @@ checks and executor input for its first real execution; that execution is attemp
 Dirty unretained changes or any existing consumed attempt require normal receipt
 reconciliation rather than this path. No dummy Conductor invocation is needed.
 
-An issue may remain suspended while the user rebases its completed prerequisites.
-Pass the current successful `reconciliationRef` to resume. It must authenticate as
-a successor of the saved reconciliation and include the suspension's checkpoint
-history. The continuation records this successor; unrelated anchors are rejected.
+A suspended issue stays parked while the user rebases and `rewrite_feature_history` records it. `resume_issue` then
+restores the saved work onto the ledger's current head, after checking that Git still matches the recorded history.
 
 Pending checkpoint recovery pins the original staged subset atomically with the
 checkpoint commit. A retry accepts that exact original index or an already finalized

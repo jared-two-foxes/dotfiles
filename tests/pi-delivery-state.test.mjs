@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -11,7 +11,7 @@ import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   readIssueHandoff,
-} from "../pi/agent/lib/delivery-state/issue-context.mjs";
+} from "../pi/agent/lib/verification/issue-handoff.mjs";
 import {
   assertDeliveryJournal,
   anchorDeliveryJournal,
@@ -22,6 +22,7 @@ async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-delivery-state-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   git(directory, ["init", "-q", "-b", "feature/delivery"]);
+  await appendFile(path.join(directory, ".git", "info", "exclude"), ".scaffold/\n");
   git(directory, ["config", "user.name", "Test"]);
   git(directory, ["config", "user.email", "test@example.invalid"]);
   git(directory, ["config", "core.autocrlf", "false"]);
@@ -226,7 +227,7 @@ test("Scaffold callers own reads, writes and post-save freshness checks", {
     const { context } = await fixture(t);
     const feature = { id: "F", tasks: { T: { status: "completed" } } };
     const args = { task: { featureId: "F", taskId: "T", designRef: "approved-design" }, evidenceRef: "receipt" };
-    let result = { ok: true, commit: "a".repeat(40) };
+    let result = { ok: true, commit: "a".repeat(40), baseRef: "b".repeat(40), tree: "c".repeat(40) };
     suite.mock.module("../pi/agent/extensions/checkpoint/commit.mjs", {
       namedExports: {
         checkpointAuthorization: () => assert.fail("Unexpected authorization factory"),
@@ -245,7 +246,7 @@ test("Scaffold callers own reads, writes and post-save freshness checks", {
       calls.push(params.operation);
       if (params.operation === "list") return { ok: true, data: { feature } };
       assert.equal(params.operation, "checkpoint-record");
-      assert.deepEqual(params.payload, { commit: result.commit, reference: args.evidenceRef });
+      assert.deepEqual(params.payload, { commit: result.commit, parent: result.baseRef, tree: result.tree, reference: args.evidenceRef });
       assert.equal(options.authorizeIssueMutation, authenticateIssueMutation);
       return recordFails ? { ok: false, message: "Recording failed" } : { ok: true };
     };

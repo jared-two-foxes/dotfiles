@@ -6,13 +6,15 @@ import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, readdir, realpath } from "node:fs/promises";
+import { workDirectory } from "../pi/agent/lib/git/workspace.mjs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { git } from "../pi/agent/lib/git/tree.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
 import { readEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { executeAndReview, requestView } from "./helpers/conductor-v2.mjs";
+import { spawnSync } from "node:child_process";
 import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
 import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
 import { designReference } from "../pi/agent/lib/scaffold/contracts.mjs";
@@ -20,19 +22,15 @@ import { issueDesignRequirements } from "../pi/agent/lib/scaffold/contracts.mjs"
 import { authenticateIssueMutation } from "../pi/agent/lib/verification/issue-mutation.mjs";
 import { suspendIssue, resumeIssue } from "../pi/agent/extensions/execution-recovery/issue-recovery.mjs";
 import { authenticateAttemptChain } from "../pi/agent/lib/verification/attempt-chain.mjs";
-import { reconcileFeature } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
 import { validateFeature } from "../pi/agent/extensions/feature-validation/feature.mjs";
 import {
   prepareIssueHandoff,
   inspectIssueHandoff,
   inspectIssueAttempt,
 } from "../pi/agent/extensions/execution-recovery/issue-context.mjs";
-import { checkpointHistory } from "../pi/agent/lib/verification/checkpoint-history.mjs";
-const integration = {
-  skip: !process.env.SCAFFOLD_SOURCE
-    ? "Set SCAFFOLD_SOURCE to recursive-issues Scaffold checkout"
-    : false,
-};
+import { verifyHistory } from "../pi/agent/lib/verification/history.mjs";
+const hasScaffold = spawnSync("scaffold", ["--help"], { encoding: "utf8" }).status === 0;
+const integration = { skip: !hasScaffold && "Real Scaffold (schema 3) is not on PATH" };
 async function fixture(t) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-issues-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -41,6 +39,7 @@ async function fixture(t) {
   g("config", "user.name", "Test");
   g("config", "user.email", "test@example.invalid");
   g("config", "core.autocrlf", "false");
+  g("config", "core.excludesfile", "");
   await writeFile(path.join(dir, ".gitignore"), ".scaffold/\n");
   await writeFile(path.join(dir, "source.txt"), "base\n");
   g("add", ".");
@@ -50,33 +49,15 @@ async function fixture(t) {
     designRef = designReference(
       "User ticket: preserve behavior. Baseline " + base,
     );
-  const scaffoldOptions = {
-    invokeScaffold: async (_program, args, ctx) => {
-      try {
-        return {
-          code: 0,
-          stdout: execFileSync(
-            process.env.PYTHON ?? "python3",
-            [
-              "-c",
-              "import sys;sys.path.insert(0,sys.argv.pop(1));from scaffold_cli.cli import main;main()",
-              path.join(process.env.SCAFFOLD_SOURCE, "src"),
-              ...args,
-            ],
-            {
-              cwd: ctx.cwd,
-              input: ctx.input,
-              encoding: "utf8",
-              stdio: ["pipe", "pipe", "pipe"],
-            },
-          ),
-        };
-      } catch (e) {
-        return { code: e.status, stderr: e.stderr?.toString() };
-      }
-    },
-  };
+  const scaffoldOptions = {};
   const call = async (operation, extra = {}) => {
+    if (operation === "start") {
+      const feature = (await call("list")).feature;
+      if (feature.workflow.phase === "implement" && !feature.direction) {
+        const approved = await approveFeatureDirection({ featureId: "F" }, { directory: dir }, { confirm: async () => true });
+        assert.equal(approved.ok, true, JSON.stringify(approved));
+      }
+    }
     const r = await scaffoldTasks(
       { operation, feature_id: "F", ...extra },
       { directory: dir },
@@ -197,7 +178,6 @@ async function fixture(t) {
         ...scope(id),
         evidenceRef: r.evidence.reference,
         authorizationMode: "manual",
-        reconciliationRef: checkpointOptions.reconciliationRef,
       },
       { directory: dir },
       { scaffoldOptions, authorize: async () => true, ...checkpointOptions },
@@ -251,13 +231,9 @@ test(
     await f.finish("api");
     await f.finish("F");
     const feature = (await f.call("list")).feature;
-    const history = await checkpointHistory(f.dir, feature, {
-      head: f.g("rev-parse", "HEAD"),
-      baseline: f.base,
-      branch: "feature/issues",
-    });
+    verifyHistory(f.dir, feature, { head: f.g("rev-parse", "HEAD") });
     assert.deepEqual(
-      history.map((c) => c.taskId),
+      feature.history.map((s) => s.task_id),
       ["types", "api", "F"],
     );
     assert.equal(f.g("rev-list", "--count", f.base + "..HEAD"), "3");
@@ -360,7 +336,6 @@ test(
       context = { directory: f.dir };
     await f.approve("F");
     await f.call("design-finish");
-    await f.call("start", { task_id: "F" });
     const a = {
       ...(await f.args("F")),
       checkpoint: { defaultBranch: "main", protectedBranches: [] },
@@ -372,6 +347,11 @@ test(
           assert.fail("precheck must not launch commands");
         },
       });
+    // Scaffold refuses `start` without an approval; the precheck reports it first.
+    assert.match(
+      (await run({})).message,
+      /Approve the overall feature direction once/,
+    );
     f.g("switch", "main");
     const approval = await approveFeatureDirection(
       { featureId: "F" },
@@ -389,10 +369,6 @@ test(
       assert.match(blocked.message, message);
       assert.ok(blocked.message.includes(a.task.designRef));
     }
-    assert.match(
-      (await run({})).message,
-      /Approve the overall feature direction once/,
-    );
   },
 );
 
@@ -489,14 +465,9 @@ test(
     );
     assert.match(f.g("stash", "list"), /Pi issue suspension/);
     const feature = (await f.call("list")).feature;
+    verifyHistory(f.dir, feature, { head: c.commit });
     assert.deepEqual(
-      (
-        await checkpointHistory(f.dir, feature, {
-          head: c.commit,
-          baseline: f.base,
-          branch: "feature/issues",
-        })
-      ).map((c) => c.taskId),
+      feature.history.map((s) => s.task_id),
       ["prerequisite", "F"],
     );
   },
@@ -658,7 +629,7 @@ test(
       task_id: "F",
       payload: {
         reason: "Fake",
-        reference: "pi-evidence:sha256:" + "a".repeat(64),
+        reference: "sha256:" + "a".repeat(64),
       },
     };
     const unguarded = await scaffoldTasks(
@@ -906,90 +877,6 @@ test(
 );
 
 test(
-  "suspended work resumes through a successor reconciliation after upstream rebase",
-  integration,
-  async (t) => {
-    const f = await fixture(t);
-    await f.add("F", ["pre", "active"]);
-    await f.approve("F", true);
-    await f.approve("pre");
-    await f.approve("active");
-    await f.call("design-finish");
-    const checkpoint = await f.finish("pre", null, () =>
-      writeFile(path.join(f.dir, "pre.txt"), "prefix\n"),
-    );
-    await f.call("start", { task_id: "active" });
-    const attempt = await f.run(await f.args("active"), "NEEDS_DESIGN", () =>
-      writeFile(path.join(f.dir, "source.txt"), "suspended work\n"),
-    );
-    const parked = await suspendIssue(
-      {
-        ...f.scope("active"),
-        previousAttempt: attempt.evidence.reference,
-        reason: "Review design",
-      },
-      { directory: f.dir },
-      f.options,
-    );
-    assert.equal(parked.status, "DESIGN", JSON.stringify(parked));
-    await f.approve("active");
-    await f.call("design-finish");
-    f.g("switch", "main");
-    await writeFile(path.join(f.dir, "upstream.txt"), "upstream\n");
-    f.g("add", ".");
-    f.g("commit", "-qm", "upstream");
-    const upstream = f.g("rev-parse", "HEAD");
-    f.g("switch", "feature/issues");
-    f.g("rebase", "--onto", upstream, f.base);
-    const outside = await mkdtemp(path.join(tmpdir(), "issue-rebase-review-"));
-    t.after(() => rm(outside, { recursive: true, force: true }));
-    const script = path.join(outside, "review.cjs");
-    await writeFile(
-      script,
-      `console.log(JSON.stringify({schema:'review.result/v1',status:'APPROVED',reason:'REVIEW_COMPLETED',review_id:'rebase',completed_at:'2026-10-29T00:00:00Z',findings:[]}));`,
-    );
-    const anchor = await reconcileFeature(
-      {
-        ...f.scope("active"),
-        featureId: "F",
-        designRef: f.binding("active").designRef,
-        oldHeadRef: checkpoint.commit,
-        upstreamBaseRef: upstream,
-        headRef: f.g("rev-parse", "HEAD"),
-        buildCommand: [process.execPath, "-e", 'console.log("build passed")'],
-        testCommand: [process.execPath, "-e", 'console.log("3 passed")'],
-        testSuccessPattern: "3 passed",
-      },
-      { directory: f.dir },
-      {
-        ...f.options,
-        reviewOptions: { executable: process.execPath, prefixArgs: [script] },
-      },
-    );
-    assert.equal(anchor.status, "PASSED", JSON.stringify(anchor));
-    const resumed = await resumeIssue(
-      {
-        ...f.scope("active"),
-        suspensionRef: parked.suspensionRef,
-        reconciliationRef: anchor.evidenceRef,
-      },
-      { directory: f.dir },
-      f.options,
-    );
-    assert.equal(resumed.status, "READY", JSON.stringify(resumed));
-    assert.equal(resumed.resume.reconciliationRef, anchor.evidenceRef);
-    await f.call("start", { task_id: "active" });
-    const c = await f.finish(
-      "active",
-      { ...resumed.resume, input: '{"operations":[]}' },
-      undefined,
-      { reconciliationRef: anchor.evidenceRef },
-    );
-    assert.equal((await readEvidence(f.dir, c.evidenceRef)).attempt, 2);
-  },
-);
-
-test(
   "zero-attempt suspension rejects dirty source and hidden consumed attempts",
   integration,
   async (t) => {
@@ -1031,10 +918,7 @@ test(
       },
     };
     const before = await snapshot(f.dir),
-      stateBefore = await readFile(
-        path.join(f.dir, ".scaffold/tasks.json"),
-        "utf8",
-      );
+      tasksBefore = (await f.call("list")).feature.tasks;
     const saved = await prepareIssueHandoff(
       args,
       { directory: f.dir },
@@ -1058,10 +942,8 @@ test(
       "Approved solution F",
     );
     assert.deepEqual(await snapshot(f.dir), before);
-    assert.equal(
-      await readFile(path.join(f.dir, ".scaffold/tasks.json"), "utf8"),
-      stateBefore,
-    );
+    // The handoff is an artifact; the task graph is untouched.
+    assert.deepEqual((await f.call("list")).feature.tasks, tasksBefore);
     const fresh =
       await import("../pi/agent/extensions/execution-recovery/issue-context.mjs?fresh");
     assert.equal(
@@ -1143,10 +1025,8 @@ test(
       exact.review_context.original.includes((await f.args("F")).requirements),
     );
     assert.equal(exact.matches_source, true);
-    const dir = path.resolve(
-      f.dir,
-      f.g("rev-parse", "--git-path", "pi-issue-context"),
-    );
+    // Handoffs are scratch files under .scaffold/work, authenticated by their digest.
+    const dir = workDirectory(await realpath(f.dir), "handoffs");
     const file = path.join(dir, updated.reference.split(":").at(-1) + ".json");
     await writeFile(file, "{}");
     assert.equal(
@@ -1180,6 +1060,8 @@ test(
     );
     const { compactMutation } =
       await import("../pi/agent/extensions/scaffold/compact-mutation.mjs");
+    const approved = await approveFeatureDirection({ featureId: "F" }, { directory: f.dir }, { confirm: async () => true });
+    assert.equal(approved.ok, true, JSON.stringify(approved));
     const result = await scaffoldTasks(
       { operation: "start", feature_id: "F", task_id: "F" },
       { directory: f.dir },
@@ -1202,13 +1084,13 @@ test(
     const options = { scaffoldOptions: f.options.scaffoldOptions };
     await f.approve("F");
     await f.call("design-finish");
-    await f.call("start", { task_id: "F" });
-    const original = (await f.call("list")).feature;
-    const oldInstance = original.workflow.instance_id;
     const approved = await approveFeatureDirection(
       { featureId: "F" }, context, { ...options, confirm: async () => true },
     );
     assert.equal(approved.ok, true, JSON.stringify(approved));
+    await f.call("start", { task_id: "F" });
+    const original = (await f.call("list")).feature;
+    const oldInstance = original.workflow.instance_id;
     assert.equal(await featureAuthorized({ featureId: "F" }, context, options), true);
 
     // An interrupted/failed attempt leaves external evidence behind.
@@ -1218,17 +1100,13 @@ test(
     const oldReceipt = await readEvidence(f.dir, first.evidence.reference);
     assert.equal(oldReceipt.featureInstanceId, oldInstance);
     const beforeGit = await snapshot(f.dir);
-    const oldEvidence = await readEvidence(f.dir, first.evidence.reference);
 
     // This is a human/operator CLI invocation, never a native Pi tool.
-    execFileSync(process.env.PYTHON ?? "python3", [
-      "-c",
-      "import sys;sys.path.insert(0,sys.argv.pop(1));from scaffold_cli.cli import main;main()",
-      path.join(process.env.SCAFFOLD_SOURCE, "src"),
-      "clean", "--feature", "F", "--yes",
-    ], { cwd: f.dir, encoding: "utf8" });
+    execFileSync("scaffold", ["clean", "--feature", "F", "--yes"], { cwd: f.dir, encoding: "utf8" });
     assert.deepEqual(await snapshot(f.dir), beforeGit);
-    assert.deepEqual(await readEvidence(f.dir, first.evidence.reference), oldEvidence);
+    // Cleaning closes the feature: nothing is deleted, but a closed feature is no longer searched.
+    assert.equal((await readdir(path.join(f.dir, ".scaffold", "features"))).length, 1);
+    await assert.rejects(readEvidence(f.dir, first.evidence.reference), /open features/);
 
     let invoked = 0;
     const noExecution = {
@@ -1269,7 +1147,12 @@ test(
     assert.equal(await featureAuthorized({ featureId: "F" }, context, options), false);
     await f.approve("F");
     await f.call("design-finish");
-    await f.call("start", { task_id: "F" });
+    // The old instance's approval does not carry over: Scaffold refuses to start without a new one.
+    const early = await scaffoldTasks(
+      { operation: "start", feature_id: "F", task_id: "F" }, context, options,
+    );
+    assert.equal(early.ok, false);
+    assert.match(early.stderr, /Approve the feature direction/);
     assert.equal((await executeAndReview(await f.args("F"), context, noExecution)).status, "BLOCKED");
     assert.equal(invoked, 0);
     const freshApproval = await approveFeatureDirection(
@@ -1277,6 +1160,7 @@ test(
     );
     assert.equal(freshApproval.ok, true, JSON.stringify(freshApproval));
     assert.notEqual(freshApproval.reference, approved.reference);
+    await f.call("start", { task_id: "F" });
 
     // Even after fresh approval, replaying the previous incarnation's receipt
     // cannot resume an old task, although the external evidence still exists.
@@ -1303,7 +1187,6 @@ test(
     const f = await fixture(t);
     await f.approve("F");
     await f.call("design-finish");
-    await f.call("start", { task_id: "F" });
     const context = { directory: f.dir },
       options = { scaffoldOptions: f.options.scaffoldOptions };
     const a = await f.args("F");
@@ -1350,6 +1233,7 @@ test(
       },
     );
     assert.equal(approved.ok, true, JSON.stringify(approved));
+    await f.call("start", { task_id: "F" });
     assert.equal(
       (await executeAndReview(a, context, runtime)).status,
       "NEEDS_DESIGN",
@@ -1403,8 +1287,8 @@ test(
     f.g("symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
     const { inspectFeatureValidation } =
       await import("../pi/agent/extensions/feature-validation/feature.mjs");
-    const inspected = await inspectFeatureValidation({}, context, options);
-    assert.equal(inspected.ok, true);
+    const inspected = await inspectFeatureValidation({ featureId: "F" }, context, options);
+    assert.equal(inspected.ok, true, JSON.stringify(inspected));
     assert.equal(inspected.results.length, 0); // approval is never validation evidence
   },
 );
@@ -1446,15 +1330,17 @@ test(
       ...options,
       confirm: async () => true,
     });
-    const evidenceDirectory = path.resolve(
-      f.dir,
-      f.g("rev-parse", "--git-path", "pi-conductor-evidence"),
-    );
-    const filename = path.join(
-      evidenceDirectory,
-      "feature-" + granted.reference.split(":").at(-1) + ".json",
-    );
-    await writeFile(filename, "{}");
+    assert.equal(granted.ok, true, JSON.stringify(granted));
+    assert.equal(await featureAuthorized({ featureId: "F" }, context, options), true);
+    // Altering the recorded approval breaks the ledger's hash chain: no permission is granted.
+    const features = path.join(f.dir, ".scaffold", "features");
+    const [instance] = await readdir(features);
+    const ledger = path.join(features, instance, "ledger.jsonl");
+    const lines = (await readFile(ledger, "utf8")).split("\n");
+    const at = lines.findIndex((line) => line.includes('"direction-approve"'));
+    assert.ok(at >= 0);
+    lines[at] = lines[at].replace('"direction-approve"', '"direction-approvX"');
+    await writeFile(ledger, lines.join("\n"));
     assert.equal(
       await featureAuthorized({ featureId: "F" }, context, options),
       false,
@@ -1555,20 +1441,18 @@ test(
     await f.call("design-finish");
     await f.call("start", { task_id: "F" });
     const first = await f.run(await f.args("F"), "NEEDS_DESIGN");
-    const evidenceDir = path.resolve(
-      f.dir,
-      f.g("rev-parse", "--git-path", "pi-conductor-evidence"),
-    );
-    await rm(evidenceDir, { recursive: true });
+    // Receipts are ledger artifacts; the ledger still records the attempt that cited them.
+    const features = path.join(f.dir, ".scaffold", "features");
+    const [instance] = await readdir(features);
+    await rm(path.join(features, instance, "artifacts"), { recursive: true });
     const cold = await f.run(await f.args("F"));
-    assert.equal(cold.status, "BLOCKED");
-    assert.match(cold.message, /EVIDENCE_RECOVERY_REQUIRED/);
+    assert.equal(cold.status, "BLOCKED", JSON.stringify(cold));
     const continued = await f.run({
       previousAttempt: first.evidence.reference,
       input: '{"operations":[]}',
     });
-    assert.equal(continued.reason, "EVIDENCE_RECOVERY_REQUIRED");
-    assert.equal((await f.call("list")).feature.tasks.F.delivery.sequence, 1);
+    assert.equal(continued.status, "BLOCKED", JSON.stringify(continued));
+    assert.equal((await f.call("list")).feature.tasks.F.attempts.length, 1);
   },
 );
 
@@ -1665,11 +1549,9 @@ test(
             reason: "LEGACY_REVIEW_UNAVAILABLE",
           },
         });
-      const original = path.join(
-        f.dir,
-        ".git/pi-conductor-evidence",
-        previous.split(":").at(-1) + ".json",
-      );
+      const features = path.join(f.dir, ".scaffold", "features");
+      const [instance] = await readdir(features);
+      const original = path.join(features, instance, "artifacts", previous.split(":").at(-1));
       originalBytes = await readFile(original);
       const delivered = await f.run({
         previousAttempt: previous,
@@ -1683,32 +1565,6 @@ test(
       assert.equal(chain.records.length, count);
       assert.equal((await f.call("list")).feature.tasks.F.delivery, undefined);
     }
-  },
-);
-
-test(
-  "a previously started legacy issue with no receipts cannot silently initialize new delivery history",
-  integration,
-  async (t) => {
-    const f = await fixture(t);
-    await f.approve("F");
-    await f.call("design-finish");
-    await f.call("start", { task_id: "F" });
-    const stateFile = path.join(f.dir, ".scaffold/tasks.json");
-    const state = JSON.parse(await readFile(stateFile, "utf8"));
-    delete state.features.F.tasks.F.delivery_policy;
-    await writeFile(stateFile, JSON.stringify(state));
-    const result = await f.run(await f.args("F"));
-    assert.equal(result.status, "BLOCKED");
-    assert.match(result.message, /UNSUPPORTED_DELIVERY_FORMAT/);
-    assert.equal((await f.call("list")).feature.tasks.F.delivery, undefined);
-    const parked = await suspendIssue(
-      { ...f.scope("F"), reason: "Try zero-attempt recovery" },
-      { directory: f.dir },
-      f.options,
-    );
-    assert.equal(parked.status, "BLOCKED");
-    assert.match(parked.message, /UNSUPPORTED_DELIVERY_FORMAT/);
   },
 );
 

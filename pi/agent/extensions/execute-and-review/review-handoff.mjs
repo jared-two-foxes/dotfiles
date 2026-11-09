@@ -1,3 +1,4 @@
+import { workDirectory } from '../../lib/git/workspace.mjs';
 import path from 'node:path';
 import { lstat, readFile, realpath, writeFile } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
@@ -33,7 +34,7 @@ export async function prepareReviewHandoff(stage) {
     name, command: i === specs.length - 1 ? checkBoundary.command : [program, ...args],
     ...(success_condition ? { successCondition: [success_condition.program, ...success_condition.args] } : {}),
   })), checks), 'Review evidence does not match the retained check plan');
-  const evidenceRoot = path.resolve(plan.repository, git(plan.repository, ['rev-parse', '--git-path', 'pi-conductor-evidence']));
+  const evidenceRoot = workDirectory(plan.repository, 'attempts');
   requireValue(path.dirname(plan.boundaryPath) === evidenceRoot &&
     /^[a-f0-9-]{36}\.boundary$/.test(path.basename(plan.boundaryPath)), 'Unsafe verification boundary path');
   const boundary = await lstat(plan.boundaryPath);

@@ -1,6 +1,6 @@
 # Pi delivery pipeline: component map
 
-**Status: draft, derived from reading the code.** Items marked *(unverified)* were
+**Status: describes the system after the Scaffold-ledger port (pi/LEDGER_DESIGN.md); the port is in review, so this reflects the `claude/ledger-pi-port` branch, not yet `main`. Derived from reading the code.** Items marked *(unverified)* were
 inferred, not traced. [`../workflow-overview.md`](../workflow-overview.md) describes
 the *process*; this file describes the *parts*, where state lives, and what guards what.
 [`agent/lib/README.md`](agent/lib/README.md) describes library boundaries in more depth.
@@ -24,7 +24,7 @@ Almost everything below either *produces* the evidence for that invariant, *chec
 |---|---|---|---|
 | **User** | A human | The one direction approval; adoption approval; merging/publishing | Source of authority. Only a real UI confirmation counts. |
 | **Pi** | The LLM orchestrator, driven by `SYSTEM.md` and skills | Reasoning, designs, choosing the next task | **Not trusted.** Cannot edit source directly; only native tools apply changes. |
-| **Scaffold** | External CLI/state store (`.scaffold/tasks.json`, gitignored) | Feature + issue graph, designs, task status, `original_baseline`, `workflow.instance_id`, delivery journal | Validates structure and association, **not** evidence authenticity. |
+| **Scaffold** | External CLI that owns the per-feature ledger (`.scaffold/features/…`, gitignored) | Feature + issue graph, designs, task status, `original_baseline`, `workflow.instance_id`, delivery journal | Validates structure and association, **not** evidence authenticity. |
 | **Conductor** | External generic command runner | Runs a list of commands with conditions | Neutral runner. |
 | **Executor** | External CLI | Applies a set of file operations | Makes the edits. |
 | **Review** | External independent reviewer (separate model) | Approves or rejects a diff against the requirements | Independent judge. |
@@ -71,12 +71,11 @@ constraints. Issue designs are produced afterwards, inside that approved scope.
 | `execute_and_review` | execute-and-review | One Executor, checks, Review pass; auto-completes and checkpoints on PASS | source, evidence, Scaffold, Git |
 | `checkpoint_verified_task` | checkpoint | Create or recover the checkpoint commit for a passed task | Git |
 | `validate_feature` | feature-validation | Final full checks + whole-feature review | evidence, Scaffold |
-| `inspect_conductor_evidence`, `inspect_feature_validation`, `inspect_rebase_evidence`, `inspect_issue_handoff`, `inspect_issue_attempt` | various | Read retained evidence and handoffs | none |
+| `inspect_conductor_evidence`, `inspect_feature_validation`, `inspect_issue_handoff`, `inspect_issue_attempt` | various | Read retained evidence and handoffs | none |
 | `suspend_issue`, `resume_issue` | execution-recovery | Park an unfinished issue (saved source/index) and return the graph to design; restore it later | Scaffold, refs, evidence |
 | `prepare_issue_handoff` | execution-recovery | Save scoped context for a fresh session | evidence |
-| `reconcile_feature_rebase` | execution-recovery | Re-verify the completed prefix after a rebase between tasks | evidence, refs |
-| `recover_interrupted_task_rebase` | execution-recovery | Carry an unfinished task across a rebase | evidence, refs |
-| `adopt_feature_baseline` | execution-recovery | Adopt a user-approved baseline before any task starts (PR #87) | evidence, refs |
+| `rewrite_feature_history` | execution-recovery | After a user rebase between tasks: map the recorded history onto the rebased commits, re-verify, record a `history-rewrite` | ledger |
+| `adopt_foreign_commits` | execution-recovery | Record user commits that are not task checkpoints (`history-foreign`), between tasks | ledger |
 | `inspect_feature_drift` | execution-recovery | Read-only: classify Git drift, name the recovery (PR #87) | none |
 | `review_changes` | review | Standalone review | none |
 | `write_plan`, `write_ticket_file` | plan | Write planning documents | files |
@@ -85,38 +84,40 @@ constraints. Issue designs are produced afterwards, inside that approved scope.
 Also in the repo but unrelated to delivery: the `lsp` and `conductor` (`/conductor` command)
 extensions, and the `comfyui-generate` skill.
 
-## 4. Where state lives (the part that is hardest to reason about)
+## 4. Where state lives
 
-Truth is split across four stores. Operations re-read and cross-check them.
+**One ledger per feature instance, owned by Scaffold.** Pi never reads Scaffold's files; it reads and writes
+only through the Scaffold CLI. See [`LEDGER_DESIGN.md`](LEDGER_DESIGN.md) for the design and its rationale.
 
-| Store | Location | Holds | Written by |
-|---|---|---|---|
-| **Scaffold state** | `.scaffold/tasks.json` (gitignored; must stay untracked) | Feature, issue graph, designs, task status and history, `original_baseline`, `instance_id`, delivery journal (`begun`/`finished`/`initialized`/`context`/`handoff` entries) | Scaffold CLI via `scaffold_tasks` |
-| **Evidence files** | `.git/pi-conductor-evidence/` (per checkout) | Content-addressed JSON. `<hash>.json` = task receipts (`pi.task-attempt/v1`); `feature-<hash>.json` = feature records | `lib/evidence/store.mjs` |
-| **Git refs** | `refs/pi-*` | Keeps objects alive and anchors records | see below |
-| **Commit trailers** | on checkpoint commits | `Pi-Task-Checkpoint: {...}` binds feature, design, branch, `featureBaseRef`, parent, tree, receipt (and `adoptionRef`) | `extensions/checkpoint/commit.mjs` |
+```
+.scaffold/                       ignored and untracked; Pi refuses to run if it is visible to Git
+  features/<feature>.<instance>/
+    ledger.jsonl                 append-only, hash-chained: every action, its payload and its state change
+    artifacts/<sha256>           receipts, approvals, verifications, suspensions (content-addressed JSON)
+  work/                          scratch: Conductor runs, boundaries, finalization, handoffs (not evidence)
+```
 
-Evidence records:
-
-| Record | Store file | Written by |
+| What | Where it lives | Written by |
 |---|---|---|
-| Task attempt receipts (incl. `issue-suspension`, `issue-zero-handoff`, `issue-handoff`, `rebase-handoff`) | `<hash>.json` | execute-and-review, execution-recovery |
-| `feature-authorization` | `feature-<hash>.json` | `lib/authorization/feature.mjs` |
-| `delivery-amendment` | `feature-<hash>.json` | `context-amendment.mjs` |
-| `reconciliation` | `feature-<hash>.json` | `execution-recovery/reconciliation.mjs` |
-| `baseline-adoption` | `feature-<hash>.json` | `lib/verification/baseline-adoption.mjs` |
-| Feature validation (`pi.feature-validation/v1`) | `feature-<hash>.json` | `extensions/feature-validation` |
+| Feature, issue graph, designs, task status | the ledger (folded state) | Scaffold |
+| Direction approval | `direction-approve` entry | Scaffold, after Pi's UI confirmation |
+| Task receipts | artifact, cited by an `attempt-record` entry | Pi stores it, Scaffold records the attempt |
+| Completion, checkpoints | `complete` and `checkpoint-record` entries | Scaffold, after Pi verifies Git |
+| Recorded history from base to head | `history` / `head` / `base` / `epochs` in the folded state | Scaffold (`checkpoint-record`, `history-foreign`, `history-rewrite`) |
+| Feature validation results | `validation-*` entries; the full record is an artifact | Scaffold and Pi |
+| The checkpoint commits themselves | Git; trailer `Pi-Checkpoint: <task>` | Pi |
 
-Git ref families:
+Scaffold enforces the rules between these (a completion must cite a recorded PASSED attempt; a checkpoint must
+continue from the recorded head; `start` needs a matching approval; validation needs the recorded head). Pi
+confirms everything that needs Git, the Executor or the reviewer before appending.
 
-| Ref prefix | Purpose | Written by |
-|---|---|---|
-| `refs/pi-checkpoints/` | Pending checkpoint commit and index while committing | checkpoint |
-| `refs/pi-delivery-journals/` | Audit anchor for a task's delivery journal | delivery-state |
-| `refs/pi-issue-suspensions/` | Saved source and index when an issue is parked | execution-recovery |
-| `refs/pi-task-recoveries/` | Audit snapshots across task recovery | execution-recovery |
-| `refs/pi-reconciliations/` | Before and after heads of a rebase reconciliation | execution-recovery |
-| `refs/pi-baseline-adoptions/` | Authoritative adoption record + original/adopted commits | baseline-adoption |
+**What is still outside the ledger.** A few Git refs keep saved source reachable so garbage collection cannot lose
+it: `refs/pi-issue-suspensions/` (parked source), `refs/pi-task-recoveries/` (before/after trees of a handoff chain),
+`refs/pi-checkpoints/` (a checkpoint commit in flight) and `refs/pi-delivery-journals/` (journal audit anchors).
+They hold Git objects, not records. Replacing them with ledger artifacts is future work.
+
+**Limits.** The chain makes edits to history detectable; it does not stop a process with write access from
+appending a forged entry, and it cannot detect removal of the newest whole entries. The ledger is per checkout.
 
 ## 5. Code layers
 
@@ -126,7 +127,7 @@ extensions/*/index.ts        tool registration + user-facing confirmations
 extensions/*/*.mjs           workflows: coordinate, perform lifecycle writes
 lib/verification             authenticate evidence, chains, checkpoints (pure checks)
 lib/authorization            feature/amendment authority
-lib/evidence, git, ...       storage, Git snapshots, contracts
+lib/evidence, scaffold, git  ledger artifact client, Scaffold CLI client, Git snapshots, contracts
 external: Scaffold, Conductor, Executor, Review
 ```
 
@@ -150,9 +151,9 @@ needs its own accommodation here. That is the source of most special cases.
 
 | Grant | Granted by | Lasts | Covers |
 |---|---|---|---|
-| Feature direction | `approve_feature_direction` (UI confirm) | Persisted evidence; exact-scope match | The whole local loop: design, implementation, checks, review, checkpoints, recovery. **Not** publish or merge. |
+| Feature direction | `approve_feature_direction` (UI confirm) | A `direction-approve` ledger entry; Scaffold computes and matches the scope digest | The whole local loop: design, implementation, checks, review, checkpoints, recovery. **Not** publish or merge. |
 | Delivery amendment | `approve_delivery_amendment` | Per change | One concrete contract change |
-| Baseline adoption | `adopt_feature_baseline` (UI confirm) | Persisted | One named old to new baseline move |
+| Foreign commits | `adopt_foreign_commits` (UI confirm) | Recorded in the ledger | One named recorded head to new head range |
 | Checkpoint grant | per-session UI grant (`checkpointAuthorization`) | Session | Local commits; separate from feature direction |
 
 ## 8. Recovery: which tool, when
@@ -160,13 +161,13 @@ needs its own accommodation here. That is the source of most special cases.
 | Situation | Use |
 |---|---|
 | Not sure | `inspect_feature_drift` |
-| Clean user commit before any task started | `adopt_feature_baseline` |
-| History rewritten between tasks | `reconcile_feature_rebase` |
-| Rebase interrupted mid-task | `recover_interrupted_task_rebase` |
+| Clean user commits between tasks | `adopt_foreign_commits` |
+| You rebased between tasks | `rewrite_feature_history` |
+| You rebased while a task was active | `suspend_issue`, `rewrite_feature_history`, `resume_issue` |
 | A task failed or was interrupted | continue with `previousAttempt` / issue handoff |
 | Checkpoint commit lost or interrupted | repeat `checkpoint_verified_task` |
 | Need to park an issue and return to design | `suspend_issue`, then `resume_issue` |
-| Never | edit Scaffold or evidence by hand; run `scaffold clean`; reapprove to reset history |
+| Never | edit the ledger by hand; run `scaffold clean` as a recovery step (it only closes a feature now); reapprove to reset history |
 
 ## 9. Glossary
 
@@ -182,8 +183,7 @@ needs its own accommodation here. That is the source of most special cases.
 
 ## 10. Known gaps in this map
 
-- *(unverified)* Whether Scaffold requires its own human approval at the design-to-implement transition.
-- *(unverified)* Full list of call sites that enforce feature authorization; the ones found are
-  `execute_and_review`, context amendments, checkpoint recovery and the recovery tools.
-- Not traced: the internals of Scaffold, Conductor, Executor and Review (external programs).
-- The delivery-state journal (`lib/delivery-state`) is only summarized.
+- Saved source for suspended issues and handoffs is still pinned with the four `refs/pi-*` families (section 4).
+- Suspension with *consumed attempts* (dirty source saved and restored) is exercised by the older stub-based tests,
+  not yet by a real-Scaffold test; the zero-attempt path is.
+- Not traced: the internals of Scaffold's design-phase rules, Conductor, Executor and Review.

@@ -94,21 +94,22 @@ def test_retired_commands_are_not_exposed_and_do_not_touch_legacy_state(workspac
         rejected = command(directory, legacy, expected=2)
         assert "unknown command" in rejected.stderr
     assert not (directory / ".scaffold" / "tasks.json").exists()
-    assert not (directory / ".scaffold" / ".tasks.lock").exists()
+    assert not (directory / ".scaffold" / "features").exists()
     assert_historical_unchanged(directory, historical)
 
 
-def test_task_only_cli_lifecycle_preserves_schema_v2_and_historical_files(workspace):
+def test_ledger_lifecycle_persists_across_subprocesses_and_ignores_legacy_files(workspace):
     directory, historical = workspace
-    storage = directory / ".scaffold" / "tasks.json"
-    lock = directory / ".scaffold" / ".tasks.lock"
+    legacy_state = directory / ".scaffold" / "tasks.json"
+    legacy_state.write_bytes(b'{"schema_version": 2, "features": {}}')
+    legacy_before = legacy_state.read_bytes()
 
     initialized = tasks(directory, "init", payload=FEATURE)
-    assert initialized["schema_version"] == 2
+    assert initialized["schema_version"] == 3
     assert initialized["feature"]["workflow"]["kind"] == "recursive-issues/v1"
     assert initialized["feature"]["workflow"]["phase"] == "design"
-    assert lock.is_file()
-    assert_historical_unchanged(directory, historical)
+    [ledger] = (directory / ".scaffold" / "features").glob(FEATURE_ID + ".*/ledger.jsonl")
+    assert (directory / ".scaffold" / ".tasks.lock").is_file()
 
     definitions = [
         {"id": "model", "title": "Model", "objective": "Build the model",
@@ -117,8 +118,6 @@ def test_task_only_cli_lifecycle_preserves_schema_v2_and_historical_files(worksp
          "acceptance_criteria": ["API is verified"], "dependencies": ["model"]},
     ]
     tasks(directory, "decompose", FEATURE_ID, definitions)
-    assert tasks(directory, "select")["context"] is None
-    assert tasks(directory, "design-select")["context"]["issue"]["id"] == FEATURE_ID
     for identifier in (FEATURE_ID, "model", "api"):
         tasks(directory, "design-record", identifier, {
             "summary": "Design for " + identifier,
@@ -127,24 +126,37 @@ def test_task_only_cli_lifecycle_preserves_schema_v2_and_historical_files(worksp
             "disposition": "decomposed" if identifier == FEATURE_ID else "leaf",
         })
     tasks(directory, "design-finish")
-    assert tasks(directory, "summary")["summary"]["phase"] == "implement"
+
+    # Scaffold refuses to start without the one direction approval it computes the scope for.
+    tasks(directory, "start", "model", expected=1)
+    scope = tasks(directory, "list")["feature"]["direction_scope"]
+    tasks(directory, "direction-approve", payload={"scope_digest": scope, "capabilities": ["test"]})
     assert tasks(directory, "select")["context"]["issue"]["id"] == "model"
 
+    head = FEATURE["baseline"]
+
     def finish(identifier, commit_char):
+        nonlocal head
         tasks(directory, "start", identifier)
-        receipt = "fixture-receipt-" + identifier
+        tree = commit_char * 40
+        receipt = command(directory, "artifact-put", "--feature", FEATURE_ID, "--input", "-",
+                          payload={"receipt": identifier})["reference"]
+        # A completion must cite a recorded PASSED attempt.
         tasks(directory, "complete", identifier, {
-            "feature_id": FEATURE_ID, "task_id": identifier,
-            "result": "PASSED", "source": "conductor",
-            "reference": receipt, "summary": "Fixture evidence association",
-        })
-        assert tasks(directory, "select")["context"] is None
+            "feature_id": FEATURE_ID, "task_id": identifier, "result": "PASSED",
+            "source": "conductor", "reference": receipt, "summary": "x"}, expected=1)
+        tasks(directory, "attempt-record", identifier, {
+            "attempt": 1, "status": "PASSED", "receipt": receipt, "base": head, "tree": tree})
+        tasks(directory, "complete", identifier, {
+            "feature_id": FEATURE_ID, "task_id": identifier, "result": "PASSED",
+            "source": "conductor", "reference": receipt, "summary": "Fixture evidence association"})
         if identifier == "model":
             blocked = tasks(directory, "start", "api", expected=1)
             assert "checkpoint" in json.loads(blocked.stderr)["error"].lower()
+        commit = commit_char * 40
         tasks(directory, "checkpoint-record", identifier, {
-            "commit": commit_char * 40, "reference": receipt,
-        })
+            "commit": commit, "parent": head, "tree": tree, "reference": receipt})
+        head = commit
 
     finish("model", "b")
     assert tasks(directory, "select")["context"]["issue"]["id"] == "api"
@@ -154,29 +166,31 @@ def test_task_only_cli_lifecycle_preserves_schema_v2_and_historical_files(worksp
     assert tasks(directory, "select")["context"] is None
 
     complete = tasks(directory, "list")["feature"]
-    assert complete["workflow"]["phase"] == "implement"
+    assert complete["head"] == head
+    assert [segment["task_id"] for segment in complete["history"]] == ["model", "api", FEATURE_ID]
     assert all(t["status"] == "completed" and t["checkpoint"] for t in complete["tasks"].values())
     assert tasks(directory, "summary")["summary"]["validation_status"] == "awaiting_validation"
-    assert storage.is_file()
-    before = storage.read_bytes()
-    # A previously persisted schema-v2 graph remains readable without a migration
-    # even when its old task lock is absent; only the new lock is recreated.
-    lock.unlink()
+
+    # State is a fold of the ledger: a fresh process reads the same graph, and a lost lock is recreated.
+    (directory / ".scaffold" / ".tasks.lock").unlink()
     assert tasks(directory, "list")["feature"]["tasks"] == complete["tasks"]
-    assert lock.is_file()
-    assert storage.read_bytes() == before
+    assert (directory / ".scaffold" / ".tasks.lock").is_file()
+    assert legacy_state.read_bytes() == legacy_before  # a schema-2 file is neither read nor rewritten
+    assert ledger.is_file()
     assert_historical_unchanged(directory, historical)
 
 
-def test_schema_mismatch_is_rejected_without_rewriting_existing_graph(workspace):
+def test_a_damaged_ledger_is_rejected_and_never_rewritten(workspace):
     directory, historical = workspace
     tasks(directory, "init", payload=FEATURE)
-    state_file = directory / ".scaffold" / "tasks.json"
-    state = json.loads(state_file.read_text(encoding="utf-8"))
-    state["schema_version"] = 1
-    state_file.write_text(json.dumps(state), encoding="utf-8")
-    original = state_file.read_bytes()
+    [ledger] = (directory / ".scaffold" / "features").glob(FEATURE_ID + ".*/ledger.jsonl")
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    entry = json.loads(lines[0])
+    entry["body"] = {**entry["body"], "title": "Tampered"}
+    lines[0] = json.dumps(entry)
+    ledger.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    original = ledger.read_bytes()
     rejected = tasks(directory, "summary", expected=1)
-    assert "schema_version" in json.loads(rejected.stderr)["error"]
-    assert state_file.read_bytes() == original
+    assert json.loads(rejected.stderr)["error"]
+    assert ledger.read_bytes() == original
     assert_historical_unchanged(directory, historical)

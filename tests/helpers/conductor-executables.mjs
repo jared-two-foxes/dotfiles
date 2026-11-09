@@ -75,7 +75,7 @@ const taskEvidenceLine = requirements.split('\\n').find(l => l.startsWith('{"sch
 const taskEvidence = taskEvidenceLine ? JSON.parse(taskEvidenceLine) : null;
 if (process.env.REVIEW_FIXTURE_REQUIRE_CHECK_EVIDENCE && request.head_ref === ':working') {
   if (taskEvidence?.gate !== 'targeted-task' || !/^[a-f0-9]{40}$/.test(taskEvidence.tree) ||
-    taskEvidence.head !== request.base_ref || !/^pi-evidence:sha256:[a-f0-9]{64}$/.test(taskEvidence.startedReference) ||
+    taskEvidence.head !== request.base_ref || !/^sha256:[a-f0-9]{64}$/.test(taskEvidence.startedReference) ||
     !requirements.includes('full-workspace gate runs separately at final feature validation') ||
     !taskEvidence.checks.some(c => c.exitCode === 0 && c.status === 'PASSED' &&
       c.testCounts.some(count => count.endsWith(' passed')) && /^[a-f0-9]{64}$/.test(c.commandReceiptSha256)) ||

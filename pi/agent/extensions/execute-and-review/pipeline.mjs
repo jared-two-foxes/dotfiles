@@ -22,7 +22,8 @@ import { isDeepStrictEqual as equal } from "node:util";
 import { validateRunner, runConductor, toolOutput, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
 import { normalizeWorkflow } from "../../lib/verification/workflow.mjs";
 import { snapshot } from "../../lib/git/snapshot.mjs";
-import { retainEvidence, readEvidence, taskEvidenceReferences } from "../../lib/evidence/store.mjs";
+import { retainEvidence, readEvidence } from "../../lib/evidence/store.mjs";
+import { retainAttempt, taskReceipts } from "../../lib/evidence/attempts.mjs";
 import { verifiedResult } from "../../lib/verification/result.mjs";
 import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
 import { assertLatestAttempt } from "../../lib/verification/attempt-chain.mjs";
@@ -303,15 +304,11 @@ export async function commandResults(plan, rawRunner) {
 }
 
 async function existingProof(plan) {
-  const candidates = [];
-  for (const reference of await taskEvidenceReferences(plan.repository)) {
-    const record = await readEvidence(plan.repository, reference);
-    if (
+  const candidates = (await taskReceipts(plan.repository, plan.args.task)).filter(
+    ({ record }) =>
       record.startedReference === plan.startedReference &&
-      record.result.status === "PASSED"
-    )
-      candidates.push({ reference, record });
-  }
+      record.result.status === "PASSED",
+  );
   requireValue(
     candidates.length <= 1,
     "Ambiguous verification receipts for delivery",
@@ -420,7 +417,7 @@ export async function sealVerification(plan) {
       producer: "pi.command-receipts/v2",
       deliveryRequest: plan.deliveryRequest,
     };
-    const reference = await retainEvidence(plan.repository, record);
+    const reference = await retainAttempt(plan.repository, record);
     await writeFile(
       path.join(plan.workflow.request.output_directory, "verified.json"),
       JSON.stringify({ reference }),
@@ -673,7 +670,7 @@ export async function runPipeline(meta, feature, context, options = {}) {
         reason: "HEAD_CHANGED",
         actualResult: outcome,
       });
-    const reference = await retainEvidence(meta.repository, {
+    const reference = await retainAttempt(meta.repository, {
       repository: meta.repository,
       ...(plan.featureInstanceId ? { featureInstanceId: plan.featureInstanceId } : {}),
       task: meta.args.task,

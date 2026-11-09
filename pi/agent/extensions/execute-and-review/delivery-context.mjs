@@ -1,6 +1,7 @@
 import { isDeepStrictEqual as equal } from "node:util";
 import { issueFeature, scaffoldTasks } from "../scaffold/adapter.mjs";
-import { readEvidence, taskEvidenceReferences } from "../../lib/evidence/store.mjs";
+import { readEvidence } from "../../lib/evidence/store.mjs";
+import { taskReceipts, recoverAttempt } from "../../lib/evidence/attempts.mjs";
 import { authenticateAttemptChain } from "../../lib/verification/attempt-chain.mjs";
 import { verificationChecks, correctionVerification } from "../../lib/verification/checks.mjs";
 import { issueRequirements } from "../../lib/scaffold/contracts.mjs";
@@ -49,12 +50,15 @@ export async function prepareDelivery(repository, feature, issue, args, options 
   assertDeliveryJournal(repository, args.task, journal, instanceId);
   if (journal?.inflight) {
     // Recover a terminal response lost before the Scaffold finish transaction.
-    const terminal = [];
-    for (const reference of await taskEvidenceReferences(repository)) {
-      const r = await readEvidence(repository, reference);
-      if (r.startedReference === journal.inflight && equal(r.task, args.task))
-        terminal.push(reference);
-    }
+    let terminal = (await taskReceipts(repository, args.task, options))
+      .filter(({ record }) => record.startedReference === journal.inflight && equal(record.task, args.task))
+      .map(({ reference }) => reference);
+    if (!terminal.length && args.previousAttempt)
+      // The terminal receipt may have been stored but not yet recorded as an attempt: record it now.
+      try {
+        const found = await recoverAttempt(repository, args.previousAttempt, args.task, options);
+        if (found.record.startedReference === journal.inflight) terminal = [found.reference];
+      } catch {} // Not recoverable from this reference: fall through to the explicit recovery error.
     requireValue(
       terminal.length === 1 && terminal[0] === args.previousAttempt,
       "INVOCATION_RECOVERY_REQUIRED: retained intent may still be active; inspect terminal stages, never replay",

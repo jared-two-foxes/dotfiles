@@ -23,7 +23,7 @@ export async function checkpointVerifiedTask(args, context = {}, options = {}) {
         operation: "checkpoint-record",
         feature_id: args.task.featureId,
         task_id: args.task.taskId,
-        payload: { commit: result.commit, reference: args.evidenceRef },
+        payload: { commit: result.commit, parent: result.baseRef, tree: result.tree, reference: args.evidenceRef },
       },
       scopedContext,
       { ...options.scaffoldOptions, authorizeIssueMutation: authenticateIssueMutation },

@@ -6,11 +6,11 @@ data contracts and reusable functions needed by multiple extension callers.
 | Directory | Owns |
 |---|---|
 | `scaffold/` | Feature, issue, binding, and request types; structural request/response validation; issue requirement formatting |
-| `verification/` | Verification plans and repair rules, result semantics, review handoffs, receipt applicability, attempt ancestry, and checkpoint history |
+| `verification/` | Issue handoff storage (`issue-handoff.mjs`), verification plans and repair rules, result semantics, review handoffs, receipt applicability, attempt ancestry, and checkpoint history |
 | `evidence/` | Content-addressed receipt persistence and integrity checks |
 | `git/` | Implementation trees, exact source/index fingerprints, temporary indexes, and tracked-input monitoring |
 | `authorization/` | Retained feature direction and amendment authority |
-| `delivery-state/` | Delivery contexts, journal audit anchors, bindings, and supplied-data handoff storage |
+| `delivery-state/` | Delivery contexts, journal audit anchors and bindings. Pure: no Scaffold dependency |
 
 The Scaffold adapter is in `extensions/scaffold/adapter.mjs`. It validates
 requests and responses with `lib/scaffold/contracts.mjs` and owns CLI invocation

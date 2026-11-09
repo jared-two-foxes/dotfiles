@@ -1,10 +1,8 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
-import { reconcileFeature } from "./reconciliation.mjs";
-import { recoverInterruptedTaskRebase } from "./interrupted-rebase.mjs";
-import { adoptBaseline, inspectDrift } from "./baseline-adoption.mjs";
-import { createRebaseInspectionTool } from "./rebase-inspection.mjs";
+import { rewriteFeatureHistory } from "./reconciliation.mjs";
+import { adoptCommits, inspectDrift } from "./foreign-history.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
 
@@ -31,7 +29,6 @@ export default function (pi: ExtensionAPI) {
           featureBaseRef: Type.String(),
           defaultBranch: Type.String(),
           protectedBranches: Type.Array(Type.String()),
-          reconciliationRef: Type.Optional(Type.String()),
           ...(operation === "suspend"
             ? {
                 previousAttempt: Type.Optional(Type.String()),
@@ -140,91 +137,19 @@ export default function (pi: ExtensionAPI) {
       },
     });
   pi.registerTool({
-    name: "recover_interrupted_task_rebase",
-    label: "Recover interrupted task after rebase",
+    name: "rewrite_feature_history",
+    label: "Verify and record a rebase",
     description:
-      "Explicit recovery of an active/blocked/failed task after rebase. Preserve current files/index, old receipt chain, criteria/findings and consumed attempts. Verify only the completed prefix in a disposable worktree, then retain a non-PASSED handoff for execute_and_review.previousAttempt. No source writes, stash/reset, task lifecycle changes or attempt reset. Requires narrow UI authorization; next source correction remains within the approved feature direction.",
-    parameters: Type.Object({
-      task: Type.Object({
-        featureId: Type.String(),
-        taskId: Type.String(),
-        designRef: Type.String(),
-      }),
-      previousAttempt: Type.String({
-        description:
-          "Latest retained receipt of the interrupted task; all consumed attempts must remain linked",
-      }),
-      featureId: Type.String(),
-      designRef: Type.String(),
-      branch: Type.String(),
-      featureBaseRef: Type.String(),
-      oldHeadRef: Type.String(),
-      upstreamBaseRef: Type.String(),
-      headRef: Type.String(),
-      defaultBranch: Type.String(),
-      protectedBranches: Type.Array(Type.String()),
-      previousReconciliationRef: Type.Optional(Type.String()),
-      prefixEvidenceRef: Type.Optional(Type.String()),
-      resumeHandoffRef: Type.Optional(Type.String()),
-      buildCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testSuccessPattern: Type.String(),
-      integrationChecks: Type.Optional(
-        Type.Array(
-          Type.Object({
-            name: Type.String(),
-            command: Type.Array(Type.String(), { minItems: 1 }),
-            successPattern: Type.String(),
-          }),
-        ),
-      ),
-      checkTimeoutMs: Type.Optional(Type.Integer()),
-      review: Type.Optional(
-        Type.Object({
-          model: Type.Optional(Type.String()),
-          wallClockBudgetSecs: Type.Optional(Type.Integer()),
-          maxTurns: Type.Optional(Type.Integer()),
-          maxCostUsd: Type.Optional(Type.Number()),
-          maxToolCalls: Type.Optional(Type.Integer()),
-          maxRepeatedActions: Type.Optional(Type.Integer()),
-          maxCompletionAttempts: Type.Optional(Type.Integer()),
-        }),
-      ),
-    }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await recoverInterruptedTaskRebase(
-        params,
-        { directory: ctx.cwd, abort: signal },
-        {
-          authorize: async () =>
-            featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
-        },
-      );
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-        isError: result.status === "BLOCKED",
-        details: result,
-      };
-    },
-  });
-  pi.registerTool({
-    name: "reconcile_feature_rebase",
-    label: "Verify feature after rebase",
-    description:
-      "Verification-only recovery after a user-performed rebase BETWEEN tasks. Requires clean feature branch, original checkpoint history and fresh approved full-project checks plus independent review. Preserves original design/receipts; never rebases, edits, commits or changes Scaffold task status. Retain returned evidenceRef for checkpoint_verified_task and validate_feature.",
+      "Recovery after a user-performed rebase of the feature branch BETWEEN tasks (suspend any active task first). Requires a clean feature branch, the ledger's recorded head, the new upstream base, and fresh approved full-project checks plus independent review of the rebased result. Maps every recorded checkpoint and foreign commit onto the rebased commits (none dropped, squashed, split, reordered or added), then records a history-rewrite entry; the previous history stays in the ledger. Never rebases, edits Git or changes task status. Not for commits the ledger has not recorded (use adopt_foreign_commits).",
     parameters: Type.Object({
       featureId: Type.String(),
       designRef: Type.String(),
       branch: Type.String(),
-      featureBaseRef: Type.String(),
-      oldHeadRef: Type.String(),
-      upstreamBaseRef: Type.String(),
-      headRef: Type.String(),
+      oldHeadRef: Type.String({ description: "The head the ledger currently records (full SHA)" }),
+      upstreamBaseRef: Type.String({ description: "The commit the branch was rebased onto (full SHA)" }),
+      headRef: Type.String({ description: "Current HEAD after the rebase (full SHA)" }),
       defaultBranch: Type.String(),
       protectedBranches: Type.Array(Type.String()),
-      previousReconciliationRef: Type.Optional(Type.String()),
       resumeEvidenceRef: Type.Optional(Type.String()),
       buildCommand: Type.Array(Type.String(), { minItems: 1 }),
       testCommand: Type.Array(Type.String(), { minItems: 1 }),
@@ -252,14 +177,7 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await reconcileFeature(
-        params,
-        { directory: ctx.cwd, abort: signal },
-        {
-          authorize: async () =>
-            featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
-        },
-      );
+      const result = await rewriteFeatureHistory(params, { directory: ctx.cwd, abort: signal }, {});
       return {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
@@ -270,29 +188,29 @@ export default function (pi: ExtensionAPI) {
     },
   });
   pi.registerTool({
-    name: "adopt_feature_baseline",
-    label: "Adopt execution baseline",
+    name: "adopt_foreign_commits",
+    label: "Record user commits in the ledger",
     description:
-      "For a feature in which NO task, attempt, checkpoint or validation has started: after the user committed unrelated changes, record an authenticated, user-approved execution baseline at the current clean HEAD. Requires explicit approval naming the concrete old and new commits (execution approval cannot substitute). The original baseline, authorization, requirements and designs are preserved; intervening commits are NOT checkpoints, remain in final-validation review scope and are named to the reviewer. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",
+      "After the user committed changes that are not verified task checkpoints (for example unrelated files committed to clear a dirty tree), record them in the Scaffold ledger between tasks. Requires explicit user approval naming the recorded head and the new head, a clean tree and index, and no active task. Records a history-foreign entry: the commits are NOT verified, are never treated as task checkpoints, and remain in final-validation review scope. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",
     parameters: Type.Object(
       {
         featureId: Type.String(),
-        originalBaseRef: Type.String({ description: "The feature's original baseline commit (full SHA)" }),
-        newBaseRef: Type.String({ description: "Current clean HEAD to adopt (full SHA)" }),
+        fromRef: Type.String({ description: "The head the ledger currently records (full SHA)" }),
+        toRef: Type.String({ description: "Current clean HEAD to record (full SHA)" }),
       },
       { additionalProperties: false },
     ),
     async execute(_id, params, signal, _update, ctx) {
-      const result = await adoptBaseline(
+      const result = await adoptCommits(
         params,
         { directory: ctx.cwd, abort: signal },
         {
           confirm: async (scope) =>
             ctx.hasUI === true &&
             (await ctx.ui.confirm(
-              "Adopt " + scope.adoptedBaseline.slice(0, 12) + " as the execution baseline (was " + scope.originalBaseline.slice(0, 12) + ")?",
+              "Record " + scope.commits.length + " commit(s) up to " + scope.to.slice(0, 12) + " (ledger head is " + scope.from.slice(0, 12) + ")?",
               JSON.stringify(scope, null, 2) +
-                "\nThese commits are NOT verified task checkpoints. They stay in the final validation review scope. The original baseline, authorization and designs are unchanged. This grants no other permission.",
+                "\nThese commits are NOT verified task checkpoints. They stay in the final validation review scope. The original baseline, approval and designs are unchanged. This grants no other permission.",
             )),
         },
       );
@@ -307,7 +225,7 @@ export default function (pi: ExtensionAPI) {
     name: "inspect_feature_drift",
     label: "Inspect feature drift",
     description:
-      "Read-only. Classifies how Git relates to the feature's authenticated boundary (authenticated, foreign commits, dirty tree, rewritten history, interrupted Git operation, corrupt adoption evidence, upstream behind) and names the one applicable recovery. Never changes Git, Scaffold or evidence.",
+      "Read-only. Classifies how Git relates to the history the Scaffold ledger recorded (authenticated, foreign commits, dirty tree, rewritten history, ledger disagrees with Git, interrupted Git operation, upstream behind) and names the one applicable recovery. Never changes Git, Scaffold or evidence.",
     parameters: Type.Object({ featureId: Type.String() }, { additionalProperties: false }),
     async execute(_id, params, signal, _update, ctx) {
       const result = await inspectDrift(params, { directory: ctx.cwd, abort: signal });
@@ -318,5 +236,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool(createRebaseInspectionTool(Type));
 }

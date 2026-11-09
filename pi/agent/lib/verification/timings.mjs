@@ -138,15 +138,18 @@ export function summarizeTimings(record) {
   return { available: true, ...t };
 }
 
-// Read every task and feature receipt in a repository's evidence directory.
-export async function repositoryTimings(evidenceDirectory) {
+// Read every task and feature receipt in the ledger artifact directories under `.scaffold/features`.
+export async function repositoryTimings(artifactDirectories) {
   const rows = [];
-  for (const name of (await readdir(evidenceDirectory)).sort()) {
-    if (!/^(feature-)?[a-f0-9]{64}\.json$/.test(name)) continue;
+  const directories = Array.isArray(artifactDirectories) ? artifactDirectories : [artifactDirectories];
+  const files = [];
+  for (const directory of directories)
+    for (const name of (await readdir(directory)).sort())
+      if (/^[a-f0-9]{64}$/.test(name)) files.push([directory, name]);
+  for (const [directory, name] of files) {
     try {
-      const record = JSON.parse(
-        await readFile(path.join(evidenceDirectory, name), "utf8"),
-      );
+      const record = JSON.parse(await readFile(path.join(directory, name), "utf8"));
+      if (!record.schema?.startsWith("pi.")) continue;
       rows.push({
         file: name,
         recordedAt: record.recordedAt ?? null,

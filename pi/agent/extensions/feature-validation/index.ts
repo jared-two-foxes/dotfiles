@@ -3,6 +3,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
 
+// Validation binds to the ledger's movable `base` (moved by a rebase). The authorization check compares the
+// immutable original baseline instead, so it is not given the validation base.
+const withoutValidationBase = ({ featureBaseRef: _validationBase, ...rest }: Record<string, unknown>) => rest;
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "validate_feature",
@@ -15,12 +19,6 @@ export default function (pi: ExtensionAPI) {
       branch: Type.String(),
       featureBaseRef: Type.String(),
       headRef: Type.String(),
-      reconciliationRef: Type.Optional(
-        Type.String({
-          description:
-            "Latest successful rebase reconciliation evidence, if history was rewritten",
-        }),
-      ),
       buildCommand: Type.Array(Type.String(), { minItems: 1 }),
       testCommand: Type.Array(Type.String(), { minItems: 1 }),
       testSuccessPattern: Type.String({
@@ -61,7 +59,7 @@ export default function (pi: ExtensionAPI) {
         { directory: ctx.cwd, abort: signal },
         {
           authorize: async () =>
-            featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
+            featureAuthorized(withoutValidationBase(params), { directory: ctx.cwd, abort: signal }),
         },
       );
       return {

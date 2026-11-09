@@ -21,8 +21,15 @@ export const OPERATIONS = [
   "select",
   "design-select",
   "delivery-record",
+  "direction-approve",
+  "attempt-record",
+  "history-foreign",
+  "history-rewrite",
+  "artifact-put",
+  "artifact-get",
 ];
 const taskActions = new Set([
+  "attempt-record",
   "delivery-record",
   "issue",
   "start",
@@ -36,6 +43,12 @@ const taskActions = new Set([
   "issue-resume",
 ]);
 const inputActions = new Set([
+  "direction-approve",
+  "attempt-record",
+  "history-foreign",
+  "history-rewrite",
+  "artifact-put",
+  "artifact-get",
   "delivery-record",
   "init",
   "add",
@@ -47,6 +60,9 @@ const inputActions = new Set([
   "issue-resume",
 ]);
 const reasonActions = new Set(["block", "fail", "retry"]);
+// Ledger references name a blob stored in the feature's ledger: sha256:<64 hex>.
+export const isReference = (x) => typeof x === "string" && /^sha256:[a-f0-9]{64}$/.test(x);
+const isCommit = (x) => typeof x === "string" && /^[a-f0-9]{40}$/.test(x);
 const statuses = new Set([
   "pending",
   "in_progress",
@@ -181,21 +197,61 @@ export function validateRequest(params) {
     fields(payload, ["reason", "reference"]);
     requireValue(
       text(payload.reason) &&
-        (payload.reference === undefined || text(payload.reference)),
-      "Reason required",
+        (payload.reference === undefined || isReference(payload.reference)),
+      "Reason required; a suspension reference must be a ledger reference (sha256:...)",
     );
   } else if (operation === "checkpoint-record") {
-    fields(payload, ["commit", "reference"]);
+    fields(payload, ["commit", "parent", "tree", "reference"]);
     requireValue(
-      /^[a-f0-9]{40}$/.test(payload.commit) && text(payload.reference),
+      isCommit(payload.commit) && isCommit(payload.parent) &&
+        isCommit(payload.tree) && isReference(payload.reference),
       "Invalid checkpoint",
     );
   } else if (operation === "issue-resume") {
     fields(payload, ["reference", "handoff"]);
     requireValue(
-      text(payload.reference) && text(payload.handoff),
-      "Suspension/handoff required",
+      isReference(payload.reference) && isReference(payload.handoff),
+      "Suspension/handoff must be ledger references (sha256:...)",
     );
+  } else if (operation === "direction-approve") {
+    fields(payload, ["scope_digest", "capabilities"]);
+    requireValue(
+      /^[a-f0-9]{64}$/.test(payload.scope_digest) &&
+        (payload.capabilities === undefined || strings(payload.capabilities)),
+      "Invalid direction approval",
+    );
+  } else if (operation === "attempt-record") {
+    fields(payload, ["attempt", "status", "receipt", "base", "tree"]);
+    requireValue(
+      Number.isSafeInteger(payload.attempt) && payload.attempt >= 1 &&
+        ["PASSED", "NEEDS_DESIGN", "BLOCKED"].includes(payload.status) &&
+        isReference(payload.receipt) && isCommit(payload.base) && isCommit(payload.tree),
+      "Invalid attempt record",
+    );
+  } else if (operation === "history-foreign") {
+    fields(payload, ["from", "to", "source", "commits", "approval"]);
+    requireValue(
+      isCommit(payload.from) && isCommit(payload.to) &&
+        ["user-commits", "upstream-merge"].includes(payload.source) &&
+        isReference(payload.approval) && Array.isArray(payload.commits) &&
+        payload.commits.length > 0 &&
+        payload.commits.every((c) => object(c) && isCommit(c.commit) &&
+          Array.isArray(c.parents) && c.parents.length > 0 && c.parents.every(isCommit) &&
+          typeof c.subject === "string"),
+      "Invalid foreign history range",
+    );
+  } else if (operation === "history-rewrite") {
+    fields(payload, ["old_head", "new_head", "new_base", "history", "verification"]);
+    requireValue(
+      isCommit(payload.old_head) && isCommit(payload.new_head) && isCommit(payload.new_base) &&
+        Array.isArray(payload.history) && isReference(payload.verification),
+      "Invalid history rewrite",
+    );
+  } else if (operation === "artifact-put") {
+    requireValue(object(payload), "Artifact must be a JSON object");
+  } else if (operation === "artifact-get") {
+    fields(payload, ["reference"]);
+    requireValue(isReference(payload.reference), "Invalid artifact reference");
   } else if (operation === "complete") {
     fields(payload, [
       "feature_id",
@@ -256,8 +312,16 @@ function validateContract(t) {
 }
 export function validateResponse(data, params) {
   requireValue(object(data), "Expected JSON object");
-  requireValue(data.schema_version === 2, "Unsupported schema_version");
+  requireValue(data.schema_version === 3, "Unsupported schema_version; Scaffold ledger schema 3 required");
   requireValue(!Object.hasOwn(data, "error"), "Error in successful response");
+  if (params.operation === "artifact-put") {
+    requireValue(isReference(data.reference), "Invalid artifact reference response");
+    return;
+  }
+  if (params.operation === "artifact-get") {
+    requireValue(object(data.artifact), "Invalid artifact response");
+    return;
+  }
   if (
     ["summary", "issue", "select", "design-select"].includes(params.operation)
   ) {
@@ -310,6 +374,10 @@ export function validateResponse(data, params) {
     "design-reopen",
     "checkpoint-record",
     "issue-resume",
+    "direction-approve",
+    "attempt-record",
+    "history-foreign",
+    "history-rewrite",
   ].includes(params.operation);
   if (needsFeature) {
     requireValue(
@@ -325,7 +393,9 @@ export function validateResponse(data, params) {
     );
     {
       requireValue(
-        data.schema_version === 2 &&
+        data.schema_version === 3 &&
+          /^[a-f0-9]{64}$/.test(data.feature.direction_scope) &&
+          isCommit(data.feature.head) && isCommit(data.feature.base) && Array.isArray(data.feature.history) &&
           data.feature.workflow.kind === "recursive-issues/v1" &&
           ["design", "implement"].includes(data.feature.workflow.phase) &&
           data.feature.tasks[data.feature.workflow.root_id] &&

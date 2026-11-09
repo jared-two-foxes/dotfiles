@@ -15,12 +15,10 @@ import {
   readEvidence,
   retainFeatureEvidence,
   readFeatureEvidence,
-  featureEvidenceReferences,
 } from '../../lib/evidence/store.mjs';
 import { snapshot } from '../../lib/git/snapshot.mjs';
-import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
-import { findAdoption, adoptionRequirements } from '../../lib/verification/baseline-adoption.mjs';
-import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
+import { foreignHistoryRequirements, verifyHistory } from '../../lib/verification/history.mjs';
+import { authenticatedCheckpoints } from '../../lib/verification/checkpoints.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
 import {
@@ -58,8 +56,8 @@ async function lifecycle(repository, operation, featureId, payload, options) {
     { cwd: repository, input: JSON.stringify(payload) });
   requireValue(response.code === 0, 'Scaffold validation transition failed: ' + response.stderr?.slice(0, 4000));
   const data = JSON.parse(response.stdout);
-  requireValue(data.schema_version === 2 && data.feature?.id === featureId && data.feature.validation,
-    'Unsupported Scaffold validation response; install Phase 5 Scaffold');
+  requireValue(data.schema_version === 3 && data.feature?.id === featureId && data.feature.validation,
+    'Unsupported Scaffold validation response; Scaffold ledger schema 3 required');
   return data.feature;
 }
 
@@ -73,7 +71,7 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const feature = await state(repository, args.featureId, options);
   requireValue(feature.design_ref === args.designRef, 'Approved design identity mismatch');
   const design = approvedDesign(repository, feature);
-  requireValue(feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
+  requireValue(feature.base === args.featureBaseRef, 'History base mismatch: the ledger records ' + feature.base + ' (the fork point, or the commit the branch was last rebased onto)');
   requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
   // The authentication below is a pure function of the feature (minus the validation
   // state only this gate writes), these arguments, immutable Git objects and the
@@ -81,7 +79,7 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const { validation: _validation, ...featureWithoutValidation } = feature;
   const derived = await memoizePreconditions(memo?.cache, repository, [
     repository, featureWithoutValidation, args.featureId, args.designRef, args.headRef,
-    args.featureBaseRef, args.branch, args.reconciliationRef ?? null, args.resumeEvidenceRef ?? null,
+    args.featureBaseRef, args.branch, args.resumeEvidenceRef ?? null,
   ], async () => {
   const tasks = feature.tasks;
   for (const task of Object.values(tasks)) for (const a of task.delivery?.context?.amendments ?? [])
@@ -90,10 +88,9 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const identifiers = Object.keys(tasks);
   requireValue(identifiers.length > 0 && identifiers.every(id => tasks[id].status === 'completed'),
     'All required tasks, including recursive parents, must be completed');
-  const anchor = args.reconciliationRef
-    ? await readReconciliation(repository, args.reconciliationRef, feature, args) : undefined;
-  const checkpoints = await checkpointHistory(repository, feature, {
-    head: args.headRef, baseline: args.featureBaseRef, branch: args.branch, anchor });
+  // Git must match the history the ledger recorded, and every checkpoint's receipt must agree with it.
+  verifyHistory(repository, feature, { head: args.headRef });
+  const checkpoints = await authenticatedCheckpoints(repository, feature);
   // Preserve the Scaffold journal as recorded. Only close a historical check in
   // the review view when the authenticated checkpoint assessed its passing retry.
   const reviewTasks = structuredClone(tasks);
@@ -112,15 +109,16 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   }
   const reviews = [];
   const resumedId = args.resumeEvidenceRef ? (await readFeatureEvidence(repository, args.resumeEvidenceRef)).attemptId : null;
-  for (const reference of await featureEvidenceReferences(repository)) {
-    const r = await readFeatureEvidence(repository, reference);
+  // Prior reviews are the feature's recorded validation results (Scaffold keeps their references).
+  for (const h of feature.validation?.history ?? []) {
+    if (h.event !== 'finished') continue;
+    const r = await readFeatureEvidence(repository, h.result.reference, { featureId: args.featureId });
     if (r.attemptId !== resumedId && r.binding?.feature_id === args.featureId && r.result?.schema === 'pi.feature-validation/v1' && r.review)
       reviews.push(r);
   }
   const obligations = findingObligations(reviews.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
     .map(r => ({ result: { conductor: { review: r.review } } })));
-  const adoption = await findAdoption(repository, feature);
-  return { anchor, checkpoints, reviewTasks, obligations, adoption };
+  return { checkpoints, reviewTasks, obligations };
   }, { fresh: memo?.fresh });
   return { feature, before, design, ...derived };
 }
@@ -131,11 +129,9 @@ function handoff(record, reference) {
 }
 function assembledRequirements(pre, args) {
   const feature = { ...pre.feature, tasks: pre.reviewTasks };
-  return featureRequirements(feature, pre.design) + (pre.adoption ? adoptionRequirements(pre.adoption) : '') + (
+  return featureRequirements(feature, pre.design) + foreignHistoryRequirements(pre.feature) + (
     '\n\nPersisted feature obligations: ' + JSON.stringify(pre.obligations) +
-    '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.') +
-    (args.reconciliationRef ? '\n\nVerified rebase reconciliation: ' + args.reconciliationRef +
-      '\nNew upstream baseline: ' + pre.anchor.baseline : '');
+    '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.');
 }
 export async function validateFeature(args, context = {}, options = {}) {
   let repository, startedReference, reference, record, monitor, started = false;
@@ -170,7 +166,7 @@ export async function validateFeature(args, context = {}, options = {}) {
       record = await readFeatureEvidence(repository, args.resumeEvidenceRef);
       requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
       const expectedRequirements = assembledRequirements(pre, args);
-      requireValue(record.requirements === expectedRequirements && (record.reconciliationRef ?? null) === (args.reconciliationRef ?? null), 'Approved feature requirements or reconciliation changed');
+      requireValue(record.requirements === expectedRequirements, 'Approved feature requirements changed');
       authenticateFeatureRecord(record, binding, plan, pre.feature.tasks, expectedRequirements, undefined,
         reviewTasks);
       // Idempotent Scaffold recording handles loss of the original confirmation.
@@ -186,7 +182,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     const confirmed = await derive(repository, args, options);
     requireValue(equal(confirmed.feature.tasks, pre.feature.tasks) && stable(pre.before, confirmed.before), 'Source/state changed during authorization');
     monitor = monitorTrackedInputs(repository);
-    record = { attemptId: randomUUID(), binding, plan, reconciliationRef: args.reconciliationRef, tasks: pre.feature.tasks, requirements,
+    record = { attemptId: randomUUID(), binding, plan, tasks: pre.feature.tasks, requirements,
       obligations: pre.obligations, scopedTaskChecks: true,
       before: pre.before, after: pre.before, checkpoints: pre.checkpoints, checks: [], review: null,
       result: result('BLOCKED', { message: 'INTERRUPTED_OR_RUNNING' }) };
@@ -261,16 +257,22 @@ export async function validateFeature(args, context = {}, options = {}) {
 export async function inspectFeatureValidation(args, context = {}, options = {}) {
   try {
     const repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
-    const refs = args.reference ? [args.reference] : await featureEvidenceReferences(repository);
+    let refs = args.reference ? [args.reference] : [];
+    if (!args.reference) {
+      requireValue(args.featureId, 'featureId or reference is required');
+      const listed = await scaffoldTasks({ operation: 'list', feature_id: args.featureId }, { directory: repository }, options.scaffoldOptions);
+      requireValue(listed.ok, 'Cannot inspect Scaffold: ' + (listed.message ?? 'invalid state'));
+      refs = (listed.data.feature.validation?.history ?? []).filter(h => h.event === 'finished').map(h => h.result.reference);
+    }
     const results = [];
     for (const reference of refs) {
-      const record = await readFeatureEvidence(repository, reference);
-      if (['reconciliation', 'feature-authorization', 'delivery-amendment'].includes(record.kind) || (args.featureId && record.binding?.feature_id !== args.featureId)) continue;
+      const record = await readFeatureEvidence(repository, reference, args.featureId ? { featureId: args.featureId } : undefined);
+      if (args.featureId && record.binding?.feature_id !== args.featureId) continue;
       let applicable = false, reason;
       try {
         requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
         const b = record.binding;
-        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, reconciliationRef: record.reconciliationRef, resumeEvidenceRef: reference };
+        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, resumeEvidenceRef: reference };
         const pre = await featurePreconditions(repository, args, options);
         requireValue(pre.feature.validation?.current === record.attemptId, 'Validation superseded');
         authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision }, record.plan,

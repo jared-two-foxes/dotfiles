@@ -10,8 +10,7 @@ try {
   if (input.schema !== 'pi.delivery-plan/v1') throw new Error('Current delivery plan required');
   const sealed = await sealVerification(input);
   const args = { ...input.args.checkpoint, task: input.args.task, evidenceRef: sealed.reference,
-    branch: input.feature.branch, featureBaseRef: input.feature.original_baseline,
-    reconciliationRef: input.args.reconciliationRef };
+    branch: input.feature.branch, featureBaseRef: input.feature.original_baseline };
   result = await commitVerifiedTask(args, { directory: process.cwd() });
 } catch (error) { result = { schema: 'pi.task-finalization/v1', ok: false, message: error.message }; }
 // Scaffold calls made here (authorization, completion, checkpoint) happen in this

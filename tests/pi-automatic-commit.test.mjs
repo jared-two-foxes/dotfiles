@@ -285,7 +285,7 @@ test(
       record.response && JSON.parse(record.response.stdout).schema,
       "pi.command-results/v1",
     );
-    assert.match(f.git("show", "-s", "--format=%B"), /Pi-Task-Checkpoint:/);
+    assert.match(f.git("show", "-s", "--format=%B"), /Pi-Checkpoint: F/);
     assert.equal(f.confirmations(), 1);
     // Automatic task commits still feed the mandatory cumulative feature gate.
     process.env.EXPECTED_REVIEW_REQUIREMENTS = "*";
@@ -1114,10 +1114,15 @@ test(
     assert.equal((await f.call("list")).feature.tasks.F.status, "in_progress");
     const record = await readEvidence(f.directory, result.evidence.reference);
     assert.equal(record.result.stage, "STARTED");
-    const records = (
-      await readdir(path.join(f.directory, ".git/pi-conductor-evidence"))
-    ).filter((x) => /^[a-f0-9]{64}\.json$/.test(x));
-    assert.equal(records.length, 1);
+    // Exactly one task receipt (the retained intent) exists, and no terminal attempt was recorded.
+    const features = path.join(f.directory, ".scaffold", "features");
+    const [instance] = await readdir(features);
+    const artifacts = path.join(features, instance, "artifacts");
+    const receipts = [];
+    for (const name of await readdir(artifacts))
+      if (JSON.parse(await readFile(path.join(artifacts, name), "utf8")).schema === "pi.task-attempt/v1") receipts.push(name);
+    assert.equal(receipts.length, 1);
+    assert.equal((await f.call("list")).feature.tasks.F.attempts ?? undefined, undefined);
   },
 );
 
@@ -1274,7 +1279,7 @@ test(
         "CONTINUATION_RECEIPT_MALFORMED",
       ],
       [
-        { previousAttempt: "pi-evidence:sha256:" + "f".repeat(64) },
+        { previousAttempt: "sha256:" + "f".repeat(64) },
         "CONTINUATION_RECEIPT_MISSING",
       ],
       [

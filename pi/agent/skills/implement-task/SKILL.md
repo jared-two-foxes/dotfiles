@@ -277,7 +277,7 @@ checkpoint is unavailable, report checkpoint required and stop dependent executi
 ### Checkpoint recovery
 
 Read scoped Scaffold `summary`/`issue`, relevant receipts, Git HEAD/history/index/worktree and
-`Pi-Task-Checkpoint` commit trailer before selecting work. Completion without a
+`Pi-Checkpoint: <task>` commit trailer before selecting work. Completion without a
 checkpoint: use the retained feature authority and call the tool with the original receipt.
 A retry before commit stages only the exact retained Git tree in a private index;
 the real index is never used as a catch-all. Interruption after commit: the tool

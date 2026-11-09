@@ -106,11 +106,6 @@ export default function (pi: ExtensionAPI) {
           },
         ),
       ),
-      reconciliationRef: Type.Optional(
-        Type.String({
-          description: "Verified rebase anchor for recursive issue execution",
-        }),
-      ),
       task: Type.Optional(
         Type.Object(
           {
