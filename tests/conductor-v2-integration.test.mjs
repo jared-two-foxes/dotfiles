@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
+import { appendFile, mkdtemp, writeFile, readFile, rm, chmod } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { executeAndReview } from "../pi/agent/extensions/execute-and-review/adapter.mjs";
@@ -74,6 +74,9 @@ test(
             encoding: "utf8",
           }).trim();
         git("init", "-q");
+        // Scaffold state and run scratch space (.scaffold/) are always ignored in real repositories.
+        git("config", "core.excludesfile", "");
+        await appendFile(path.join(git("rev-parse", "--absolute-git-dir"), "info", "exclude"), ".scaffold/\n");
         git("config", "user.name", "Test");
         git("config", "user.email", "test@example.invalid");
         await writeFile(path.join(directory, "source.txt"), "before");

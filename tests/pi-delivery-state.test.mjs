@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -22,6 +22,7 @@ async function fixture(t) {
   const directory = await mkdtemp(path.join(tmpdir(), "pi-delivery-state-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   git(directory, ["init", "-q", "-b", "feature/delivery"]);
+  await appendFile(path.join(directory, ".git", "info", "exclude"), ".scaffold/\n");
   git(directory, ["config", "user.name", "Test"]);
   git(directory, ["config", "user.email", "test@example.invalid"]);
   git(directory, ["config", "core.autocrlf", "false"]);

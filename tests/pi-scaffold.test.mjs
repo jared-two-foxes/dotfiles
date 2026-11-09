@@ -256,7 +256,9 @@ test('clean is not an agent operation', () => {
 });
 
 test('production adapter only invokes Git inspection and scaffold tasks, with no file writes', async () => {
-  const adapter = await readFile(path.join(root, 'pi/agent/extensions/scaffold/adapter.mjs'), 'utf8');
+  // The process runner lives in lib/scaffold/process.mjs so shared modules can reach Scaffold.
+  const adapter = await readFile(path.join(root, 'pi/agent/extensions/scaffold/adapter.mjs'), 'utf8') +
+    await readFile(path.join(root, 'pi/agent/lib/scaffold/process.mjs'), 'utf8');
   const extension = await readFile(path.join(root, 'pi/agent/extensions/scaffold/index.ts'), 'utf8');
   assert.doesNotMatch(adapter, /writeFile|mkdir|unlink|rename|executeAndReview|invokeConductor|push-ticket|next-step/i);
   assert.match(adapter, /shell: false/);

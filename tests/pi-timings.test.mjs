@@ -170,13 +170,15 @@ test("receipts without telemetry are summarized as unavailable, not as errors", 
 
   const dir = await directory(t);
   const hash = "a".repeat(64), other = "b".repeat(64);
-  await writeFile(path.join(dir, `${hash}.json`), JSON.stringify({
-    recordedAt: "2026-01-01T00:00:00.000Z", task: { taskId: "SA-1" }, result: { status: "PASSED" },
+  // Receipts are ledger artifacts: files named by their digest, with no extension.
+  await writeFile(path.join(dir, hash), JSON.stringify({
+    schema: "pi.task-attempt/v1", recordedAt: "2026-01-01T00:00:00.000Z", task: { taskId: "SA-1" }, result: { status: "PASSED" },
   }));
-  await writeFile(path.join(dir, `${other}.json`), JSON.stringify({
-    recordedAt: "2026-01-02T00:00:00.000Z", task: { taskId: "SA-2" }, result: { status: "PASSED" }, timings,
+  await writeFile(path.join(dir, other), JSON.stringify({
+    schema: "pi.task-attempt/v1", recordedAt: "2026-01-02T00:00:00.000Z", task: { taskId: "SA-2" }, result: { status: "PASSED" }, timings,
   }));
-  await writeFile(path.join(dir, "not-a-receipt.json"), "{}");
+  await writeFile(path.join(dir, "c".repeat(64)), JSON.stringify({ approved: "not a pi receipt" }));
+  await writeFile(path.join(dir, "not-a-receipt"), "{}");
   const rows = await repositoryTimings(dir);
   assert.deepEqual(rows.map((r) => [r.task, r.available]), [["SA-1", false], ["SA-2", true]]);
 });
