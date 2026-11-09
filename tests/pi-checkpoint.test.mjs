@@ -774,7 +774,9 @@ test("execution and checkpoints authenticate an adopted baseline while retaining
   const two = await f.verify("two", first.commit, async () => { await writeFile(path.join(f.dir, "consumer.txt"), "two\n"); });
   const second = await f.checkpoint(two);
   assert.equal(second.ok, true, JSON.stringify(second));
-  const history = await checkpointHistory(f.dir, f.feature, { head: second.commit, baseline: f.base, branch: "feature/test" });
+  // Receipts bind the canonical repository path (Windows temp dirs may be 8.3 short names).
+  const repository = path.resolve(f.g("rev-parse", "--show-toplevel"));
+  const history = await checkpointHistory(repository, f.feature, { head: second.commit, baseline: f.base, branch: "feature/test" });
   assert.deepEqual(history.map(c => c.taskId), ["one", "two"]);
   // The user's commit is unverified: it remains in the original-baseline diff reviewed at final validation.
   assert.match(f.g("diff", "--name-only", f.base, second.commit), /unrelated\.txt/);
