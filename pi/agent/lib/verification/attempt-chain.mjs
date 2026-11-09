@@ -42,10 +42,16 @@ export async function assertLatestAttempt(repository, reference, binding, attemp
     throw error;
   }
   const recorded = feature.tasks?.[binding.taskId]?.attempts ?? [];
-  const stale = recorded.some(a => a.attempt > attempt || (a.attempt === attempt && reference && a.receipt !== reference));
-  if (stale)
-    throw Object.assign(new Error('A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count'),
-      reference ? { code: 'CONTINUATION_RECEIPT_STALE' } : {});
+  const stale = () => Object.assign(new Error('A newer task attempt or terminal receipt exists; inspect and use the latest retained evidence without resetting its count'),
+    reference ? { code: 'CONTINUATION_RECEIPT_STALE' } : {});
+  if (recorded.some(a => a.attempt > attempt)) throw stale();
+  const same = recorded.find(a => a.attempt === attempt);
+  if (same && reference && same.receipt !== reference) {
+    // A handoff that continues the finished attempt keeps its attempt number and is current. The
+    // retained *intent* of an attempt that has since finished is not.
+    const named = await readEvidence(repository, reference, { featureId: binding.featureId });
+    if (named.result?.stage === 'STARTED') throw stale();
+  }
 }
 
 export async function authenticateAttemptChain(repository, reference, binding, seen = new Set(), pendingReference) {

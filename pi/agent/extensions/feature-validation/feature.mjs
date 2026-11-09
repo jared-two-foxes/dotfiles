@@ -56,8 +56,8 @@ async function lifecycle(repository, operation, featureId, payload, options) {
     { cwd: repository, input: JSON.stringify(payload) });
   requireValue(response.code === 0, 'Scaffold validation transition failed: ' + response.stderr?.slice(0, 4000));
   const data = JSON.parse(response.stdout);
-  requireValue(data.schema_version === 2 && data.feature?.id === featureId && data.feature.validation,
-    'Unsupported Scaffold validation response; install Phase 5 Scaffold');
+  requireValue(data.schema_version === 3 && data.feature?.id === featureId && data.feature.validation,
+    'Unsupported Scaffold validation response; Scaffold ledger schema 3 required');
   return data.feature;
 }
 
