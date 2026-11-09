@@ -75,6 +75,7 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
     requireCurrentFeatureReceipt(feature, record);
+    requireValue(feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch: Scaffold records ' + feature.original_baseline);
     // The ledger records the history so far, and Scaffold requires this checkpoint to continue from
     // its head. Before the checkpoint is recorded that head is where the task started; after a lost
     // response it is the checkpoint commit itself, which the recovery path below recognizes.

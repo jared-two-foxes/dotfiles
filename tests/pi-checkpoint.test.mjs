@@ -2,7 +2,7 @@ import { designReference } from '../pi/agent/lib/scaffold/contracts.mjs';
 import { test } from "node:test";
 import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm, mkdir, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { git } from "../pi/agent/lib/git/tree.mjs";
@@ -10,6 +10,7 @@ import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.m
 import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
+import { ledgerFeature } from "./helpers/ledger-feature.mjs";
 import {
   checkpointVerifiedTask,
   checkpointAuthorization,
@@ -32,7 +33,7 @@ async function executeAndReview(args, context, options) {
   });
 }
 
-async function fixture(t) {
+async function fixture(t, { withFeature = true } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-checkpoint-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const g = (...args) => git(dir, args);
@@ -47,56 +48,27 @@ async function fixture(t) {
   g("commit", "-qm", "baseline");
   g("switch", "-qc", "feature/test");
   const base = g("rev-parse", "HEAD");
-  const feature = {
-    id: "F4",
-    context: "Approved checkpoint design",
-    design_ref: designReference("Approved checkpoint design"),
-    baseline: base,
-    original_baseline: base,
-    branch: "feature/test",
-    workflow: {
-      kind: "recursive-issues/v1",
-      phase: "implement",
-      root_id: "one",
-    },
-    direction_scope: "d".repeat(64),
-    head: base,
-    history: [],
-    tasks: {},
-  };
-  const options = {
-    authorize: async () => true,
-    scaffoldOptions: {
-      invokeScaffold: async (_program, args) => ({
-        code: 0,
-        stdout: JSON.stringify(
-          args[0] === "features"
-            ? { schema_version: 3, features: [] }
-            : { schema_version: 3, feature },
-        ),
-        stderr: "",
-      }),
-    },
-  };
+  // A real Scaffold feature: receipts, attempts, completion and checkpoints all live in its ledger.
+  const ledger = withFeature
+    ? await ledgerFeature(dir, { featureId: "F4", taskId: "one", branch: "feature/test",
+      designContext: "Approved checkpoint design", objective: "Dependent consumer works", criteria: ["Dependent consumer works"],
+      tasks: [{ id: "one" }, { id: "two", dependencies: ["one"] }], start: false })
+    : null;
+  const options = { authorize: async () => true };
   async function verify(
     id = "one",
     baseRef = g("rev-parse", "HEAD"),
     changes = async () => {
       await writeFile(path.join(dir, "value.txt"), id + "\n");
     },
+    { complete = true } = {},
   ) {
-    const task = { featureId: "F4", taskId: id, designRef: feature.design_ref };
-    let requirements = id + " criteria";
-    try {
-      const state = JSON.parse(
-        await readFile(path.join(dir, ".scaffold/tasks.json"), "utf8"),
-      );
-      requirements = requirementsFor(state.features.F4.tasks[id], requirements);
-    } catch {}
+    if ((await ledger.feature()).tasks[id].status === "pending") await ledger.call("start", undefined, id);
+    const task = ledger.binding(id);
     const args = {
       task,
       baseRef,
-      requirements,
+      requirements: await ledger.requirements(id, id + " criteria"),
       input: '{"operations":[]}',
       checks: [
         { name: "build", command: ["fixture", "build"] },
@@ -107,7 +79,6 @@ async function fixture(t) {
       args,
       { directory: dir },
       {
-        scaffoldOptions: options.scaffoldOptions,
         invokeConductor: async (json) => {
           assert.equal(JSON.parse(json).review.base_ref, baseRef);
           await changes();
@@ -131,25 +102,10 @@ async function fixture(t) {
       },
     );
     assert.equal(result.status, "PASSED", JSON.stringify(result));
-    feature.tasks[id] = {
-      id,
-      feature_id: feature.id,
-      status: "completed",
-      parent_id: null,
-      dependencies: id === "two" ? ["one"] : [],
-      history: [
-        {
-          to: "completed",
-          evidence: {
-            feature_id: feature.id,
-            task_id: id,
-            result: "PASSED",
-            source: "conductor",
-            reference: result.evidence.reference,
-          },
-        },
-      ],
-    };
+    // The pipeline's own completion is separate from checkpointing; do it as Scaffold would record it.
+    if (complete)
+      await ledger.call("complete", { feature_id: "F4", task_id: id, result: "PASSED", source: "conductor",
+        reference: result.evidence.reference, summary: "Checks and review passed" }, id);
     return {
       task,
       evidenceRef: result.evidence.reference,
@@ -162,7 +118,7 @@ async function fixture(t) {
   }
   const checkpoint = (args, patch = {}) =>
     checkpointVerifiedTask(args, { directory: dir }, { ...options, ...patch });
-  return { dir, g, base, feature, options, verify, checkpoint };
+  return { dir, g, base, ledger, options, verify, checkpoint };
 }
 
 test("two dependent tasks have separate verification baselines, commits, contents and durable recovery", async (t) => {
@@ -201,7 +157,7 @@ test("two dependent tasks have separate verification baselines, commits, content
   );
   assert.match(
     f.g("show", "-s", "--format=%B", second.commit),
-    /"taskId":"two"/,
+    /Pi-Checkpoint: two/,
   );
   assert.equal((await f.checkpoint(two)).commit, second.commit);
   assert.equal(f.g("rev-list", "--count", f.base + "..HEAD"), "2");
@@ -218,7 +174,7 @@ test("missing, tampered, unsuccessful, mismatched and legacy receipts never comm
     { request: { review: { base_ref: f.base, requirements: "weakened" } } },
   ]) {
     const evidenceRef = await retainEvidence(f.dir, { ...original, ...patch });
-    f.feature.tasks.one.history[0].evidence.reference = evidenceRef;
+    // Scaffold completed the task with the original receipt, so a different receipt cannot be checkpointed.
     assert.equal((await f.checkpoint({ ...args, evidenceRef })).ok, false);
   }
   for (const patch of [
@@ -267,15 +223,15 @@ test("changed source, unrelated unstaged/staged files and staged variants are pr
 
 test("completed task, matching Scaffold evidence and ignored bookkeeping are mandatory", async (t) => {
   const f = await fixture(t);
-  const args = await f.verify();
-  f.feature.tasks.one.status = "in_progress";
+  const args = await f.verify(undefined, undefined, undefined, { complete: false });
+  // The task is still in progress: Scaffold has not recorded its completion.
   assert.equal((await f.checkpoint(args)).ok, false);
-  f.feature.tasks.one.status = "completed";
-  f.feature.tasks.one.history[0].evidence.reference = "wrong";
-  assert.equal((await f.checkpoint(args)).ok, false);
-  f.feature.tasks.one.history[0].evidence.reference = args.evidenceRef;
-  await mkdir(path.join(f.dir, ".scaffold"));
-  await writeFile(path.join(f.dir, ".scaffold/tasks.json"), "{}");
+  await f.ledger.call("complete", { feature_id: "F4", task_id: "one", result: "PASSED", source: "conductor",
+    reference: args.evidenceRef, summary: "Checks and review passed" }, "one");
+  // Completion cites exactly this receipt; a different one is refused (and Scaffold would refuse to record it).
+  assert.equal((await f.checkpoint({ ...args, evidenceRef: "sha256:" + "0".repeat(64) })).ok, false);
+  await mkdir(path.join(f.dir, ".scaffold"), { recursive: true });
+  await writeFile(path.join(f.dir, ".scaffold/note.txt"), "bookkeeping stays ignored and untracked");
   const result = await f.checkpoint(args);
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(
@@ -435,7 +391,7 @@ test("deletions, binary files, spaces and unchanged parent verification use exac
     f.g("ls-tree", "--name-only", result.commit, "--", "value.txt"),
     "",
   );
-  const parent = await f.verify("parent", result.commit, async () => {});
+  const parent = await f.verify("two", result.commit, async () => {}); // verification-only: no file changes
   const checked = await f.checkpoint(parent);
   assert.equal(checked.ok, true, JSON.stringify(checked));
   assert.equal(f.g("diff", "--name-only", result.commit, checked.commit), "");
@@ -502,21 +458,17 @@ test("merge/rebase ambiguity, tracked Scaffold, hidden index entries and lost re
       await writeFile(path.join(f.dir, ".git/MERGE_HEAD"), f.base + "\n");
     if (kind === "rebase") await mkdir(path.join(f.dir, ".git/rebase-merge"));
     if (kind === "scaffold") {
-      await mkdir(path.join(f.dir, ".scaffold"));
-      await writeFile(path.join(f.dir, ".scaffold/tasks.json"), "{}");
-      f.g("add", "-f", ".scaffold/tasks.json");
+      await mkdir(path.join(f.dir, ".scaffold"), { recursive: true });
+      await writeFile(path.join(f.dir, ".scaffold/note.txt"), "tracked bookkeeping");
+      f.g("add", "-f", ".scaffold/note.txt");
     }
     if (kind === "hidden")
       f.g("update-index", "--assume-unchanged", "value.txt");
     if (kind === "tampered") {
-      await writeFile(
-        path.join(
-          f.dir,
-          ".git/pi-conductor-evidence",
-          args.evidenceRef.split(":").at(-1) + ".json",
-        ),
-        "{}",
-      );
+      // Receipts are ledger artifacts; tamper with the stored bytes.
+      const features = path.join(f.dir, ".scaffold", "features");
+      const [instance] = await readdir(features);
+      await writeFile(path.join(features, instance, "artifacts", args.evidenceRef.split(":").at(-1)), "{}");
     }
     assert.equal((await f.checkpoint(args)).ok, false, kind);
     assert.equal(f.g("rev-parse", "HEAD"), f.base);
@@ -547,6 +499,7 @@ test("real test wrapper preserves command output/status and binds the pre-review
     "testFailure",
   ]) {
     const f = await fixture(t);
+    await f.ledger.call("start", undefined, "one");
     const command = [
       process.execPath,
       "-e",
@@ -555,9 +508,9 @@ test("real test wrapper preserves command output/status and binds the pre-review
         : 'console.log("2 relevant tests passed")',
     ];
     const args = {
-      task: { featureId: "F4", taskId: "one", designRef: designReference("Approved checkpoint design") },
+      task: f.ledger.binding("one"),
       baseRef: f.base,
-      requirements: "One behavior",
+      requirements: await f.ledger.requirements("one", "One behavior"),
       input: '{"operations":[]}',
       checks: [
         { name: "build", command: ["fixture", "build"] },
@@ -639,81 +592,15 @@ test(
         : false,
   },
   async (t) => {
-    const { scaffoldTasks } =
-      await import("../pi/agent/extensions/scaffold/adapter.mjs");
     const f = await fixture(t);
-    f.options.scaffoldOptions = {
-      invokeScaffold: async (_program, args, ctx) => {
-        try {
-          const stdout = execFileSync(
-            "python3",
-            [
-              "-c",
-              "import sys;sys.path.insert(0, sys.argv.pop(1));from scaffold_cli.cli import main;main()",
-              path.join(process.env.SCAFFOLD_SOURCE, "src"),
-              ...args,
-            ],
-            { cwd: ctx.cwd, input: ctx.input, encoding: "utf8" },
-          );
-          return { code: 0, stdout, stderr: "" };
-        } catch (error) {
-          return {
-            code: error.status,
-            stdout: error.stdout,
-            stderr: error.stderr,
-          };
-        }
-      },
-    };
-    const call = async (operation, extra = {}) => {
-      const result = await scaffoldTasks(
-        { operation, feature_id: "F4", ...extra },
-        { directory: f.dir },
-        f.options.scaffoldOptions,
-      );
-      assert.equal(result.ok, true, JSON.stringify(result));
-      return result.data;
-    };
-    await call("init", {
-      payload: {
-        id: "F4",
-        title: "Feature",
-        objective: "Two independent review scopes",
-        baseline: f.base,
-        branch: "feature/test",
-        context: "Approved checkpoint design",
-        design_ref: designReference("Approved checkpoint design"),
-        acceptance_criteria: ["Dependent consumer works"],
-      },
-    });
-    await call("decompose", {
-      task_id: "F4",
-      payload: ["one", "two"].map((id) => ({
-        id,
-        title: id,
-        objective: id,
-        acceptance_criteria: [id + " verified"],
-        dependencies: id === "two" ? ["one"] : [],
-      })),
-    });
-    await approveGraph(call);
+    const call = (operation, extra = {}) =>
+      f.ledger.call(operation, extra.payload, extra.task_id);
     let last = f.base;
     for (const id of ["one", "two"]) {
       assert.equal((await call("select")).context.issue.id, id);
       await call("start", { task_id: id });
       const args = await f.verify(id, last, async () => {
         await writeFile(path.join(f.dir, id + ".txt"), id);
-      });
-      await call("complete", {
-        task_id: id,
-        payload: {
-          feature_id: "F4",
-          task_id: id,
-          result: "PASSED",
-          source: "conductor",
-          reference: args.evidenceRef,
-          summary: "Deterministic build/test/review fixture passed",
-        },
       });
       const checkpoint = await f.checkpoint(args);
       assert.equal(checkpoint.ok, true, JSON.stringify(checkpoint));
@@ -731,17 +618,6 @@ test(
     assert.equal((await call("select")).context.issue.id, "F4");
     await call("start", { task_id: "F4" });
     const parent = await f.verify("F4", last, async () => {});
-    await call("complete", {
-      task_id: "F4",
-      payload: {
-        feature_id: "F4",
-        task_id: "F4",
-        result: "PASSED",
-        source: "conductor",
-        reference: parent.evidenceRef,
-        summary: "Parent integration verified",
-      },
-    });
     const parentCommit = await f.checkpoint(parent);
     assert.equal(parentCommit.ok, true, JSON.stringify(parentCommit));
     assert.equal(
