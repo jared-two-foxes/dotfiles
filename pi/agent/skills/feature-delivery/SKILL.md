@@ -152,6 +152,8 @@ criteria and every historical failure. Stop on material scope changes as above.
 Report actual tests, unresolved findings, feature review outcome and reviewable
 commits/PR to the user. Do not declare completion from `select: null` alone.
 
+If a clean user commit lands after authorization but before any task starts, or Git no longer matches the feature boundary, run `inspect_feature_drift`; for the unstarted case it directs you to `adopt_feature_baseline`, which needs the user's explicit approval of the exact old and new commits and is not rebase recovery. Never edit Scaffold or recreate the feature to bypass a baseline mismatch.
+
 For user-performed rebases use `reconcile_feature_rebase` between tasks or
 `recover_interrupted_task_rebase` for an interrupted chain. Preserve original
 receipts, baseline, criteria and budget. Inspect retained evidence using the matching

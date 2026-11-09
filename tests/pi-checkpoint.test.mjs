@@ -9,6 +9,9 @@ import { git } from "../pi/agent/lib/git/tree.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
+import { approveFeatureDirection } from "../pi/agent/lib/authorization/feature.mjs";
+import { adoptFeatureBaseline } from "../pi/agent/lib/verification/baseline-adoption.mjs";
+import { checkpointHistory } from "../pi/agent/lib/verification/checkpoint-history.mjs";
 import { approveGraph, requirementsFor } from "./helpers/issue-plan.mjs";
 import {
   checkpointVerifiedTask,
@@ -745,3 +748,40 @@ test(
     assert.equal(f.g("rev-list", "--count", f.base + "..HEAD"), "3");
   },
 );
+
+test("execution and checkpoints authenticate an adopted baseline while retaining the original", async (t) => {
+  const f = await fixture(t);
+  f.feature.objective = "Objective"; f.feature.acceptance_criteria = ["Criterion"];
+  const approved = await approveFeatureDirection({ featureId: "F4" }, { feature: f.feature, tasks: f.feature.tasks },
+    { directory: f.dir }, { confirmFeature: async () => structuredClone(f.feature) });
+  assert.equal(approved.ok, true, approved.message);
+  await writeFile(path.join(f.dir, "unrelated.txt"), "user change\n");
+  f.g("add", "."); f.g("commit", "-qm", "user: unrelated");
+  const adoptedHead = f.g("rev-parse", "HEAD");
+  const request = { featureId: "F4", originalBaseRef: f.base, newBaseRef: adoptedHead };
+  const adoption = await adoptFeatureBaseline(request, { readFeature: async () => structuredClone(f.feature) },
+    { directory: f.dir }, { confirm: async () => true });
+  assert.equal(adoption.ok, true, JSON.stringify(adoption));
+  const one = await f.verify("one");
+  const first = await f.checkpoint(one);
+  assert.equal(first.ok, true, JSON.stringify(first));
+  assert.equal(first.baseRef, adoptedHead);
+  assert.equal(first.featureBaseRef, f.base);
+  const provenance = JSON.parse(f.g("show", "-s", "--format=%B", first.commit).match(/Pi-Task-Checkpoint: (.*)/)[1]);
+  assert.equal(provenance.adoptionRef, adoption.reference);
+  assert.equal(provenance.featureBaseRef, f.base);
+  assert.equal((await f.checkpoint(one)).commit, first.commit);
+  const two = await f.verify("two", first.commit, async () => { await writeFile(path.join(f.dir, "consumer.txt"), "two\n"); });
+  const second = await f.checkpoint(two);
+  assert.equal(second.ok, true, JSON.stringify(second));
+  // Receipts bind the canonical repository path (Windows temp dirs may be 8.3 short names).
+  const repository = path.resolve(f.g("rev-parse", "--show-toplevel"));
+  const history = await checkpointHistory(repository, f.feature, { head: second.commit, baseline: f.base, branch: "feature/test" });
+  assert.deepEqual(history.map(c => c.taskId), ["one", "two"]);
+  // The user's commit is unverified: it remains in the original-baseline diff reviewed at final validation.
+  assert.match(f.g("diff", "--name-only", f.base, second.commit), /unrelated\.txt/);
+  const repeat = await adoptFeatureBaseline(request, { readFeature: async () => structuredClone(f.feature) },
+    { directory: f.dir }, { confirm: async () => false });
+  assert.equal(repeat.recovered, true);
+  assert.equal(repeat.reference, adoption.reference);
+});
