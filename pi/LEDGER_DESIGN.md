@@ -1,7 +1,7 @@
 # Design: one ledger per feature, owned by Scaffold
 
-**Status: approved. Scaffold half implemented and under review
-([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)); Pi port in progress.**
+**Status: approved. Scaffold half implemented and merged
+([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)); Pi port in review.**
 Describes the target that replaces the stores mapped in [`ARCHITECTURE.md`](ARCHITECTURE.md) section 4.
 Spans two repositories: `jared-two-foxes/scaffold` (Python CLI) and this one (`pi/agent`).
 
@@ -196,7 +196,7 @@ feature. The cost is accepted by the user.
 
 ## 6. Work plan (one coherent change, two repositories)
 
-1. **Scaffold: done, in review ([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)).** Ledger,
+1. **Scaffold: done, merged ([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)).** Ledger,
    schema v3, the rules in 3.4, artifact API, `clean` as `feature-close`, tests, README.
 2. **Pi, storage layer:** an adapter over the Scaffold CLI for ledger actions and artifacts. Evidence
    receipts become artifacts; `retainEvidence`/`readEvidence` callers move to `artifact-put`/`artifact-get`.
@@ -207,7 +207,7 @@ feature. The cost is accepted by the user.
 4. **Pi, deletion:** the evidence store, every `refs/pi-*` family, `lib/authorization`, and the embedded
    feature copies.
 5. **Docs and CI:** update `ARCHITECTURE.md`, `RECOVERY.md`, skills and `SYSTEM.md`; point this repository's CI
-   at the Scaffold branch until scaffold#22 merges.
+   at Scaffold `main` (scaffold#22 has merged).
 
 **Sequencing:** this repository's CI checks out the latest Scaffold `main`. The two pull requests are
 reviewed in parallel; merging Scaffold first leaves this repository's Pi integration tests failing until the
