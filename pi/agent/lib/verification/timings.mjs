@@ -113,7 +113,7 @@ export function taskTimings({ stages, ledgerEvents, sealPrepMs, attempt }) {
 }
 
 // Build the `timings` field for a feature validation record.
-export function featureTimings({ checks, reviewMs, totalMs, rechecks }) {
+export function featureTimings({ checks, reviewMs, totalMs, rechecks, cache }) {
   return {
     schema: TIMINGS_SCHEMA,
     kind: "feature",
@@ -123,6 +123,9 @@ export function featureTimings({ checks, reviewMs, totalMs, rechecks }) {
     // Cost of re-deriving preconditions (SA-611): how often and how long.
     precondition_checks: rechecks.count,
     precondition_ms: Math.round(rechecks.ms * 1000) / 1000,
+    // How many derivations reused cached authentication, recomputed it after a change
+    // (misses), or were required to recompute it in full (fresh). Null: no cache.
+    precondition_cache: cache ?? null,
     total_ms: totalMs,
   };
 }

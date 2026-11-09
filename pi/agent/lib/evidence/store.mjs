@@ -26,6 +26,9 @@ async function directory(repository, create = false) {
   return dir;
 }
 
+// Read-only access to the evidence directory's location, for fingerprinting.
+export const evidenceDirectory = directory;
+
 export async function retainEvidence(repository, record) {
   const bytes = JSON.stringify({
     recordedAt: new Date().toISOString(),
