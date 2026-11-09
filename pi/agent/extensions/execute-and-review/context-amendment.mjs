@@ -72,6 +72,7 @@ export async function approveDeliveryAmendment(args, context, options = {}) {
     );
     const reference = await retainFeatureEvidence(repository, {
       kind: "delivery-amendment",
+      featureId: task.featureId,
       approved: true,
       scope,
     });
