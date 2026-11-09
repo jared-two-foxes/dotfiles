@@ -307,7 +307,7 @@ export default function (pi: ExtensionAPI) {
     name: "inspect_feature_drift",
     label: "Inspect feature drift",
     description:
-      "Read-only. Classifies how Git relates to the feature's authenticated boundary (authenticated, foreign commits, dirty tree, rewritten history, interrupted Git operation, corrupt adoption evidence, upstream behind) and names the one applicable recovery. Never changes Git, Scaffold or evidence.",
+      "Read-only. Classifies how Git relates to the history the Scaffold ledger recorded (authenticated, foreign commits, dirty tree, rewritten history, ledger disagrees with Git, interrupted Git operation, upstream behind) and names the one applicable recovery. Never changes Git, Scaffold or evidence.",
     parameters: Type.Object({ featureId: Type.String() }, { additionalProperties: false }),
     async execute(_id, params, signal, _update, ctx) {
       const result = await inspectDrift(params, { directory: ctx.cwd, abort: signal });
