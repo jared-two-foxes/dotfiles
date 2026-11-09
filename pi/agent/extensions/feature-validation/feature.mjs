@@ -79,7 +79,7 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const { validation: _validation, ...featureWithoutValidation } = feature;
   const derived = await memoizePreconditions(memo?.cache, repository, [
     repository, featureWithoutValidation, args.featureId, args.designRef, args.headRef,
-    args.featureBaseRef, args.branch, args.reconciliationRef ?? null, args.resumeEvidenceRef ?? null,
+    args.featureBaseRef, args.branch, args.resumeEvidenceRef ?? null,
   ], async () => {
   const tasks = feature.tasks;
   for (const task of Object.values(tasks)) for (const a of task.delivery?.context?.amendments ?? [])
@@ -88,7 +88,6 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const identifiers = Object.keys(tasks);
   requireValue(identifiers.length > 0 && identifiers.every(id => tasks[id].status === 'completed'),
     'All required tasks, including recursive parents, must be completed');
-  requireValue(!args.reconciliationRef, 'Rebase reconciliation references are replaced by ledger history rewrites');
   // Git must match the history the ledger recorded, and every checkpoint's receipt must agree with it.
   verifyHistory(repository, feature, { head: args.headRef });
   const checkpoints = await authenticatedCheckpoints(repository, feature);
@@ -167,7 +166,7 @@ export async function validateFeature(args, context = {}, options = {}) {
       record = await readFeatureEvidence(repository, args.resumeEvidenceRef);
       requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
       const expectedRequirements = assembledRequirements(pre, args);
-      requireValue(record.requirements === expectedRequirements && (record.reconciliationRef ?? null) === (args.reconciliationRef ?? null), 'Approved feature requirements or reconciliation changed');
+      requireValue(record.requirements === expectedRequirements, 'Approved feature requirements changed');
       authenticateFeatureRecord(record, binding, plan, pre.feature.tasks, expectedRequirements, undefined,
         reviewTasks);
       // Idempotent Scaffold recording handles loss of the original confirmation.
@@ -183,7 +182,7 @@ export async function validateFeature(args, context = {}, options = {}) {
     const confirmed = await derive(repository, args, options);
     requireValue(equal(confirmed.feature.tasks, pre.feature.tasks) && stable(pre.before, confirmed.before), 'Source/state changed during authorization');
     monitor = monitorTrackedInputs(repository);
-    record = { attemptId: randomUUID(), binding, plan, reconciliationRef: args.reconciliationRef, tasks: pre.feature.tasks, requirements,
+    record = { attemptId: randomUUID(), binding, plan, tasks: pre.feature.tasks, requirements,
       obligations: pre.obligations, scopedTaskChecks: true,
       before: pre.before, after: pre.before, checkpoints: pre.checkpoints, checks: [], review: null,
       result: result('BLOCKED', { message: 'INTERRUPTED_OR_RUNNING' }) };
@@ -273,7 +272,7 @@ export async function inspectFeatureValidation(args, context = {}, options = {})
       try {
         requireValue(record.scopedTaskChecks === true && Array.isArray(record.obligations), 'Unsupported feature verification format');
         const b = record.binding;
-        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, reconciliationRef: record.reconciliationRef, resumeEvidenceRef: reference };
+        const args = { featureId: b.feature_id, designRef: b.design_ref, branch: b.branch, featureBaseRef: b.baseline, headRef: b.head, resumeEvidenceRef: reference };
         const pre = await featurePreconditions(repository, args, options);
         requireValue(pre.feature.validation?.current === record.attemptId, 'Validation superseded');
         authenticateFeatureRecord(record, { ...b, task_revision: pre.feature.task_revision }, record.plan,

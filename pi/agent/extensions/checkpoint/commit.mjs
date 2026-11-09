@@ -65,7 +65,7 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
     try { remoteDefault = git(repository, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, ''); } catch {}
     requireValue(!protectedBranches.includes(branch) && branch !== remoteDefault, 'Protected branch checkpoint prohibited');
     requireValue(branch === args.branch, 'Current branch differs from authorized feature branch');
-    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches, ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
+    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches };
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);

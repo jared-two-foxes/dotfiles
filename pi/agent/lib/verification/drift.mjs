@@ -11,7 +11,7 @@ export async function inspectFeatureDrift(repository, feature) {
     details: { ...details, upstream: upstream(repository) } });
   try { await assertNoGitOperation(repository); }
   catch (error) { return out('git-operation-in-progress', error.message,
-    'Finish or abort the Git operation. After an interrupted task rebase use recover_interrupted_task_rebase.'); }
+    'Finish or abort the Git operation. If it was a rebase of the feature branch, rewrite_feature_history records it between tasks (suspend any active task first).'); }
   const branch = tryGit(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']);
   if (branch !== feature.branch) return out('branch-mismatch', 'Current branch ' + branch + ', feature branch ' + feature.branch,
     'Switch to the feature branch; approval and execution never switch branches.');
@@ -19,7 +19,7 @@ export async function inspectFeatureDrift(repository, feature) {
   const reachable = head === feature.head || tryGit(repository, ['merge-base', '--is-ancestor', feature.head, head]) !== undefined;
   if (!reachable)
     return out('rewritten-history', 'The ledger\'s recorded head ' + feature.head + ' is not reachable from HEAD.',
-      'History was rewritten (rebase or amend). Reconcile it between tasks; recording foreign commits does not apply.',
+      'History was rewritten (rebase or amend). Use rewrite_feature_history between tasks (suspend any active task first); adopt_foreign_commits does not apply.',
       { recordedHead: feature.head });
   try { verifyHistory(repository, feature); }
   catch (error) {

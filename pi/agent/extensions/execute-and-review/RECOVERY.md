@@ -181,8 +181,8 @@ Run `inspect_feature_drift` first. It is read-only and names the one applicable 
 | Situation | Operation | What it does |
 | --- | --- | --- |
 | You committed changes that are not task checkpoints (for example unrelated files to clear a dirty tree), the tree is clean, and **no task is active** | `adopt_foreign_commits` | Records those commits in the Scaffold ledger as a user-approved **foreign range** |
-| History was rewritten (rebase) between tasks | `reconcile_feature_rebase` | Re-verifies the rewritten completed prefix |
-| A rebase was interrupted mid-task | `recover_interrupted_task_rebase` | Carries the unfinished task's attempts across the rebase |
+| You rebased the feature branch **between tasks** | `rewrite_feature_history` | Maps the recorded history onto the rebased commits, re-verifies it, and records a ledger rewrite |
+| You rebased while a task was **active** | `suspend_issue`, then `rewrite_feature_history`, then `resume_issue` | Parks the task's work, records the rebase, restores the work onto the new head |
 | A task attempt failed or was interrupted | `previousAttempt` / issue handoff | Ordinary correction within the same feature direction |
 | A verified task's commit was lost or interrupted | `checkpoint_verified_task` (repeat) | Commit-only checkpoint recovery |
 
