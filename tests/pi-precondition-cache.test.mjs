@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -137,6 +137,44 @@ test("failures are never cached", async (t) => {
   assert.equal(calls, 2);
   await memoizePreconditions(cache, r.dir, ["k"], flaky);
   assert.equal(calls, 2);
+});
+
+test("evidence corrupted after a result was cached is rejected on the next lookup and by a fresh one", async (t) => {
+  const r = await repository(t);
+  await r.create();
+  const file = path.join(r.evidence, "e".repeat(64) + ".json");
+  const body = '{"task":"one"}';
+  await writeFile(file, body);
+  // Stands in for authentication: it re-reads the receipt and verifies it is intact.
+  let reads = 0;
+  const authenticate = async () => {
+    reads += 1;
+    if ((await readFile(file, "utf8")) !== body) throw new Error("Evidence digest mismatch");
+    return { authenticated: true };
+  };
+  const cache = createPreconditionCache();
+  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], authenticate), { authenticated: true });
+  assert.deepEqual(await memoizePreconditions(cache, r.dir, ["k"], authenticate), { authenticated: true });
+  assert.equal(reads, 1, "second lookup was served from the cache");
+
+  await sleep(20);
+  await appendFile(file, " "); // corrupt it after it was cached
+  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate), /digest mismatch/);
+  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate, { fresh: true }), /digest mismatch/);
+  await assert.rejects(memoizePreconditions(cache, r.dir, ["k"], authenticate), /digest mismatch/);
+  assert.equal(cache.entries.size, 1, "the earlier success is stale but never served");
+  assert.equal(reads, 4, "every lookup after the corruption re-authenticated");
+});
+
+test("an unrelated receipt changing still invalidates the cache, as it could affect the result", async (t) => {
+  const r = await repository(t);
+  await r.create();
+  const cache = createPreconditionCache();
+  const { state, compute } = counter();
+  await memoizePreconditions(cache, r.dir, ["k"], compute);
+  await writeFile(path.join(r.evidence, "f".repeat(64) + ".json"), "{}");
+  await memoizePreconditions(cache, r.dir, ["k"], compute);
+  assert.equal(state.calls, 2);
 });
 
 test("callers cannot corrupt a cached result by mutating what they were given", async (t) => {

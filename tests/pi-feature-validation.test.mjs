@@ -10,7 +10,6 @@ import {
   evidenceDirectory,
   featureEvidenceReferences,
   readFeatureEvidence,
-  taskEvidenceReferences,
 } from "../pi/agent/lib/evidence/store.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
@@ -378,28 +377,36 @@ test(
   async (t) => {
     const f = await fixture(t);
     await f.add("one");
-    await f.finish("one");
+    const checkpoint = await f.finish("one");
+    // The receipt the task's checkpoint is authenticated against (the evidence
+    // directory also holds intent and other records that validation never reads).
+    const receipt = path.join(
+      await evidenceDirectory(f.dir),
+      checkpoint.evidenceRef.split(":").at(-1) + ".json",
+    );
     const interrupted = await f.validate(
       {},
       {
         interrupt: async (stage) => {
           if (stage !== "beforeReview") return;
           // Earlier derivations have cached this authentication; now corrupt the
-          // retained receipt it covers. The changed evidence must not be trusted.
-          const [reference] = await taskEvidenceReferences(f.dir);
-          const file = path.join(
-            await evidenceDirectory(f.dir),
-            reference.split(":").at(-1) + ".json",
-          );
-          await appendFile(file, " ");
+          // receipt it covers. The changed evidence must not be trusted.
+          await appendFile(receipt, " ");
         },
       },
     );
     assert.equal(interrupted.status, "BLOCKED", JSON.stringify(interrupted));
+    assert.match(interrupted.message, /digest/i, JSON.stringify(interrupted));
     assert.notEqual(
       (await f.call("list")).feature.validation.status,
       "verified",
     );
+    // The cache really was in use before the corruption was detected.
+    const diagnostic = await readFeatureEvidence(
+      f.dir,
+      interrupted.diagnosticEvidenceRef,
+    );
+    assert.ok(diagnostic.timings.precondition_cache.hits >= 1);
   },
 );
 
