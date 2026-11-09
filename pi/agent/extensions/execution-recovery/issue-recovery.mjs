@@ -1,6 +1,5 @@
 import { anchorHandoff } from '../execute-and-review/delivery-context.mjs';
 // Explicit UI-authorized issue parking. Never discard the saved stash or old receipts.
-import { suspensionAnchor } from '../../lib/delivery-state/issue-anchors.mjs';
 import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation, currentIndexTree } from '../../lib/git/tree.mjs';
@@ -14,9 +13,8 @@ import {
   readTaskHandoff,
 } from '../../lib/verification/attempt-chain.mjs';
 import { rebasedAttemptTree, recoveryCommitEnvironment } from "../../lib/git/recovery-tree.mjs";
-import { pinHandoff } from './interrupted-rebase.mjs';
-import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
-import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
+import { pinHandoff } from '../../lib/verification/recovery-pins.mjs';
+import { verifyHistory } from '../../lib/verification/history.mjs';
 import { issueFeature, scaffoldTasks } from '../scaffold/adapter.mjs';
 import { authenticateIssueMutation } from '../../lib/verification/issue-mutation.mjs';
 import { approvedIssue, issueDesignRequirements } from '../../lib/scaffold/contracts.mjs';
@@ -36,10 +34,9 @@ async function scope(args, context, options) {
   requireValue(feature && feature.original_baseline === args.featureBaseRef && feature.branch === args.branch, 'Recursive issue workflow and original branch/baseline required');
   return { repository, feature };
 }
+// Git must be at the ledger's recorded head, with the recorded history matching it.
 async function prefix(repository, feature, args, head) {
-  const anchor = args.reconciliationRef ? await readReconciliation(repository, args.reconciliationRef, feature,
-    { featureBaseRef: args.featureBaseRef, branch: args.branch }) : null;
-  return checkpointHistory(repository, feature, { head, baseline: args.featureBaseRef, branch: args.branch, anchor });
+  return verifyHistory(repository, feature, { head });
 }
 export async function suspendIssue(args, context = {}, options = {}) {
   let suspensionRef, repository;
@@ -79,7 +76,7 @@ export async function suspendIssue(args, context = {}, options = {}) {
         ...(feature.workflow.instance_id ? { featureInstanceId: feature.workflow.instance_id } : {}), task: args.task, attempt: previous.attempt,
         args: { ...previous.args, previousAttempt: args.previousAttempt }, before, after: before,
         result: { status: 'BLOCKED', reason: 'ISSUE_SUSPENDED' },
-        suspension: { branch: args.branch, featureBaseRef: args.featureBaseRef, reconciliationRef: args.reconciliationRef,
+        suspension: { branch: args.branch, featureBaseRef: args.featureBaseRef,
           reason: args.reason, feature, indexTree, sourceCommit } };
       // Intent is durable BEFORE any source is parked; its reference is the recovery handle.
       suspensionRef = await retainEvidence(repository, record);
@@ -142,7 +139,6 @@ export async function resumeIssue(args, context = {}, options = {}) {
     requireValue(parked.kind === 'issue-suspension' && equal(parked.task, args.task) &&
       task.suspension?.reference === args.suspensionRef && parked.suspension.branch === args.branch &&
       parked.suspension.featureBaseRef === args.featureBaseRef, 'Suspension binding mismatch');
-    await suspensionAnchor(repository, parked, feature, args);
     const chain = parked.attempt ? await authenticateAttemptChain(repository, parked.args.previousAttempt, args.task) : { records: [] };
     const previous = chain.record ?? parked;
     await assertLatestAttempt(repository, parked.args.previousAttempt, args.task, previous.attempt);
@@ -163,7 +159,7 @@ export async function resumeIssue(args, context = {}, options = {}) {
       await pinHandoff(repository, handoffRef, await readEvidence(repository, handoffRef));
       const h = await readTaskHandoff(repository, handoffRef, args.task);
       requireValue(['issue-handoff', 'issue-zero-handoff'].includes(h.kind) && h.recovery.suspensionRef === args.suspensionRef &&
-        (h.recovery.reconciliationRef ?? null) === (args.reconciliationRef ?? null) && equal(await snapshot(repository), h.after), 'Stale issue handoff');
+        equal(await snapshot(repository), h.after), 'Stale issue handoff');
       const resumed = await scaffoldTasks({
         operation: 'issue-resume', feature_id: args.task.featureId, task_id: args.task.taskId,
         payload: { reference: args.suspensionRef, handoff: handoffRef },
@@ -192,10 +188,10 @@ export async function resumeIssue(args, context = {}, options = {}) {
       await currentIndexTree(repository, path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index']))) === expectedIndex, 'Restored source differs from authenticated transplant; preserve saved snapshots');
     const h = { kind: parked.attempt ? 'issue-handoff' : 'issue-zero-handoff', repository,
       ...(feature.workflow.instance_id ? { featureInstanceId: feature.workflow.instance_id } : {}), task: args.task, attempt: previous.attempt,
-      args: { ...previous.args, baseRef: head, requirements, reconciliationRef: args.reconciliationRef, previousAttempt: parked.args.previousAttempt },
+      args: { ...previous.args, baseRef: head, requirements, previousAttempt: parked.args.previousAttempt },
       before: after, after, result: { status: 'BLOCKED', reason: 'ISSUE_RECOVERY_READY' },
       recovery: { suspensionRef: args.suspensionRef, feature, featureBaseRef: args.featureBaseRef, branch: args.branch,
-        reconciliationRef: args.reconciliationRef, indexTree: expectedIndex } };
+        indexTree: expectedIndex } };
     handoffRef = await retainEvidence(repository, h);
     await options.interrupt?.('afterHandoffRetention');
     await pinHandoff(repository, handoffRef, h);

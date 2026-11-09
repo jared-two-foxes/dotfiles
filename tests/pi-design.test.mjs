@@ -125,7 +125,9 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   assert.match(checkpoint, /name: "checkpoint_verified_task"/);
   assert.doesNotMatch(recovery, /name: "checkpoint_verified_task"/);
   assert.match(validation, /name: "validate_feature"/);
-  assert.equal(((native + recovery + validation).match(/authorize: async \(\) =>\s*featureAuthorized/g) ?? []).length, 4);
+  // Suspend/resume and validation ask the retained approval; the rewrite and foreign-commit tools read
+  // Scaffold's recorded approval themselves (approved(feature)).
+  assert.equal(((native + recovery + validation).match(/authorize: async \(\) =>\s*featureAuthorized/g) ?? []).length, 2);
   assert.match(read('pi/agent/extensions/execute-and-review/delivery.mjs'), /requireFeatureAuthorization/);
   assert.match(read('pi/agent/extensions/checkpoint/finalization.mjs'), /featureAuthorized/);
   const adapter = read('pi/agent/extensions/execute-and-review/adapter.mjs');

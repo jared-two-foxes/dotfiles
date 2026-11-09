@@ -241,9 +241,9 @@ export function validateRequest(params) {
       "Invalid foreign history range",
     );
   } else if (operation === "history-rewrite") {
-    fields(payload, ["old_head", "new_head", "history", "verification"]);
+    fields(payload, ["old_head", "new_head", "new_base", "history", "verification"]);
     requireValue(
-      isCommit(payload.old_head) && isCommit(payload.new_head) &&
+      isCommit(payload.old_head) && isCommit(payload.new_head) && isCommit(payload.new_base) &&
         Array.isArray(payload.history) && isReference(payload.verification),
       "Invalid history rewrite",
     );
@@ -395,7 +395,7 @@ export function validateResponse(data, params) {
       requireValue(
         data.schema_version === 3 &&
           /^[a-f0-9]{64}$/.test(data.feature.direction_scope) &&
-          isCommit(data.feature.head) && Array.isArray(data.feature.history) &&
+          isCommit(data.feature.head) && isCommit(data.feature.base) && Array.isArray(data.feature.history) &&
           data.feature.workflow.kind === "recursive-issues/v1" &&
           ["design", "implement"].includes(data.feature.workflow.phase) &&
           data.feature.tasks[data.feature.workflow.root_id] &&

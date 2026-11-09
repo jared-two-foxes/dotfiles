@@ -1,10 +1,8 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
-import { reconcileFeature } from "./reconciliation.mjs";
-import { recoverInterruptedTaskRebase } from "./interrupted-rebase.mjs";
+import { rewriteFeatureHistory } from "./reconciliation.mjs";
 import { adoptCommits, inspectDrift } from "./foreign-history.mjs";
-import { createRebaseInspectionTool } from "./rebase-inspection.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
 
@@ -31,7 +29,6 @@ export default function (pi: ExtensionAPI) {
           featureBaseRef: Type.String(),
           defaultBranch: Type.String(),
           protectedBranches: Type.Array(Type.String()),
-          reconciliationRef: Type.Optional(Type.String()),
           ...(operation === "suspend"
             ? {
                 previousAttempt: Type.Optional(Type.String()),
@@ -140,91 +137,19 @@ export default function (pi: ExtensionAPI) {
       },
     });
   pi.registerTool({
-    name: "recover_interrupted_task_rebase",
-    label: "Recover interrupted task after rebase",
+    name: "rewrite_feature_history",
+    label: "Verify and record a rebase",
     description:
-      "Explicit recovery of an active/blocked/failed task after rebase. Preserve current files/index, old receipt chain, criteria/findings and consumed attempts. Verify only the completed prefix in a disposable worktree, then retain a non-PASSED handoff for execute_and_review.previousAttempt. No source writes, stash/reset, task lifecycle changes or attempt reset. Requires narrow UI authorization; next source correction remains within the approved feature direction.",
-    parameters: Type.Object({
-      task: Type.Object({
-        featureId: Type.String(),
-        taskId: Type.String(),
-        designRef: Type.String(),
-      }),
-      previousAttempt: Type.String({
-        description:
-          "Latest retained receipt of the interrupted task; all consumed attempts must remain linked",
-      }),
-      featureId: Type.String(),
-      designRef: Type.String(),
-      branch: Type.String(),
-      featureBaseRef: Type.String(),
-      oldHeadRef: Type.String(),
-      upstreamBaseRef: Type.String(),
-      headRef: Type.String(),
-      defaultBranch: Type.String(),
-      protectedBranches: Type.Array(Type.String()),
-      previousReconciliationRef: Type.Optional(Type.String()),
-      prefixEvidenceRef: Type.Optional(Type.String()),
-      resumeHandoffRef: Type.Optional(Type.String()),
-      buildCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testCommand: Type.Array(Type.String(), { minItems: 1 }),
-      testSuccessPattern: Type.String(),
-      integrationChecks: Type.Optional(
-        Type.Array(
-          Type.Object({
-            name: Type.String(),
-            command: Type.Array(Type.String(), { minItems: 1 }),
-            successPattern: Type.String(),
-          }),
-        ),
-      ),
-      checkTimeoutMs: Type.Optional(Type.Integer()),
-      review: Type.Optional(
-        Type.Object({
-          model: Type.Optional(Type.String()),
-          wallClockBudgetSecs: Type.Optional(Type.Integer()),
-          maxTurns: Type.Optional(Type.Integer()),
-          maxCostUsd: Type.Optional(Type.Number()),
-          maxToolCalls: Type.Optional(Type.Integer()),
-          maxRepeatedActions: Type.Optional(Type.Integer()),
-          maxCompletionAttempts: Type.Optional(Type.Integer()),
-        }),
-      ),
-    }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await recoverInterruptedTaskRebase(
-        params,
-        { directory: ctx.cwd, abort: signal },
-        {
-          authorize: async () =>
-            featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
-        },
-      );
-      return {
-        content: [
-          { type: "text" as const, text: JSON.stringify(result, null, 2) },
-        ],
-        isError: result.status === "BLOCKED",
-        details: result,
-      };
-    },
-  });
-  pi.registerTool({
-    name: "reconcile_feature_rebase",
-    label: "Verify feature after rebase",
-    description:
-      "Verification-only recovery after a user-performed rebase BETWEEN tasks. Requires clean feature branch, original checkpoint history and fresh approved full-project checks plus independent review. Preserves original design/receipts; never rebases, edits, commits or changes Scaffold task status. Retain returned evidenceRef for checkpoint_verified_task and validate_feature.",
+      "Recovery after a user-performed rebase of the feature branch BETWEEN tasks (suspend any active task first). Requires a clean feature branch, the ledger's recorded head, the new upstream base, and fresh approved full-project checks plus independent review of the rebased result. Maps every recorded checkpoint and foreign commit onto the rebased commits (none dropped, squashed, split, reordered or added), then records a history-rewrite entry; the previous history stays in the ledger. Never rebases, edits Git or changes task status. Not for commits the ledger has not recorded (use adopt_foreign_commits).",
     parameters: Type.Object({
       featureId: Type.String(),
       designRef: Type.String(),
       branch: Type.String(),
-      featureBaseRef: Type.String(),
-      oldHeadRef: Type.String(),
-      upstreamBaseRef: Type.String(),
-      headRef: Type.String(),
+      oldHeadRef: Type.String({ description: "The head the ledger currently records (full SHA)" }),
+      upstreamBaseRef: Type.String({ description: "The commit the branch was rebased onto (full SHA)" }),
+      headRef: Type.String({ description: "Current HEAD after the rebase (full SHA)" }),
       defaultBranch: Type.String(),
       protectedBranches: Type.Array(Type.String()),
-      previousReconciliationRef: Type.Optional(Type.String()),
       resumeEvidenceRef: Type.Optional(Type.String()),
       buildCommand: Type.Array(Type.String(), { minItems: 1 }),
       testCommand: Type.Array(Type.String(), { minItems: 1 }),
@@ -252,14 +177,7 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await reconcileFeature(
-        params,
-        { directory: ctx.cwd, abort: signal },
-        {
-          authorize: async () =>
-            featureAuthorized(params, { directory: ctx.cwd, abort: signal }),
-        },
-      );
+      const result = await rewriteFeatureHistory(params, { directory: ctx.cwd, abort: signal }, {});
       return {
         content: [
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
@@ -318,5 +236,4 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool(createRebaseInspectionTool(Type));
 }

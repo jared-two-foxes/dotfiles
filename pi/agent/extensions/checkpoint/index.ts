@@ -15,12 +15,6 @@ export default function (pi: ExtensionAPI) {
         designRef: Type.String(),
       }),
       evidenceRef: Type.String(),
-      reconciliationRef: Type.Optional(
-        Type.String({
-          description:
-            "Latest successful rebase reconciliation evidence, if history was rewritten",
-        }),
-      ),
       featureBaseRef: Type.String({
         description:
           "Original feature-start SHA, preserved across all task checkpoints",

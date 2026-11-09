@@ -24,12 +24,12 @@ const params = operation => ({ operation, feature_id: 'F1',
     'direction-approve': { payload: { scope_digest: 'd'.repeat(64), capabilities: ['design'] } },
     'attempt-record': { payload: { attempt: 1, status: 'PASSED', receipt: 'sha256:' + 'a'.repeat(64), base: 'a'.repeat(40), tree: 'b'.repeat(40) } },
     'history-foreign': { payload: { from: 'a'.repeat(40), to: 'b'.repeat(40), source: 'user-commits', approval: 'sha256:' + 'c'.repeat(64), commits: [{ commit: 'b'.repeat(40), parents: ['a'.repeat(40)], subject: 'user' }] } },
-    'history-rewrite': { payload: { old_head: 'a'.repeat(40), new_head: 'b'.repeat(40), history: [], verification: 'sha256:' + 'c'.repeat(64) } },
+    'history-rewrite': { payload: { old_head: 'a'.repeat(40), new_head: 'b'.repeat(40), new_base: 'c'.repeat(40), history: [], verification: 'sha256:' + 'c'.repeat(64) } },
     'artifact-put': { payload: { receipt: 1 } },
     'artifact-get': { payload: { reference: 'sha256:' + 'c'.repeat(64) } },
     'issue-resume': { payload: { reference: 'sha256:' + 'e'.repeat(64), handoff: 'sha256:' + 'f'.repeat(64) } } }[operation] ?? {}),
 });
-const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 3, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,direction_scope:'d'.repeat(64),head:data.feature.baseline,history:[],workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
+const success = data => ({ code: 0, stdout: JSON.stringify({ schema_version: 3, ...data, ...(data.feature ? {feature:{...data.feature,original_baseline:data.feature.baseline,direction_scope:'d'.repeat(64),head:data.feature.baseline,base:data.feature.baseline,history:[],workflow:{kind:'recursive-issues/v1',phase:'implement',root_id:'T1'}}} : {}) }), stderr: '' });
 function response(operation) {
   if (operation === 'artifact-put') return { code: 0, stdout: JSON.stringify({ schema_version: 3, reference: 'sha256:' + 'c'.repeat(64) }), stderr: '' };
   if (operation === 'artifact-get') return { code: 0, stdout: JSON.stringify({ schema_version: 3, artifact: { receipt: 1 } }), stderr: '' };

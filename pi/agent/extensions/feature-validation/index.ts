@@ -15,12 +15,6 @@ export default function (pi: ExtensionAPI) {
       branch: Type.String(),
       featureBaseRef: Type.String(),
       headRef: Type.String(),
-      reconciliationRef: Type.Optional(
-        Type.String({
-          description:
-            "Latest successful rebase reconciliation evidence, if history was rewritten",
-        }),
-      ),
       buildCommand: Type.Array(Type.String(), { minItems: 1 }),
       testCommand: Type.Array(Type.String(), { minItems: 1 }),
       testSuccessPattern: Type.String({

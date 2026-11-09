@@ -8,7 +8,7 @@ import { scaffoldCall } from '../scaffold/client.mjs';
 import { featureInstanceId } from './feature-instance.mjs';
 import { validateBinding } from '../delivery-state/binding.mjs';
 import { sameVerification, correctionVerification } from './checks.mjs';
-import { readReconciliation } from './reconciliation.mjs';
+import { verifyHistory } from './history.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
 
@@ -61,8 +61,6 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     ['PASSED', 'NEEDS_DESIGN', 'BLOCKED'].includes(record.result?.status), 'Invalid task correction receipt');
   if (record.kind === 'issue-zero-handoff') {
     const parked = await readEvidence(repository, record.recovery.suspensionRef);
-    const { suspensionAnchor } = await import('../delivery-state/issue-anchors.mjs');
-    const { checkpointHistory } = await import('./checkpoint-history.mjs');
     requireValue(parked.kind === 'issue-suspension' && parked.attempt === 0 && !parked.args.previousAttempt &&
       parked.args.baseRef === parked.before.head && equal(parked.args.task, binding) &&
       record.result.reason === 'ISSUE_RECOVERY_READY' && parked.result.reason === 'ISSUE_SUSPENDED' &&
@@ -74,21 +72,15 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     requireValue(git(repository, ['rev-parse', sourceRef + '^{tree}']) === parked.before.tree &&
       git(repository, ['show', '-s', '--format=%P', sourceRef]) === parked.before.head &&
       git(repository, ['rev-parse', sourceRef + '-index^{tree}']) === parked.before.tree, 'Missing zero-attempt suspension snapshots');
-    await suspensionAnchor(repository, parked, record.recovery.feature, record.recovery);
-    const anchor = record.recovery.reconciliationRef ? await readReconciliation(repository, record.recovery.reconciliationRef,
-      record.recovery.feature, record.recovery) : null;
-    await checkpointHistory(repository, record.recovery.feature, { head: record.args.baseRef,
-      baseline: record.recovery.featureBaseRef, branch: record.recovery.branch, anchor });
+    // The recovery's feature copy was taken at the handoff, when the ledger head was this baseline.
+    verifyHistory(repository, record.recovery.feature, { head: record.args.baseRef });
     return { record, records: [record] };
   }
   if (record.kind === 'issue-handoff') {
     const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
     const previous = prior.record, recovery = record.recovery;
     const parked = await readEvidence(repository, recovery.suspensionRef);
-    const { suspensionAnchor } = await import('../delivery-state/issue-anchors.mjs');
-    await suspensionAnchor(repository, parked, recovery.feature, recovery);
     const { issueDesignRequirements } = await import('../scaffold/contracts.mjs');
-    const { checkpointHistory } = await import('./checkpoint-history.mjs');
     requireValue(parked.kind === 'issue-suspension' && equal(parked.task, binding) &&
       parked.args.previousAttempt === record.args.previousAttempt && equal(parked.after, previous.after) &&
       previous.result.status !== 'PASSED' && previous.attempt === record.attempt &&
@@ -107,45 +99,13 @@ export async function authenticateAttemptChain(repository, reference, binding, s
     const savedIndex = git(repository, ['rev-parse', sourceRef + '-index']);
     requireValue(git(repository, ['rev-parse', savedIndex + '^{tree}']) === parked.suspension.indexTree &&
       recovery.indexTree === git(repository, ['merge-tree', '--write-tree', '--merge-base=' + previous.args.baseRef, record.args.baseRef, savedIndex]).split('\n')[0], 'Issue index handoff mismatch');
-    const anchor = recovery.reconciliationRef ? await readReconciliation(repository, recovery.reconciliationRef,
-      recovery.feature, { featureBaseRef: recovery.featureBaseRef, branch: recovery.branch }) : null;
-    await checkpointHistory(repository, recovery.feature, { head: record.args.baseRef,
-      baseline: recovery.featureBaseRef, branch: recovery.branch, anchor });
+    verifyHistory(repository, recovery.feature, { head: record.args.baseRef });
     const records = [...prior.records, record];
     if (reference !== pendingReference) for (const [index, retained] of records.entries()) for (const side of ['before', 'after']) {
       const ref = 'refs/pi-task-recoveries/' + reference.split(':').at(-1) + '/record-' + index + '-' + side;
       requireValue(git(repository, ['rev-parse', ref + '^{tree}']) === retained[side].tree &&
         git(repository, ['show', '-s', '--format=%P', ref]) === retained.args.baseRef,
       'Issue recovery audit snapshots missing or changed');
-    }
-    return { record, records };
-  }
-  if (record.kind === 'rebase-handoff') {
-    const prior = await authenticateAttemptChain(repository, record.args.previousAttempt, binding, seen, pendingReference);
-    const previous = prior.record, recovery = record.recovery;
-    requireValue(previous.result.status !== 'PASSED' && previous.attempt === record.attempt &&
-      previous.args.baseRef !== record.args.baseRef && sameVerification(previous.args, record.args) &&
-      record.args.requirements === carriedRequirements(previous.args.requirements, prior.records) &&
-      record.result.status === 'BLOCKED' && record.result.reason === 'REBASE_RECOVERY_READY' &&
-      equal(record.before, record.after) && recovery?.feature?.tasks?.[binding.taskId] &&
-      ['in_progress', 'blocked', 'failed'].includes(recovery.feature.tasks[binding.taskId].status), 'Invalid interrupted task handoff');
-    const anchor = await readReconciliation(repository, recovery.reconciliationRef, recovery.feature,
-      { featureBaseRef: recovery.featureBaseRef, branch: recovery.branch });
-    requireValue(anchor.head === record.args.baseRef && anchor.record.oldHead === previous.args.baseRef &&
-      anchor.record.interruptedTask === binding.taskId && equal(anchor.record.interruptedSource, record.before) &&
-      !record.before.bookkeepingVisible && record.before.tree === rebasedAttemptTree(repository, previous, record.args.baseRef).tree &&
-      [git(repository, ['rev-parse', record.args.baseRef + '^{tree}']), record.before.tree].includes(recovery.indexTree),
-    'Handoff tree, completed prefix or index does not match retained source');
-    const records = [...prior.records, record];
-    if (reference !== pendingReference) {
-      const prefix = 'refs/pi-task-recoveries/' + reference.split(':').at(-1);
-      for (const [index, retained] of records.entries()) for (const side of ['before', 'after']) {
-        const ref = prefix + '/record-' + index + '-' + side;
-        requireValue(git(repository, ['rev-parse', ref + '^{tree}']) === retained[side].tree &&
-          git(repository, ['show', '-s', '--format=%P', ref]) === retained.args.baseRef &&
-          git(repository, ['show', '-s', '--format=%B', ref]) === 'Pi task recovery snapshot ' + index + ' ' + side,
-        'Recovery audit snapshots are missing or changed; resume retained handoff to repair only missing refs');
-      }
     }
     return { record, records };
   }
@@ -166,7 +126,7 @@ export async function authenticateAttemptChain(repository, reference, binding, s
 
 export async function readTaskHandoff(repository, reference, binding) {
   const chain = await authenticateAttemptChain(repository, reference, binding);
-  requireValue(['rebase-handoff', 'issue-handoff', 'issue-zero-handoff'].includes(chain.record.kind), 'Expected an authenticated task rebase handoff');
+  requireValue(['issue-handoff', 'issue-zero-handoff'].includes(chain.record.kind), 'Expected an authenticated issue handoff');
   await assertLatestAttempt(repository, reference, binding, chain.record.attempt);
   return chain.record;
 }

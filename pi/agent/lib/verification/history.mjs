@@ -48,7 +48,7 @@ export function verifyHistory(repository, feature, { head } = {}) {
       cursor = segment.from;
     }
   }
-  requireValue(cursor === feature.original_baseline, 'Recorded history does not lead back to the original baseline');
+  requireValue(cursor === (feature.base ?? feature.original_baseline), 'Recorded history does not lead back to its base');
   return feature.history;
 }
 

@@ -71,7 +71,7 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const feature = await state(repository, args.featureId, options);
   requireValue(feature.design_ref === args.designRef, 'Approved design identity mismatch');
   const design = approvedDesign(repository, feature);
-  requireValue(feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
+  requireValue(feature.base === args.featureBaseRef, 'History base mismatch: the ledger records ' + feature.base + ' (the fork point, or the commit the branch was last rebased onto)');
   requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
   // The authentication below is a pure function of the feature (minus the validation
   // state only this gate writes), these arguments, immutable Git objects and the
