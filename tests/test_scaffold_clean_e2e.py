@@ -70,8 +70,18 @@ def tasks(workspace, operation, identifier, *, task=None, payload=None, expected
     return json.loads(completed.stdout) if expected == 0 else completed
 
 
-def saved(workspace):
-    return json.loads((workspace / ".scaffold" / "tasks.json").read_text("utf-8"))
+def open_features(workspace):
+    return sorted(item["id"] for item in tasks_features(workspace))
+
+
+def tasks_features(workspace):
+    completed = process(workspace, "features")
+    return json.loads(completed.stdout)["features"]
+
+
+def ledgers(workspace):
+    root = workspace / ".scaffold" / "features"
+    return {path.parent.name: path.read_bytes() for path in root.glob("*/ledger.jsonl")}
 
 
 @pytest.fixture
@@ -115,14 +125,13 @@ def assert_protected(workspace, expected):
     assert protected_snapshot(workspace) == expected
 
 
-def test_scoped_clean_preserves_other_feature_git_and_evidence_then_reinitializes(workspace):
+def test_scoped_clean_closes_one_feature_and_keeps_ledgers_git_and_evidence(workspace):
     baseline = git(workspace, "rev-parse", "HEAD")
     first = tasks(workspace, "init", "F1", payload=feature("F1", baseline))
     tasks(workspace, "init", "F2", payload=feature("F2", baseline))
     original_instance = first["feature"]["workflow"]["instance_id"]
     assert len(original_instance) == 32
 
-    # An in-progress feature has design, lifecycle and evidence associations.
     tasks(workspace, "design-record", "F1", task="F1", payload={
         "summary": "Original design",
         "verification": "Check completed tests",
@@ -130,91 +139,99 @@ def test_scoped_clean_preserves_other_feature_git_and_evidence_then_reinitialize
         "disposition": "leaf",
     })
     tasks(workspace, "design-finish", "F1")
+    scope = tasks(workspace, "list", "F1")["feature"]["direction_scope"]
+    tasks(workspace, "direction-approve", "F1", payload={"scope_digest": scope, "capabilities": ["fixture"]})
     tasks(workspace, "start", "F1", task="F1")
-    prior_store = saved(workspace)
-    other_feature = prior_store["features"]["F2"]
-    task_state = workspace / ".scaffold" / "tasks.json"
     lock_file = workspace / ".scaffold" / ".tasks.lock"
     lock_before = lock_file.read_bytes()
-    before = task_state.read_bytes()
+    before = ledgers(workspace)
     protected = protected_snapshot(workspace)
+    assert open_features(workspace) == ["F1", "F2"]
 
     dry = process(workspace, "clean", "--feature", "F1", "--dry-run")
     assert "Affected features: 1" in dry.stdout
     assert "F1:" in dry.stdout
-    assert task_state.read_bytes() == before
+    assert ledgers(workspace) == before
 
     # A pipe containing the literal 'yes' cannot grant interactive approval.
     rejected = process(workspace, "clean", "--feature", "F1", payload="yes", expected=1)
     assert "Confirmation requires a terminal" in rejected.stderr
-    assert task_state.read_bytes() == before
+    assert ledgers(workspace) == before
 
-    removed = process(workspace, "clean", "--feature", "F1", "--yes")
-    assert "Removed 1 feature(s)" in removed.stdout
-    assert saved(workspace)["features"] == {"F2": other_feature}
+    closed = process(workspace, "clean", "--feature", "F1", "--yes")
+    assert "Closed 1 feature(s)" in closed.stdout
+    assert open_features(workspace) == ["F2"]
+    # Nothing is deleted: every ledger remains; only F1's gained a closing entry.
+    after = ledgers(workspace)
+    assert set(after) == set(before)
+    changed = [name for name in after if after[name] != before[name]]
+    assert len(changed) == 1 and changed[0].startswith("F1.")
+    assert after[changed[0]].startswith(before[changed[0]])
     assert lock_file.is_file() and lock_file.read_bytes() == lock_before
     assert_protected(workspace, protected)
 
-    # The old active session cannot complete or checkpoint the missing feature.
+    # The old active session cannot complete or checkpoint the closed feature.
     completion = tasks(workspace, "complete", "F1", task="F1", payload={
         "feature_id": "F1", "task_id": "F1", "result": "PASSED",
-        "source": "conductor", "reference": "retained-old-receipt",
+        "source": "conductor", "reference": "sha256:" + "0" * 64,
         "summary": "Stale pre-clean result",
     }, expected=1)
     assert completion.returncode == 1
     checkpoint = tasks(workspace, "checkpoint-record", "F1", task="F1", payload={
-        "commit": baseline, "reference": "retained-old-receipt",
+        "commit": baseline, "parent": baseline, "tree": baseline,
+        "reference": "sha256:" + "0" * 64,
     }, expected=1)
     assert checkpoint.returncode == 1
-    assert saved(workspace)["features"] == {"F2": other_feature}
+    assert ledgers(workspace) == after
 
     recreated = tasks(workspace, "init", "F1", payload=feature("F1", baseline))
     assert recreated["feature"]["workflow"]["instance_id"] != original_instance
     assert recreated["feature"]["design_ref"] == first["feature"]["design_ref"]
     assert recreated["feature"]["tasks"]["F1"]["status"] == "pending"
-    assert saved(workspace)["features"]["F2"] == other_feature
+    assert "direction" not in recreated["feature"]  # a new instance needs its own approval
+    assert open_features(workspace) == ["F1", "F2"]
     assert_protected(workspace, protected)
 
 
-def test_all_clean_confirmation_noops_and_schema_validation(workspace):
+def test_all_clean_confirmation_noops_and_damaged_ledgers_fail_closed(workspace):
     baseline = git(workspace, "rev-parse", "HEAD")
     for identifier in ("F1", "F2"):
         tasks(workspace, "init", identifier, payload=feature(identifier, baseline))
-    state = workspace / ".scaffold" / "tasks.json"
-    before = state.read_bytes()
+    before = ledgers(workspace)
     protected = protected_snapshot(workspace)
 
     assert "Affected features: 2" in process(
         workspace, "clean", "--all", "--dry-run"
     ).stdout
-    assert state.read_bytes() == before
+    assert ledgers(workspace) == before
     denied = process(workspace, "clean", "--all", expected=1)
     assert "Confirmation requires a terminal" in denied.stderr
-    assert state.read_bytes() == before
+    assert ledgers(workspace) == before
 
     invalid = process(workspace, "clean", "--all", "--feature", "F1", expected=2)
-    assert invalid.stderr and state.read_bytes() == before
+    assert invalid.stderr and ledgers(workspace) == before
     invalid = process(workspace, "clean", expected=2)
-    assert invalid.stderr and state.read_bytes() == before
+    assert invalid.stderr and ledgers(workspace) == before
 
     lock = workspace / ".scaffold" / ".tasks.lock"
     lock_before = lock.read_bytes()
     process(workspace, "clean", "--all", "--yes")
-    assert saved(workspace) == {"schema_version": 2, "features": {}}
+    assert open_features(workspace) == []
+    assert set(ledgers(workspace)) == set(before)  # closed, never deleted
     assert lock.read_bytes() == lock_before
     assert_protected(workspace, protected)
 
-    empty = state.read_bytes()
-    assert "Nothing to clean" in process(workspace, "clean", "--all").stdout
-    assert "Nothing to clean" in process(
-        workspace, "clean", "--feature", "F1"
-    ).stdout
-    assert state.read_bytes() == empty
+    closed = ledgers(workspace)
+    assert "Nothing to close" in process(workspace, "clean", "--all").stdout
+    assert "Nothing to close" in process(workspace, "clean", "--feature", "F1").stdout
+    assert ledgers(workspace) == closed
 
-    # Corrupt/unsupported schema never becomes an implicit migration or reset.
-    for bad in (b"{invalid JSON", b'{"schema_version":1,"features":{}}'):
-        state.write_bytes(bad)
-        failure = process(workspace, "clean", "--all", "--yes", expected=1)
-        assert "scaffold clean:" in failure.stderr
-        assert state.read_bytes() == bad
-        assert_protected(workspace, protected)
+    # A damaged ledger is never repaired, reset or silently skipped.
+    name = next(iter(closed))
+    path = workspace / ".scaffold" / "features" / name / "ledger.jsonl"
+    path.write_bytes(b"{invalid JSON\n" + closed[name])
+    damaged = path.read_bytes()
+    failure = process(workspace, "clean", "--all", "--yes", expected=1)
+    assert "scaffold clean:" in failure.stderr
+    assert path.read_bytes() == damaged
+    assert_protected(workspace, protected)
