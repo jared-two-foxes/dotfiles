@@ -2,15 +2,16 @@
 // Print retained delivery timings for a checkout: `node timing-summary.mjs [repository]`.
 // Read-only. Receipts written before timing telemetry existed are listed as unavailable.
 import path from "node:path";
+import { readdir } from "node:fs/promises";
 import { git } from "../../lib/git/tree.mjs";
 import { repositoryTimings } from "../../lib/verification/timings.mjs";
 
 const repository = path.resolve(
   git(process.argv[2] ?? process.cwd(), ["rev-parse", "--show-toplevel"]).trim(),
 );
-const directory = path.resolve(
-  repository,
-  git(repository, ["rev-parse", "--git-path", "pi-conductor-evidence"]).trim(),
+const featuresRoot = path.join(repository, ".scaffold", "features");
+const directory = await Promise.all(
+  (await readdir(featuresRoot).catch(() => [])).map((name) => path.join(featuresRoot, name, "artifacts")),
 );
 const fmt = (ms) => (ms === null || ms === undefined ? "-" : (ms / 1000).toFixed(1) + "s");
 const rows = await repositoryTimings(directory).catch((error) => {

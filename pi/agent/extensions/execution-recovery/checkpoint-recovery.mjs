@@ -1,3 +1,4 @@
+import { workDirectory } from "../../lib/git/workspace.mjs";
 // Commit-only recovery for an already verified attempt.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,10 +55,7 @@ export async function finalizeVerifiedTask(args, context = {}, options = {}) {
         current.digest === record.after.digest,
       "Current source/index differs from the reviewed receipt",
     );
-    const root = path.resolve(
-      repository,
-      git(repository, ["rev-parse", "--git-path", "pi-conductor-finalization"]),
-    );
+    const root = workDirectory(repository, "finalization");
     await mkdir(root, { recursive: true, mode: 0o700 });
     const info = await lstat(root);
     requireValue(

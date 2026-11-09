@@ -1,6 +1,7 @@
 import { isDeepStrictEqual as equal } from "node:util";
 import { issueFeature, scaffoldTasks } from "../scaffold/adapter.mjs";
-import { readEvidence, taskEvidenceReferences } from "../../lib/evidence/store.mjs";
+import { readEvidence } from "../../lib/evidence/store.mjs";
+import { taskReceipts } from "../../lib/evidence/attempts.mjs";
 import { authenticateAttemptChain } from "../../lib/verification/attempt-chain.mjs";
 import { verificationChecks, correctionVerification } from "../../lib/verification/checks.mjs";
 import { issueRequirements } from "../../lib/scaffold/contracts.mjs";
@@ -49,12 +50,9 @@ export async function prepareDelivery(repository, feature, issue, args, options 
   assertDeliveryJournal(repository, args.task, journal, instanceId);
   if (journal?.inflight) {
     // Recover a terminal response lost before the Scaffold finish transaction.
-    const terminal = [];
-    for (const reference of await taskEvidenceReferences(repository)) {
-      const r = await readEvidence(repository, reference);
-      if (r.startedReference === journal.inflight && equal(r.task, args.task))
-        terminal.push(reference);
-    }
+    const terminal = (await taskReceipts(repository, args.task, options))
+      .filter(({ record }) => record.startedReference === journal.inflight && equal(record.task, args.task))
+      .map(({ reference }) => reference);
     requireValue(
       terminal.length === 1 && terminal[0] === args.previousAttempt,
       "INVOCATION_RECOVERY_REQUIRED: retained intent may still be active; inspect terminal stages, never replay",

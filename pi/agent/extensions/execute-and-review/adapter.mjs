@@ -13,6 +13,8 @@ import { requireBroadCheckJustifications } from "../../lib/verification/check-sc
 import { validateBinding } from "../../lib/delivery-state/binding.mjs";
 import { snapshot } from "../../lib/git/snapshot.mjs";
 import { readEvidence, retainEvidence } from "../../lib/evidence/store.mjs";
+import { retainAttempt } from "../../lib/evidence/attempts.mjs";
+import { ensureWorkDirectory } from "../../lib/git/workspace.mjs";
 import { verifiedResult } from "../../lib/verification/result.mjs";
 import {
   readTaskHandoff,
@@ -211,14 +213,7 @@ async function executeAttempt(args, context = {}, options = {}) {
           : {}),
       };
     });
-    const root = path.resolve(
-      repository,
-      await git(
-        repository,
-        ["rev-parse", "--git-path", "pi-conductor-runs"],
-        context.abort,
-      ),
-    );
+    const root = await ensureWorkDirectory(repository, "runs");
     const workflow = await prepareWorkflow(
       repository,
       root,
@@ -596,13 +591,8 @@ export async function executeAndReview(args, context = {}, options = {}) {
         );
       return result;
     };
-    boundaryPath = path.resolve(
-      repository,
-      await git(
-        repository,
-        ["rev-parse", "--git-path", "pi-conductor-evidence"],
-        context.abort,
-      ),
+    boundaryPath = path.join(
+      await ensureWorkDirectory(repository, "attempts"),
       randomUUID() + ".boundary",
     );
     const verificationBoundary = [
@@ -633,7 +623,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
       });
       if (invoked) return await finishDelivery(result);
       const after = await snapshot(repository);
-      const reference = await retainEvidence(repository, {
+      const reference = await retainAttempt(repository, {
         repository,
       ...(instanceId ? { featureInstanceId: instanceId } : {}),
         task: args.task,
@@ -705,7 +695,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
         actualResult: result,
       });
     try {
-      const reference = await retainEvidence(repository, {
+      const reference = await retainAttempt(repository, {
         repository,
       ...(instanceId ? { featureInstanceId: instanceId } : {}),
         task: args.task,

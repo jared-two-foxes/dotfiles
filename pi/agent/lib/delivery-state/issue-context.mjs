@@ -1,24 +1,22 @@
+import { workDirectory } from '../git/workspace.mjs';
 // Data-only, content-addressed issue handoffs. Never authorizes execution or changes graph/source.
 import path from 'node:path';
 import { lstat, mkdir, readFile, writeFile, realpath, readdir } from 'node:fs/promises';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from '../git/tree.mjs';
-import { digest, readEvidence, taskEvidenceReferences } from '../evidence/store.mjs';
+import { digest, readEvidence } from '../evidence/store.mjs';
+import { taskReceipts } from '../evidence/attempts.mjs';
 import { snapshot } from '../git/snapshot.mjs';
 import { authenticateAttemptChain, assertLatestAttempt } from '../verification/attempt-chain.mjs';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 async function directory(repository, create = false) {
-  const dir = path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'pi-issue-context']));
+  const dir = workDirectory(repository, 'handoffs');
   try { const s = await lstat(dir); requireValue(s.isDirectory() && !s.isSymbolicLink(), 'Unsafe issue handoff directory'); }
-  catch (e) { if (e.code !== 'ENOENT' || !create) throw e; await mkdir(dir, { mode: 0o700 }); }
+  catch (e) { if (e.code !== 'ENOENT' || !create) throw e; await mkdir(dir, { recursive: true, mode: 0o700 }); }
   return dir;
 }
 async function attempt(repository, binding) {
-  const receipts = [];
-  for (const reference of await taskEvidenceReferences(repository)) {
-    const record = await readEvidence(repository, reference);
-    if (equal(record.task, binding) && record.kind !== 'issue-suspension') receipts.push({ reference, record });
-  }
+  const receipts = (await taskReceipts(repository, binding)).filter(({ record }) => equal(record.task, binding) && record.kind !== 'issue-suspension');
   if (!receipts.length) return null;
   const replaced = new Set(receipts.flatMap(({ record }) => [record.args?.previousAttempt, record.startedReference]).filter(Boolean));
   const candidates = receipts.filter(r => !replaced.has(r.reference));

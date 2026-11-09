@@ -1,10 +1,11 @@
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
+import { git } from "../git/tree.mjs";
+import { verifyHistory } from "./history.mjs";
+
+// Execution may start only on the feature branch, at the ledger's recorded head, with Git matching
+// the history the ledger recorded (task checkpoints and approved foreign ranges).
 export async function issueExecutionScope(repository, feature, args) {
-  const { git } = await import("../git/tree.mjs");
-  const { readReconciliation } = await import("./reconciliation.mjs");
-  const { checkpointHistory } = await import("./checkpoint-history.mjs");
-  const branch = feature.branch,
-    baseline = feature.original_baseline;
+  const branch = feature.branch;
   requireValue(
     git(repository, ["symbolic-ref", "--short", "HEAD"]) === branch &&
       args.baseRef === git(repository, ["rev-parse", "HEAD"]),
@@ -21,16 +22,5 @@ export async function issueExecutionScope(repository, feature, args) {
     ),
     "Preserve original issue criteria/constraints in review requirements",
   );
-  const anchor = args.reconciliationRef
-    ? await readReconciliation(repository, args.reconciliationRef, feature, {
-        featureBaseRef: baseline,
-        branch,
-      })
-    : null;
-  await checkpointHistory(repository, feature, {
-    head: args.baseRef,
-    baseline,
-    branch,
-    anchor,
-  });
+  verifyHistory(repository, feature, { head: args.baseRef });
 }

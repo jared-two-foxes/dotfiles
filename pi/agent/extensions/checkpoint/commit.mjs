@@ -2,8 +2,7 @@
 import { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
 import { requireCurrentFeatureReceipt } from '../../lib/verification/feature-instance.mjs';
 export { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
-import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
-import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { verifyHistory } from '../../lib/verification/history.mjs';
 import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -76,33 +75,17 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
         h.evidence?.result === 'PASSED' && h.evidence?.feature_id === args.task.featureId && h.evidence?.task_id === args.task.taskId),
     'Scaffold must record completion with matching Conductor evidence');
     requireCurrentFeatureReceipt(feature, record);
-    if (args.reconciliationRef) {
-      const anchor = await readReconciliation(repository, args.reconciliationRef, feature, args);
-      // Preserve ancestry and inherited dependencies while excluding only the
-      // current task's not-yet-created checkpoint from the preceding history.
-      // This is a temporary view; persisted Scaffold completion stays unchanged.
-      await checkpointHistory(repository, { ...feature, tasks: {
-        ...feature.tasks, [args.task.taskId]: { ...task, status: 'pending' },
-      } },
-        { head: record.args.baseRef, baseline: args.featureBaseRef, branch, anchor });
-    } else {
-      git(repository, ['merge-base', '--is-ancestor', args.featureBaseRef, record.args.baseRef]);
-      if (record.args.baseRef !== args.featureBaseRef) {
-        const previousMessage = git(repository, ['show', '-s', '--format=%B', record.args.baseRef]);
-        const trailer = previousMessage.split('\n').find(line => line.startsWith('Pi-Task-Checkpoint: '));
-        const previous = JSON.parse(trailer?.slice('Pi-Task-Checkpoint: '.length) ?? 'null');
-        requireValue(previous?.schema === 'pi.task-checkpoint/v1' && previous.featureId === args.task.featureId &&
-          previous.designRef === args.task.designRef && previous.featureBaseRef === args.featureBaseRef && previous.branch === branch &&
-          !previous.reconciliationRef && previous.baseRef === git(repository, ['show', '-s', '--format=%P', record.args.baseRef]) &&
-          previous.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']),
-        'Feature baseline or checkpoint lineage mismatch; use reconcile_feature_rebase after history rewrites');
-      }
-    }
-    const provenance = { schema: 'pi.task-checkpoint/v1', ...args.task, evidenceRef: args.evidenceRef,
-      featureBaseRef: args.featureBaseRef, baseRef: record.args.baseRef, tree: record.after.tree, branch,
-      ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
+    // The ledger records the history so far, and Scaffold requires this checkpoint to continue from
+    // its head. Before the checkpoint is recorded that head is where the task started; after a lost
+    // response it is the checkpoint commit itself, which the recovery path below recognizes.
+    if (task.checkpoint) {
+      requireValue(task.checkpoint.reference === args.evidenceRef, 'A different checkpoint is already recorded for this task');
+      verifyHistory(repository, feature);
+    } else verifyHistory(repository, feature, { head: record.args.baseRef });
+    const provenance = { ...args.task, evidenceRef: args.evidenceRef, featureBaseRef: args.featureBaseRef,
+      baseRef: record.args.baseRef, tree: record.after.tree, branch };
     const message = 'Checkpoint verified task ' + args.task.taskId.replace(/[\r\n]/g, ' ') +
-      '\n\nPi-Task-Checkpoint: ' + JSON.stringify(provenance) + '\n';
+      '\n\nPi-Checkpoint: ' + args.task.taskId.replace(/[\r\n]/g, ' ') + '\n';
     // Lock the real index before any mutation. Existing locks are never removed.
     const indexPath = path.resolve(repository, git(repository, ['rev-parse', '--git-path', 'index']));
     requireValue(!(await lstat(indexPath)).isSymbolicLink(), 'Symlink index prohibited');

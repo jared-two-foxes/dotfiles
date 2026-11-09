@@ -9,8 +9,9 @@ import {
   digest,
   retainFeatureEvidence,
   readFeatureEvidence,
-  featureEvidenceReferences,
 } from '../../lib/evidence/store.mjs';
+// Rebase reconciliation is replaced by ledger history rewrites (next slice); listing is unavailable meanwhile.
+const featureEvidenceReferences = async () => { throw new Error('Rebase evidence listing is not available: reconciliation moves to ledger history rewrites'); };
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
 import { scaffoldTasks } from '../scaffold/adapter.mjs';
 import { planFor, meaningful, reviewScope } from '../../lib/verification/feature.mjs';
