@@ -4,6 +4,7 @@ import { requireCurrentFeatureReceipt } from '../../lib/verification/feature-ins
 export { authenticateTaskEvidence } from '../../lib/verification/task-evidence.mjs';
 import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { findAdoption } from '../../lib/verification/baseline-adoption.mjs';
 import { open, readFile, rename, unlink, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -66,7 +67,9 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
     try { remoteDefault = git(repository, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).replace(/^origin\//, ''); } catch {}
     requireValue(!protectedBranches.includes(branch) && branch !== remoteDefault, 'Protected branch checkpoint prohibited');
     requireValue(branch === args.branch, 'Current branch differs from authorized feature branch');
-    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches, ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
+    const adoption = feature ? await findAdoption(repository, feature) : null;
+    const scope = { repository, branch, ...args.task, featureBaseRef: args.featureBaseRef, protectedBranches, ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}),
+      ...(adoption ? { adoptionRef: adoption.reference } : {}) };
     // A feature grant deliberately excludes taskId, while binding feature/design/repository/branch/baseline.
     const { taskId, ...featureScope } = scope;
     const record = await authenticateTaskEvidence(repository, args.evidenceRef, args.task);
@@ -86,21 +89,22 @@ export async function checkpointVerifiedTask(args, { feature } = {}, context = {
       } },
         { head: record.args.baseRef, baseline: args.featureBaseRef, branch, anchor });
     } else {
-      git(repository, ['merge-base', '--is-ancestor', args.featureBaseRef, record.args.baseRef]);
-      if (record.args.baseRef !== args.featureBaseRef) {
+      git(repository, ['merge-base', '--is-ancestor', adoption?.baseline ?? args.featureBaseRef, record.args.baseRef]);
+      if (record.args.baseRef !== (adoption?.baseline ?? args.featureBaseRef)) {
         const previousMessage = git(repository, ['show', '-s', '--format=%B', record.args.baseRef]);
         const trailer = previousMessage.split('\n').find(line => line.startsWith('Pi-Task-Checkpoint: '));
         const previous = JSON.parse(trailer?.slice('Pi-Task-Checkpoint: '.length) ?? 'null');
         requireValue(previous?.schema === 'pi.task-checkpoint/v1' && previous.featureId === args.task.featureId &&
           previous.designRef === args.task.designRef && previous.featureBaseRef === args.featureBaseRef && previous.branch === branch &&
-          !previous.reconciliationRef && previous.baseRef === git(repository, ['show', '-s', '--format=%P', record.args.baseRef]) &&
+          !previous.reconciliationRef && (previous.adoptionRef ?? null) === (adoption?.reference ?? null) && previous.baseRef === git(repository, ['show', '-s', '--format=%P', record.args.baseRef]) &&
           previous.tree === git(repository, ['rev-parse', record.args.baseRef + '^{tree}']),
         'Feature baseline or checkpoint lineage mismatch; use reconcile_feature_rebase after history rewrites');
       }
     }
     const provenance = { schema: 'pi.task-checkpoint/v1', ...args.task, evidenceRef: args.evidenceRef,
       featureBaseRef: args.featureBaseRef, baseRef: record.args.baseRef, tree: record.after.tree, branch,
-      ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}) };
+      ...(args.reconciliationRef ? { reconciliationRef: args.reconciliationRef } : {}),
+      ...(adoption ? { adoptionRef: adoption.reference } : {}) };
     const message = 'Checkpoint verified task ' + args.task.taskId.replace(/[\r\n]/g, ' ') +
       '\n\nPi-Task-Checkpoint: ' + JSON.stringify(provenance) + '\n';
     // Lock the real index before any mutation. Existing locks are never removed.

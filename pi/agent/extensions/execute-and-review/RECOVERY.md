@@ -173,3 +173,38 @@ the system cannot manufacture missing independent verification.
 
 Install the matching Scaffold delivery-record implementation and Review's typed
 failure/obligation-assessment protocol before deploying this Pi extension.
+
+## Choosing a recovery: baseline adoption and its neighbours
+
+Run `inspect_feature_drift` first. It is read-only and names the one applicable recovery.
+
+| Situation | Operation | What it does |
+| --- | --- | --- |
+| You committed unrelated changes after authorization but **before any task started**; tree is clean | `adopt_feature_baseline` | Records a user-approved **execution baseline** at the new HEAD |
+| History was rewritten (rebase) between tasks | `reconcile_feature_rebase` | Re-verifies the rewritten completed prefix |
+| A rebase was interrupted mid-task | `recover_interrupted_task_rebase` | Carries the unfinished task's attempts across the rebase |
+| A task attempt failed or was interrupted | `previousAttempt` / issue handoff | Ordinary correction within the same feature direction |
+| A verified task's commit was lost or interrupted | `checkpoint_verified_task` (repeat) | Commit-only checkpoint recovery |
+
+### Baseline adoption
+
+The **original baseline** (Scaffold `original_baseline`) and the **execution baseline** are different concepts.
+Adoption never edits Scaffold, journals, receipts or Git history, and never reapproves the feature.
+It adds an authenticated record in the feature evidence store, retained by
+`refs/pi-baseline-adoptions/<key>/{record,original,adopted}` created in one atomic ref transaction
+(create-only, so concurrent calls have exactly one winner; an evidence record without the refs confers no authority).
+
+- **Eligibility** (checked without mutation): clean worktree and index, feature branch, HEAD equal to the named new commit,
+  original baseline an ancestor of HEAD, retained original feature authorization, every task `pending` or `decomposed`
+  with no delivery or suspension state, and no attempt, reconciliation or validation evidence for this feature instance.
+- **Approval** is a dedicated confirmation naming the old and new commits, the intervening commits and changed paths.
+  Feature-direction or execution approval cannot satisfy it. State changing during approval blocks adoption.
+- **Checkpoints** begin at the adopted commit. Each checkpoint's provenance carries `adoptionRef` and still carries the
+  original `featureBaseRef`. The intervening commits are **not** checkpoints and are never treated as verified.
+- **Review scope**: final validation still reviews `original baseline..HEAD`. Its requirements list the adopted commits and
+  paths as unverified and in scope; nothing is exempted. Per-task reviews diff from each task's own start.
+- **Idempotency**: repeating the same request, or retrying after a lost response, returns the existing record without
+  requiring a clean tree. A different baseline once adopted is rejected. An interrupted write leaves no authority.
+- **Not supported yet**: adopting commits made after work began, merge-based integration of upstream, and
+  `reconcile_feature_rebase` on an adopted feature (it is refused rather than guessed). An upstream that moved is
+  advisory in `inspect_feature_drift`; it never invalidates execution by itself.

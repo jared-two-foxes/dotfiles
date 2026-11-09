@@ -19,6 +19,7 @@ import {
 } from '../../lib/evidence/store.mjs';
 import { snapshot } from '../../lib/git/snapshot.mjs';
 import { checkpointHistory } from '../../lib/verification/checkpoint-history.mjs';
+import { findAdoption, adoptionRequirements } from '../../lib/verification/baseline-adoption.mjs';
 import { readReconciliation } from '../../lib/verification/reconciliation.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
@@ -118,7 +119,8 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   }
   const obligations = findingObligations(reviews.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
     .map(r => ({ result: { conductor: { review: r.review } } })));
-  return { anchor, checkpoints, reviewTasks, obligations };
+  const adoption = await findAdoption(repository, feature);
+  return { anchor, checkpoints, reviewTasks, obligations, adoption };
   }, { fresh: memo?.fresh });
   return { feature, before, design, ...derived };
 }
@@ -129,7 +131,7 @@ function handoff(record, reference) {
 }
 function assembledRequirements(pre, args) {
   const feature = { ...pre.feature, tasks: pre.reviewTasks };
-  return featureRequirements(feature, pre.design) + (
+  return featureRequirements(feature, pre.design) + (pre.adoption ? adoptionRequirements(pre.adoption) : '') + (
     '\n\nPersisted feature obligations: ' + JSON.stringify(pre.obligations) +
     '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.') +
     (args.reconciliationRef ? '\n\nVerified rebase reconciliation: ' + args.reconciliationRef +

@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { reconcileFeature } from "./reconciliation.mjs";
 import { recoverInterruptedTaskRebase } from "./interrupted-rebase.mjs";
+import { adoptBaseline, inspectDrift } from "./baseline-adoption.mjs";
 import { createRebaseInspectionTool } from "./rebase-inspection.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
@@ -264,6 +265,55 @@ export default function (pi: ExtensionAPI) {
           { type: "text" as const, text: JSON.stringify(result, null, 2) },
         ],
         isError: result.status === "BLOCKED",
+        details: result,
+      };
+    },
+  });
+  pi.registerTool({
+    name: "adopt_feature_baseline",
+    label: "Adopt execution baseline",
+    description:
+      "For a feature in which NO task, attempt, checkpoint or validation has started: after the user committed unrelated changes, record an authenticated, user-approved execution baseline at the current clean HEAD. Requires explicit approval naming the concrete old and new commits (execution approval cannot substitute). The original baseline, authorization, requirements and designs are preserved; intervening commits are NOT checkpoints, remain in final-validation review scope and are named to the reviewer. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",
+    parameters: Type.Object(
+      {
+        featureId: Type.String(),
+        originalBaseRef: Type.String({ description: "The feature's original baseline commit (full SHA)" }),
+        newBaseRef: Type.String({ description: "Current clean HEAD to adopt (full SHA)" }),
+      },
+      { additionalProperties: false },
+    ),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await adoptBaseline(
+        params,
+        { directory: ctx.cwd, abort: signal },
+        {
+          confirm: async (scope) =>
+            ctx.hasUI === true &&
+            (await ctx.ui.confirm(
+              "Adopt " + scope.adoptedBaseline.slice(0, 12) + " as the execution baseline (was " + scope.originalBaseline.slice(0, 12) + ")?",
+              JSON.stringify(scope, null, 2) +
+                "\nThese commits are NOT verified task checkpoints. They stay in the final validation review scope. The original baseline, authorization and designs are unchanged. This grants no other permission.",
+            )),
+        },
+      );
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        isError: result.ok === false,
+        details: result,
+      };
+    },
+  });
+  pi.registerTool({
+    name: "inspect_feature_drift",
+    label: "Inspect feature drift",
+    description:
+      "Read-only. Classifies how Git relates to the feature's authenticated boundary (authenticated, foreign commits, dirty tree, rewritten history, interrupted Git operation, corrupt adoption evidence, upstream behind) and names the one applicable recovery. Never changes Git, Scaffold or evidence.",
+    parameters: Type.Object({ featureId: Type.String() }, { additionalProperties: false }),
+    async execute(_id, params, signal, _update, ctx) {
+      const result = await inspectDrift(params, { directory: ctx.cwd, abort: signal });
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
+        isError: result.ok === false,
         details: result,
       };
     },

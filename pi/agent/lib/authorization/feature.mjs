@@ -154,6 +154,11 @@ export async function featureAuthorized(args, { feature }, context = {}) {
     return false;
   }
 }
+// Read-only: the retained authorization (if any) for this exact feature scope.
+export async function authorizationReference(args, { feature }, context = {}) {
+  const scope = scopeFor(args, feature, context);
+  return { scope, reference: await existing(scope) };
+}
 function requireRecoverableAuthority(tasks) {
   requireValue(
     tasks && !Object.values(tasks).some((t) => t.delivery),
