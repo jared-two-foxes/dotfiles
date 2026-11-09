@@ -286,7 +286,32 @@ export default function (pi: ExtensionAPI) {
             minItems: 1,
             maxItems: 64,
             description:
-              "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. Exclude the full repository/workspace test command where targeted coverage is available; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. The only supported verification format.  Required on the first attempt; continuations may omit it to inherit the retained verification plan. Revise commands through structured repairs; preserve required coverage and validators.",
+              "Ordered named verification commands for this task, using executable/argv arrays. Prefer targeted tests for leaves and scoped integration checks for intermediate parents. A bare full-suite command is rejected on the first attempt unless justified in broadCheckJustifications; reserve the full suite for final root verification via validate_feature. Inspect output for actual coverage. The only supported verification format.  Required on the first attempt; continuations may omit it to inherit the retained verification plan. Revise commands through structured repairs; preserve required coverage and validators.",
+          },
+        ),
+      ),
+      broadCheckJustifications: Type.Optional(
+        Type.Array(
+          Type.Object(
+            {
+              check: Type.String({
+                minLength: 1,
+                maxLength: 256,
+                description: "Exact name of a check in this plan",
+              }),
+              reason: Type.String({
+                minLength: 20,
+                maxLength: 2000,
+                description:
+                  "Why this check must run the whole test suite, for example that the runner cannot select the necessary tests",
+              }),
+            },
+            { additionalProperties: false },
+          ),
+          {
+            maxItems: 64,
+            description:
+              "First attempt only. A check that would run an entire test suite (for example a bare cargo test, npm test, pytest, go test ./... or dotnet test) is rejected unless it is named here with the reason the whole suite is unavoidable. Narrow the check instead where the runner can select tests. Continuations inherit the retained plan and do not need this.",
           },
         ),
       ),

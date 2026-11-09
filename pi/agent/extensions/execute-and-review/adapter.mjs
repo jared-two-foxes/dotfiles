@@ -9,6 +9,7 @@ import { issueExecutionScope } from "../../lib/verification/issue-scope.mjs";
 import { verificationChecks, correctionVerification } from "../../lib/verification/checks.mjs";
 import { prepareWorkflow, decodeWorkflow, validateWorkflowPreparation } from "./workflow.mjs";
 import { invoke, runConductor, DEFAULT_TIMEOUT_MS } from "../../lib/conductor/client.mjs";
+import { requireBroadCheckJustifications } from "../../lib/verification/check-scope.mjs";
 import { validateBinding } from "../../lib/delivery-state/binding.mjs";
 import { snapshot } from "../../lib/git/snapshot.mjs";
 import { readEvidence, retainEvidence } from "../../lib/evidence/store.mjs";
@@ -59,6 +60,15 @@ function outcome(status, stage, fields = {}) {
     ...fields,
   };
 }
+
+// A rejected verification plan is a precheck failure, not a task-context error.
+const isBroadCheckError = (error) => error?.code?.startsWith?.("BROAD_CHECK_");
+const broadCheckOutcome = (error) =>
+  outcome("BLOCKED", "PRECHECK", {
+    reason: error.code,
+    message: error.message,
+    ...(error.findings ? { broadChecks: error.findings } : {}),
+  });
 
 async function git(repository, args, signal) {
   const result = await invoke("git", args, {
@@ -305,6 +315,8 @@ export async function hydrateContinuation(args, context) {
       : verificationChecks(previous.args);
   const checks =
     callerPlan || !inheritedChecks ? verificationChecks(args) : inheritedChecks;
+  // A zero-attempt handoff has no earlier plan, so this is the task's first plan.
+  if (!inheritedChecks) requireBroadCheckJustifications({ ...args, checks });
 
   if (args.requirements !== undefined && args.requirements !== previous.args.requirements)
     throw new Error("Use contextUpdates.add_obligation to extend retained requirements");
@@ -326,6 +338,7 @@ export async function executeAndReview(args, context = {}, options = {}) {
   try {
     args = await hydrateContinuation(args, context);
   } catch (error) {
+    if (isBroadCheckError(error)) return broadCheckOutcome(error);
     return outcome("BLOCKED", "EVIDENCE", {
       reason: "EVIDENCE_RECOVERY_REQUIRED",
       message: error.message,
@@ -346,6 +359,16 @@ export async function executeAndReview(args, context = {}, options = {}) {
       await requireFeatureAuthorization(args, context, options);
     let checks = verificationChecks(args);
     validateWorkflowPreparation(args);
+    // A first attempt chooses the task's verification plan. Continuations inherit
+    // the retained plan, so work already in flight is never stranded by this rule.
+    if (!args.previousAttempt) {
+      try {
+        requireBroadCheckJustifications(args);
+      } catch (error) {
+        if (isBroadCheckError(error)) return broadCheckOutcome(error);
+        throw error;
+      }
+    }
     if (
       args.reviewContextMaxBytes !== undefined &&
       (!Number.isSafeInteger(args.reviewContextMaxBytes) ||

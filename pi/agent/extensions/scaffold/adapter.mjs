@@ -2,6 +2,7 @@
 import { execFile } from "node:child_process";
 import { lstat, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import { validateRequest, validateResponse } from "../../lib/scaffold/contracts.mjs";
 export { OPERATIONS } from "../../lib/scaffold/contracts.mjs";
 

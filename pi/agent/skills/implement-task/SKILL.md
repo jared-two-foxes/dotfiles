@@ -216,6 +216,14 @@ command is needed; never substitute an irrelevant passing check or omit required
 coverage merely to keep commands narrow. Inspect output to prove the selected tests
 actually ran, including correct handling of filters matching no tests.
 
+A first attempt that includes a bare full-suite command (a plain `cargo test`,
+`npm test`, `pytest`, `go test ./...`, `dotnet test`, `node --test`, `vitest`,
+`jest` or `mocha`) is rejected with `BROAD_CHECK_UNJUSTIFIED` before any source
+operation. Narrow it with a test name, file, package or filter. If the runner truly
+cannot select the needed tests, name the check in `broadCheckJustifications:
+[{check, reason}]` and record the same reason in the issue's design verification
+record. Continuations inherit the retained plan and are not re-checked.
+
 Reserve the full test suite for the final root/feature verification through
 `validate_feature` after required issue checkpoints. The root's implementation
 attempt may use focused integration checks; the final gate supplies full-project
