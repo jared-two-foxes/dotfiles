@@ -4,6 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { git, assertNoGitOperation } from '../../lib/git/tree.mjs';
 import { featureTimings, stopwatch } from '../../lib/verification/timings.mjs';
+import {
+  createPreconditionCache,
+  memoizePreconditions,
+  preconditionCacheStats,
+} from '../../lib/verification/precondition-cache.mjs';
 import { reviewEvidence } from '../../lib/verification/review-evidence.mjs';
 import {
   digest,
@@ -57,7 +62,8 @@ async function lifecycle(repository, operation, featureId, payload, options) {
   return data.feature;
 }
 
-export async function featurePreconditions(repository, args, options = {}) {
+// `memo` ({cache, fresh}) is optional: without it every call derives everything.
+export async function featurePreconditions(repository, args, options = {}, memo) {
   await assertNoGitOperation(repository);
   requireValue(git(repository, ['symbolic-ref', '--quiet', '--short', 'HEAD']) === args.branch, 'Feature branch changed or detached');
   const before = await snapshot(repository);
@@ -68,6 +74,14 @@ export async function featurePreconditions(repository, args, options = {}) {
   const design = approvedDesign(repository, feature);
   requireValue(feature.original_baseline === args.featureBaseRef, 'Original feature baseline mismatch');
   requireValue(feature.workflow.phase === 'implement', 'Finish issue graph design before feature validation');
+  // The authentication below is a pure function of the feature (minus the validation
+  // state only this gate writes), these arguments, immutable Git objects and the
+  // evidence files, so it can be reused while all of those are unchanged.
+  const { validation: _validation, ...featureWithoutValidation } = feature;
+  const derived = await memoizePreconditions(memo?.cache, repository, [
+    repository, featureWithoutValidation, args.featureId, args.designRef, args.headRef,
+    args.featureBaseRef, args.branch, args.reconciliationRef ?? null, args.resumeEvidenceRef ?? null,
+  ], async () => {
   const tasks = feature.tasks;
   for (const task of Object.values(tasks)) for (const a of task.delivery?.context?.amendments ?? [])
     requireValue(equal(await authenticateAmendment(repository, a.reference,
@@ -104,7 +118,9 @@ export async function featurePreconditions(repository, args, options = {}) {
   }
   const obligations = findingObligations(reviews.sort((a, b) => String(a.recordedAt).localeCompare(String(b.recordedAt)))
     .map(r => ({ result: { conductor: { review: r.review } } })));
-  return { feature, before, checkpoints, design, anchor, obligations, reviewTasks };
+  return { anchor, checkpoints, reviewTasks, obligations };
+  }, { fresh: memo?.fresh });
+  return { feature, before, design, ...derived };
 }
 
 function handoff(record, reference) {
@@ -123,21 +139,26 @@ export async function validateFeature(args, context = {}, options = {}) {
   let repository, startedReference, reference, record, monitor, started = false;
   const totalClock = stopwatch();
   const checkTimings = [], rechecks = { count: 0, ms: 0 };
+  const cache = createPreconditionCache();
   let reviewMs = null;
   // Every full precondition derivation in this run is timed, including the initial
   // and post-authorization ones, so the recorded cost is complete up to the last
   // derivation before the receipt is retained.
-  const derive = async (...params) => {
+  // The immutable authentication is reused between derivations while its inputs are
+  // unchanged. The first and the last derivation before retention always recompute
+  // it in full (`fresh`), so persistent changes are still caught before a receipt exists.
+  const derive = async (repo, deriveArgs, deriveOptions, { fresh = false } = {}) => {
     const clock = stopwatch();
-    try { return await featurePreconditions(...params); }
+    try { return await featurePreconditions(repo, deriveArgs, deriveOptions, { cache, fresh }); }
     finally { rechecks.count += 1; rechecks.ms += clock.elapsed(); }
   };
-  const currentTimings = () => featureTimings({ checks: checkTimings, reviewMs, totalMs: totalClock.elapsed(), rechecks });
+  const currentTimings = () => featureTimings({ checks: checkTimings, reviewMs, totalMs: totalClock.elapsed(), rechecks,
+    cache: preconditionCacheStats(cache) });
   try {
     context.abort?.throwIfAborted();
     const plan = planFor(args);
     repository = path.resolve(git(context.directory, ['rev-parse', '--show-toplevel']));
-    const pre = await derive(repository, args, options);
+    const pre = await derive(repository, args, options, { fresh: true });
     const binding = { feature_id: args.featureId, design_ref: args.designRef, baseline: args.featureBaseRef,
       head: args.headRef, tree: pre.before.tree, branch: args.branch, task_revision: pre.feature.task_revision,
       plan_digest: digest(JSON.stringify(plan)) };
@@ -154,7 +175,7 @@ export async function validateFeature(args, context = {}, options = {}) {
       const current = pre.feature.validation;
       requireValue(current?.current === record.attemptId, 'Result is superseded; run a new validation');
       await lifecycle(repository, 'validation-record', args.featureId, handoff(record, args.resumeEvidenceRef), options);
-      const post = await derive(repository, args, options);
+      const post = await derive(repository, args, options, { fresh: true });
       requireValue(stable(pre.before, post.before) && equal(pre.feature.tasks, post.feature.tasks), 'Source/state changed during recovery');
       return { ...record.result, evidenceRef: args.resumeEvidenceRef, binding, recovered: true, checks: record.checks, review: record.review };
     }
@@ -171,10 +192,10 @@ export async function validateFeature(args, context = {}, options = {}) {
     await lifecycle(repository, 'validation-start', args.featureId, { attempt_id: record.attemptId, binding }, options);
     started = true;
     await options.interrupt?.('beforeChecks');
-    const unchanged = async () => {
+    const unchanged = async ({ fresh = false } = {}) => {
       monitor.assert();
       context.abort?.throwIfAborted();
-      const current = await derive(repository, args, options);
+      const current = await derive(repository, args, options, { fresh });
       requireValue(stable(pre.before, current.before) && equal(pre.feature.tasks, current.feature.tasks) &&
         current.feature.validation?.current === record.attemptId, 'Source, task graph or active validation changed; reconcile');
       record.after = current.before;
@@ -203,7 +224,7 @@ export async function validateFeature(args, context = {}, options = {}) {
         obligationsVerified({ deliveryContext: { obligations: pre.obligations } }, review) ? 'PASSED' : review.status === 'CHANGES_REQUESTED' ? 'NEEDS_DESIGN' : 'BLOCKED',
         { message: review.reason ?? review.message ?? 'Independent review indeterminate' });
     }
-    await unchanged();
+    await unchanged({ fresh: true });
     await options.interrupt?.('beforeRetention');
     // Additive telemetry in its own top-level field; not part of any authenticated comparison.
     record.timings = currentTimings();

@@ -760,6 +760,31 @@ Receipts written before this existed remain valid and report no timings.
 - `inspect_conductor_evidence` returns `timingSummary`. To list every receipt in a
   checkout: `node pi/agent/extensions/execute-and-review/timing-summary.mjs [repo]`.
 
+## Final-validation precondition cache
+
+`validate_feature` derives its preconditions repeatedly (before and after
+authorization, after every check and the review, before and after retention). The
+costly part authenticates every completed task: it walks each checkpoint commit,
+re-reads and re-verifies each task's evidence and attempt chain, re-authenticates
+amendments and scans earlier feature reviews. `lib/verification/precondition-cache.mjs`
+reuses that result within one run while nothing it reads has changed.
+
+- **What is reused:** only the immutable authentication. The live checks (no Git
+  operation in progress, branch, clean HEAD/index/worktree, the Scaffold state read,
+  the active validation attempt) run on every derivation.
+- **When it is reused:** the Scaffold feature (excluding `validation`, which only this
+  gate writes), the validation arguments and a fingerprint of every evidence file's
+  name, size, inode, mtime and ctime must all be unchanged. A file added, removed,
+  renamed or edited in place invalidates it. Git objects are immutable by SHA.
+- **What is never reused:** failures are never cached. The first derivation and the
+  last one before the receipt is retained always recompute in full, so a persistent
+  change to any input, including check logs outside the evidence directory, is caught
+  before a receipt is written. Cached results are handed out as copies.
+- **Observability:** the receipt's `timings.precondition_cache` reports `hits`,
+  `misses` (recomputed after a change) and `fresh` (required full recomputes).
+  Fingerprinting costs about 5 ms for 50 evidence files, 14 ms for 500 and 47 ms for
+  2000, which a reused derivation pays instead of re-authenticating every task.
+
 Not yet available: review model turns and tool calls. `review-cli` does not expose
 them in its JSON result and its ledger vocabulary is not interpreted here, so only
 the raw ledger event count is kept. Exposing them needs a `review-cli` change.

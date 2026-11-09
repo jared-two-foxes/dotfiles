@@ -1,12 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { git } from "../pi/agent/lib/git/tree.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
-import { readFeatureEvidence, featureEvidenceReferences } from "../pi/agent/lib/evidence/store.mjs";
+import {
+  evidenceDirectory,
+  featureEvidenceReferences,
+  readFeatureEvidence,
+  taskEvidenceReferences,
+} from "../pi/agent/lib/evidence/store.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
 import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
@@ -343,6 +348,10 @@ test(
     assert.ok(timed.timings.review_ms >= 0);
     // initial + post-authorization + after the check(s) + after review + before retention
     assert.ok(timed.timings.precondition_checks >= 5);
+    // The first and last derivations before retention always recompute in full; the
+    // ones between reuse the immutable authentication while nothing it reads changed.
+    assert.ok(timed.timings.precondition_cache.fresh >= 2);
+    assert.ok(timed.timings.precondition_cache.hits >= 1);
     capture = JSON.parse(await readFile(f.capture, "utf8"));
     assert.equal(capture.req.head_ref, e.commit);
     const feature = (await f.call("list")).feature;
@@ -359,6 +368,37 @@ test(
     assert.deepEqual(
       (await f.call("list")).feature.validation.history,
       feature.validation.history,
+    );
+  },
+);
+
+test(
+  "task evidence changed during validation is still caught despite cached authentication",
+  integration,
+  async (t) => {
+    const f = await fixture(t);
+    await f.add("one");
+    await f.finish("one");
+    const interrupted = await f.validate(
+      {},
+      {
+        interrupt: async (stage) => {
+          if (stage !== "beforeReview") return;
+          // Earlier derivations have cached this authentication; now corrupt the
+          // retained receipt it covers. The changed evidence must not be trusted.
+          const [reference] = await taskEvidenceReferences(f.dir);
+          const file = path.join(
+            await evidenceDirectory(f.dir),
+            reference.split(":").at(-1) + ".json",
+          );
+          await appendFile(file, " ");
+        },
+      },
+    );
+    assert.equal(interrupted.status, "BLOCKED", JSON.stringify(interrupted));
+    assert.notEqual(
+      (await f.call("list")).feature.validation.status,
+      "verified",
     );
   },
 );
