@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  appendFile,
+  readdir,
   mkdtemp,
   writeFile,
   readFile,
@@ -17,6 +19,7 @@ import { digest } from "../pi/agent/lib/evidence/store.mjs";
 import { snapshot } from "../pi/agent/lib/git/snapshot.mjs";
 import { scaffoldTasks, buildCommand } from "../pi/agent/extensions/scaffold/adapter.mjs";
 import { designReference } from "../pi/agent/lib/scaffold/contracts.mjs";
+import { ledgerFeature } from "./helpers/ledger-feature.mjs";
 
 async function executeAndReview(args, context, options) {
   return executeTaskAttempt(args, context, {
@@ -34,6 +37,9 @@ async function executeAndReview(args, context, options) {
     },
   });
 }
+
+// A continuation inherits its requirements from the retained receipts and Scaffold.
+const inherit = ({ requirements: _requirements, ...rest }) => rest;
 
 const designText =
   "Approved: independent value model, then consumer. Preserve existing interfaces.";
@@ -90,7 +96,7 @@ function response(status = "PASSED", patch = {}) {
     }),
   };
 }
-async function fixture(t) {
+async function fixture(t, { withFeature = true } = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "pi-task-workflow-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const git = (...args) =>
@@ -98,15 +104,23 @@ async function fixture(t) {
   git("init", "-q");
   git("config", "user.name", "Test");
   git("config", "user.email", "test@example.invalid");
+  // Scaffold state and run scratch space (.scaffold/) are always ignored in real repositories.
+  git("config", "core.excludesfile", "");
+  await appendFile(path.join(dir, ".git", "info", "exclude"), ".scaffold/\n");
   await writeFile(path.join(dir, "value.txt"), "before");
   git("add", "value.txt");
   git("commit", "-qm", "baseline");
+  const ledger = withFeature
+    ? await ledgerFeature(dir, { featureId: "F3", taskId: "model", objective: feature.objective,
+      criteria: feature.acceptance_criteria, designContext: designText, tasks: [{ id: "model", constraints: ["Preserve existing interfaces"] }] })
+    : null;
   return {
     dir,
     git,
+    ledger,
     args: {
-      task,
-      requirements,
+      task: ledger ? ledger.binding("model") : task,
+      requirements: ledger ? await ledger.requirements("model", requirements) : requirements,
       baseRef: git("rev-parse", "HEAD"),
       input: JSON.stringify({
         operations: [
@@ -172,16 +186,16 @@ test("one task retains real request/raw response and exposes read-only recovery 
       invokeConductor: async (json) => {
         calls++;
         const sent = JSON.parse(json);
-        assert.equal(sent.review.requirements, requirements);
+        assert.ok(sent.review.requirements.includes(requirements));
         assert.equal(sent.execution.operations.length, 1);
         await writeFile(path.join(f.dir, "value.txt"), "after");
         return actual;
       },
     },
   );
-  assert.equal(calls, 1);
+  assert.equal(calls, 1, JSON.stringify(result));
   assert.equal(result.status, "PASSED");
-  assert.match(result.evidence.reference, /^pi-evidence:sha256:[a-f0-9]{64}$/);
+  assert.match(result.evidence.reference, /^sha256:[a-f0-9]{64}$/);
   const fresh =
     await import("../pi/agent/extensions/execute-and-review/inspect-evidence.mjs?fresh-session");
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
@@ -196,7 +210,7 @@ test("one task retains real request/raw response and exposes read-only recovery 
     "conductor.result/v2",
   );
   assert.equal(recovered.record.args.baseRef, f.args.baseRef);
-  assert.equal(recovered.record.workflow.inputs.requirements, requirements);
+  assert.ok(recovered.record.workflow.inputs.requirements.includes(requirements));
   const intent = await inspectEvidence(recovered.record.startedReference, {
     directory: f.dir,
   });
@@ -233,7 +247,7 @@ test("task receipts retain workflow timeout and corrections may increase it with
   assert.equal(firstRecord.record.args.workflowTimeoutMs, originalTimeout);
   const corrected = await executeAndReview(
     {
-      ...f.args,
+      ...inherit(f.args),
       workflowTimeoutMs: increasedTimeout,
       previousAttempt: first.evidence.reference,
     },
@@ -252,7 +266,7 @@ test("task receipts retain workflow timeout and corrections may increase it with
   });
   assert.equal(correctedRecord.record.args.workflowTimeoutMs, increasedTimeout);
   assert.equal(correctedRecord.record.args.baseRef, f.args.baseRef);
-  assert.equal(correctedRecord.record.args.requirements, f.args.requirements);
+  assert.ok(correctedRecord.record.args.requirements.includes(requirements));
   assert.deepEqual(correctedRecord.record.args.checks, f.args.checks);
   assert.equal(correctedRecord.record.attempt, 2);
 });
@@ -262,13 +276,18 @@ test("corrections preserve baseline/requirements and count attempts without auto
   let last;
   for (let attempt = 1; attempt <= 7; attempt++) {
     const result = await executeAndReview(
-      { ...f.args, previousAttempt: last },
+      { ...(last ? inherit(f.args) : f.args), previousAttempt: last },
       { directory: f.dir },
       {
-        invokeConductor: async () => response("NEEDS_DESIGN"),
+        invokeConductor: async () => {
+          // Each attempt changes the source, so repeated equivalent failures do not trip the pause circuit.
+          await writeFile(path.join(f.dir, "value.txt"), "attempt " + attempt);
+          return response("NEEDS_DESIGN", { review: { status: "CHANGES_REQUESTED",
+            findings: [{ severity: "high", blocking: true, message: "Distinct finding " + attempt }] } });
+        },
       },
     );
-    assert.equal(result.status, "NEEDS_DESIGN");
+    assert.equal(result.status, "NEEDS_DESIGN", JSON.stringify(result).slice(0, 600));
     assert.equal(result.evidence.attempt, attempt);
     last = result.evidence.reference;
   }
@@ -283,7 +302,7 @@ test("corrections preserve baseline/requirements and count attempts without auto
   ]) {
     let calls = 0;
     const invalid = await executeAndReview(
-      { ...f.args, ...patch, previousAttempt: last },
+      { ...inherit(f.args), ...patch, previousAttempt: last },
       { directory: f.dir },
       {
         invokeConductor: async () => {
@@ -315,7 +334,7 @@ test("partial changes require the exact prior receipt, and current-state correct
   );
   assert.equal(first.status, "NEEDS_DESIGN");
   const args = {
-    ...f.args,
+    ...inherit(f.args),
     previousAttempt: first.evidence.reference,
     input: JSON.stringify({
       operations: [
@@ -352,7 +371,7 @@ test("partial changes require the exact prior receipt, and current-state correct
 });
 
 test("missing, tampered and incomplete verification cannot provide successful evidence", async (t) => {
-  const f = await fixture(t);
+  let f;
   for (const patch of [
     { checks: [] },
     { review: null },
@@ -365,6 +384,8 @@ test("missing, tampered and incomplete verification cannot provide successful ev
       ],
     },
   ]) {
+    // Each case is a first attempt: the ledger records every terminal attempt, so a second first attempt is stale.
+    f = await fixture(t);
     const result = await executeAndReview(
       f.args,
       { directory: f.dir },
@@ -373,7 +394,9 @@ test("missing, tampered and incomplete verification cannot provide successful ev
     assert.equal(result.status, "BLOCKED");
     assert.ok(
       ["INCOMPLETE_VERIFICATION", "PROTOCOL_MISMATCH"].includes(result.reason),
+      JSON.stringify(result).slice(0, 500),
     );
+    assert.ok(result.evidence?.reference, JSON.stringify(patch) + " " + JSON.stringify(result).slice(0, 500));
     assert.equal(
       (await inspectEvidence(result.evidence.reference, { directory: f.dir }))
         .structurallyVerified,
@@ -386,24 +409,23 @@ test("missing, tampered and incomplete verification cannot provide successful ev
   );
   assert.equal(
     (
-      await inspectEvidence("pi-evidence:sha256:" + "a".repeat(64), {
+      await inspectEvidence("sha256:" + "a".repeat(64), {
         directory: f.dir,
       })
     ).ok,
     false,
   );
+  f = await fixture(t); // a fresh first attempt: the ledger already holds the loop's attempts
   const result = await executeAndReview(
     f.args,
     { directory: f.dir },
     { invokeConductor: async () => response() },
   );
-  const dir = f.git("rev-parse", "--git-path", "pi-conductor-evidence");
+  // Tamper with the stored artifact itself; its digest no longer matches the reference.
+  const features = path.join(f.dir, ".scaffold", "features");
+  const [instance] = await readdir(features);
   await writeFile(
-    path.resolve(
-      f.dir,
-      dir,
-      result.evidence.reference.split(":").at(-1) + ".json",
-    ),
+    path.join(features, instance, "artifacts", result.evidence.reference.split(":").at(-1)),
     "{}",
   );
   assert.equal(
@@ -444,8 +466,8 @@ test("blocked responses retain partial changes with no automatic invocation or r
 
 test("Scaffold bookkeeping must be ignored so it cannot pollute the review diff", async (t) => {
   const f = await fixture(t);
-  await mkdir(path.join(f.dir, ".scaffold"));
-  await writeFile(path.join(f.dir, ".scaffold/tasks.json"), "{}");
+  // Remove the ignore rule the fixture installs; Scaffold state must then be refused before any execution.
+  await writeFile(path.join(f.dir, ".git", "info", "exclude"), "");
   const result = await executeAndReview(
     f.args,
     { directory: f.dir },
@@ -458,10 +480,11 @@ test("Scaffold bookkeeping must be ignored so it cannot pollute the review diff"
 
 test("receipt retention must succeed before applying operations; HEAD changes never complete", async (t) => {
   const f = await fixture(t);
-  const dir = path.resolve(
-    f.dir,
-    f.git("rev-parse", "--git-path", "pi-conductor-evidence"),
-  );
+  // Receipts are ledger artifacts; make the ledger's artifact store unusable so retention fails.
+  const features = path.join(f.dir, ".scaffold", "features");
+  const [instance] = await readdir(features);
+  const dir = path.join(features, instance, "artifacts");
+  await rm(dir, { recursive: true, force: true });
   await writeFile(dir, "not a directory");
   const refused = await executeAndReview(
     f.args,
@@ -493,7 +516,7 @@ test(
     skip: !process.env.SCAFFOLD_SOURCE ? "Set SCAFFOLD_SOURCE" : false,
   },
   async (t) => {
-    const f = await fixture(t);
+    const f = await fixture(t, { withFeature: false });
     const { invoke } =
       await import("../pi/agent/extensions/scaffold/adapter.mjs");
     const invokeScaffold = async (_program, args, options) =>
@@ -525,20 +548,17 @@ test(
     const rejected = await call("start", { task_id: "model" });
     assert.equal(rejected.ok, false);
     assert.match(rejected.scaffold_error.error, /design/);
-    const versionOne = JSON.parse(
-      await readFile(path.join(f.dir, ".scaffold/tasks.json"), "utf8"),
-    );
-    versionOne.schema_version = 1;
-    await writeFile(
-      path.join(f.dir, ".scaffold/tasks.json"),
-      JSON.stringify(versionOne),
-    );
+    // A tampered ledger blocks every operation instead of being repaired.
+    const features = path.join(f.dir, ".scaffold", "features");
+    const [instance] = await readdir(features);
+    const ledgerFile = path.join(features, instance, "ledger.jsonl");
+    await writeFile(ledgerFile, (await readFile(ledgerFile, "utf8")).replace('"objective"', '"objectivx"'));
     const old = await call("retry", {
       task_id: "model",
-      reason: "Attempt to use old state",
+      reason: "Attempt to use tampered state",
     });
     assert.equal(old.ok, false);
-    assert.match(old.scaffold_error.error, /schema_version/);
+    assert.match(old.scaffold_error.error, /modified|chain|sequence/i);
   },
 );
 
@@ -602,12 +622,12 @@ test("existing attempt evidence retains approved local design independently of i
   assert.ok(!definitions[0].context.includes("bounded integers"));
   let calls = 0;
   const result = await executeAndReview(
-    { ...f.args, requirements: approvedTaskDesign },
+    { ...f.args, requirements: await f.ledger.requirements("model", approvedTaskDesign) },
     { directory: f.dir },
     {
       invokeConductor: async (json) => {
         calls++;
-        assert.equal(JSON.parse(json).review.requirements, approvedTaskDesign);
+        assert.ok(JSON.parse(json).review.requirements.includes(approvedTaskDesign));
         await writeFile(path.join(f.dir, "value.txt"), "after");
         return response();
       },
@@ -619,15 +639,12 @@ test("existing attempt evidence retains approved local design independently of i
   const recovered = await fresh.inspectEvidence(result.evidence.reference, {
     directory: f.dir,
   });
-  assert.equal(
-    recovered.record.workflow.inputs.requirements,
-    approvedTaskDesign,
-  );
+  assert.ok(recovered.record.workflow.inputs.requirements.includes(approvedTaskDesign));
   const intent = await fresh.inspectEvidence(
     recovered.record.startedReference,
     { directory: f.dir },
   );
-  assert.equal(intent.record.args.requirements, approvedTaskDesign);
+  assert.ok(intent.record.args.requirements.includes(approvedTaskDesign));
   assert.equal(intent.structurallyVerified, false); // approval text is not successful execution
   assert.equal(calls, 1); // recovery never applies operations
   assert.equal(architecture.design_ref, task.designRef);
@@ -644,7 +661,7 @@ test(
         : false,
   },
   async (t) => {
-    const f = await fixture(t);
+    const f = await fixture(t, { withFeature: false });
     const bin = await mkdtemp(path.join(tmpdir(), "pi-design-scaffold-bin-"));
     t.after(() => rm(bin, { recursive: true, force: true }));
     await writeFile(

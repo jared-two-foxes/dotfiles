@@ -8,7 +8,7 @@ import { requirementsFor } from "./issue-plan.mjs";
 
 export async function ledgerFeature(dir, {
   featureId = "F", taskId = "T", branch = "feature/ledger", tasks, start = true, approve = true,
-  objective = "Deliver the feature", criteria = ["Feature works"],
+  objective = "Deliver the feature", criteria = ["Feature works"], designContext = "Approved design",
 } = {}) {
   const g = (...args) => git(dir, args);
   if (g("symbolic-ref", "--quiet", "--short", "HEAD") !== branch) g("switch", "-qc", branch);
@@ -22,7 +22,7 @@ export async function ledgerFeature(dir, {
   };
   const children = tasks ?? [{ id: taskId }];
   await call("init", { id: featureId, title: "Feature", objective, design_ref: "sha256:context",
-    context: "Approved design", acceptance_criteria: criteria, baseline, branch });
+    context: designContext, acceptance_criteria: criteria, baseline, branch });
   await call("decompose", children.map(c => ({ title: c.id, objective: "Do " + c.id,
     acceptance_criteria: [c.id + " works"], constraints: [], ...c })), featureId);
   const design = (id, disposition) => call("design-record",
