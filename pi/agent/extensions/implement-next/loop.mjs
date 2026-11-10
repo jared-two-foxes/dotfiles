@@ -19,9 +19,8 @@ export function parseArgs(args) {
 /** The prompt a fresh session receives. Identity only: design and criteria live in Scaffold. */
 export function taskPrompt({ featureId, taskId, designRef }) {
   return [
-    "/skill:implement-task",
-    "",
-    "Implement exactly one Scaffold issue, then stop and report the outcome.",
+    // Pi splits the skill name at the first space, so the instruction must start on this line.
+    "/skill:implement-task Implement exactly one Scaffold issue, then stop and report the outcome.",
     `featureId: ${featureId}`,
     `taskId: ${taskId}`,
     `task.designRef: ${designRef}`,

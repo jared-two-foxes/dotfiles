@@ -4,7 +4,7 @@
  * command handler (not a tool or skill), hence a command.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { scaffoldFeatures, scaffoldTasks } from "../scaffold/adapter.mjs";
+import { invoke, scaffoldFeatures, scaffoldTasks } from "../scaffold/adapter.mjs";
 import { describe, implementNext, parseArgs, taskPrompt } from "./loop.mjs";
 
 export default function (pi: ExtensionAPI) {
@@ -57,8 +57,15 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
+/** `scaffold features` finds .scaffold relative to its working directory, so run it at the Git top level. */
+async function repositoryRoot(cwd: string): Promise<string> {
+  const git = await invoke("git", ["rev-parse", "--show-toplevel"], { cwd });
+  if (git.code !== 0) throw new Error("Current directory must be inside the target Git repository");
+  return git.stdout.trim();
+}
+
 async function soleFeature(cwd: string): Promise<string> {
-  const features = await scaffoldFeatures(cwd);
+  const features = await scaffoldFeatures(await repositoryRoot(cwd));
   const ids = features.map((f: any) => f.id ?? f.feature_id).filter(Boolean);
   if (ids.length !== 1) {
     throw new Error(ids.length ? `Several features are open (${ids.join(", ")}); pass the feature id` : "No open Scaffold feature");

@@ -13,7 +13,9 @@ test('parseArgs defaults to one task and accepts a feature id, --max and --all',
 
 test('prompt carries identity only and invokes implement-task', () => {
   const p = taskPrompt(task('t1'));
-  assert.match(p, /^\/skill:implement-task/);
+  assert.match(p, /^\/skill:implement-task /);
+  // Pi splits the skill name at the first literal space, not at a newline.
+  assert.equal(p.slice('/skill:'.length).split(' ')[0], 'implement-task');
   assert.match(p, /taskId: t1/);
   assert.match(p, /task\.designRef: sha256:/);
 });
