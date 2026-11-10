@@ -16,8 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # TEMPORARY: failure-record is in jared-two-foxes/scaffold#23. Restore `ref: main` once it merges.
-          ref: claude/ledger-failure-record
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
@@ -46,8 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          # TEMPORARY: failure-record is in jared-two-foxes/scaffold#23. Restore `ref: main` once it merges.
-          ref: claude/ledger-failure-record
+          ref: main
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
