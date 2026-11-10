@@ -5,7 +5,7 @@ export function compactMutation(result) {
   const f = result.data.feature, t = result.data.task;
   return { ok: true, operation: result.operation, feature_id: result.feature_id,
     ...(result.task_id ? { task_id: result.task_id } : {}),
-    data: { schema_version: 2, phase: f?.workflow.phase,
+    data: { schema_version: 3, phase: f?.workflow.phase,
       task_revision: f?.task_revision, status: t?.status ?? f?.tasks?.[result.task_id]?.status,
       next_query: { operation: 'summary', feature_id: result.feature_id } } };
 }

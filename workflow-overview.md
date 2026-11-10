@@ -72,7 +72,7 @@ scaffold design-select --feature SA-585
 scaffold select --feature SA-585
 ```
 
-State lives only in `.scaffold/tasks.json` (schema version 2); the task-only
+State lives only in one append-only ledger per feature instance, `.scaffold/features/<feature>.<instance>/ledger.jsonl` (schema version 3); the task-only
 lock is `.scaffold/.tasks.lock`. `scaffold status` and `scaffold stack`
 are **retired**, not alternate work-tracking interfaces. Historical
 `.criteria-stack.json` and `.criteria-stack.lock` files are not consumed,

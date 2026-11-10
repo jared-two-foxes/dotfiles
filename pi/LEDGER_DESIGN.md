@@ -1,7 +1,7 @@
 # Design: one ledger per feature, owned by Scaffold
 
 **Status: approved. Scaffold half implemented and merged
-([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)); Pi port in review.**
+([scaffold#22](https://github.com/jared-two-foxes/scaffold/pull/22)); Pi port merged ([#89](https://github.com/jared-two-foxes/dotfiles/pull/89)).**
 Describes the target that replaces the stores mapped in [`ARCHITECTURE.md`](ARCHITECTURE.md) section 4.
 Spans two repositories: `jared-two-foxes/scaffold` (Python CLI) and this one (`pi/agent`).
 

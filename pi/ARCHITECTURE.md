@@ -1,6 +1,6 @@
 # Pi delivery pipeline: component map
 
-**Status: describes the system after the Scaffold-ledger port (pi/LEDGER_DESIGN.md); the port is in review, so this reflects the `claude/ledger-pi-port` branch, not yet `main`. Derived from reading the code.** Items marked *(unverified)* were
+**Status: describes the system after the Scaffold-ledger port (pi/LEDGER_DESIGN.md); the port has merged (#89). Derived from reading the code.** Items marked *(unverified)* were
 inferred, not traced. [`../workflow-overview.md`](../workflow-overview.md) describes
 the *process*; this file describes the *parts*, where state lives, and what guards what.
 [`agent/lib/README.md`](agent/lib/README.md) describes library boundaries in more depth.

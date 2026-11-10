@@ -3,10 +3,11 @@
 `index.ts` registers one `scaffold_tasks` tool. `pi/agent/extensions/scaffold/adapter.mjs` validates requests,
 resolves Pi's current Git repository root, and invokes the requested
 `scaffold OPERATION` command with explicit arguments and JSON stdin. Install
-Scaffold with the schema-v2 issue graph API on Pi's PATH.
-The only supported persisted work model is the schema-v2 recursive task graph
-(`.scaffold/tasks.json`, `.scaffold/.tasks.lock`); no legacy criteria-stack
-commands, frame state, fallback or migration are supported. For human inspection
+Scaffold with the schema-3 ledger API on Pi's PATH.
+The only supported persisted work model is the schema-3 recursive task graph, kept as one
+append-only ledger per feature instance (`.scaffold/features/<feature>.<instance>/ledger.jsonl`,
+with `artifacts/` beside it and one global `.scaffold/.tasks.lock`). A legacy `.scaffold/tasks.json`
+is ignored, never read or rewritten; no criteria-stack commands, fallback or migration are supported. For human inspection
 use `scaffold summary --feature ID`, `scaffold issue --feature ID
 --task ID`, `scaffold design-select --feature ID` and
 `scaffold select --feature ID`. In Pi, the native `scaffold_tasks`
@@ -30,15 +31,12 @@ or an explicit operator-provided `--yes`; Pi must never invoke them as retry,
 recovery, or initialization fallbacks. No native `clean` tool or lifecycle
 operation is registered.
 
-Cleaning removes selected feature associations only from `.scaffold/tasks.json`.
-It does not change Git commits, branches, worktrees, implementation/source files,
-`.scaffold/.tasks.lock`, historical criteria-stack files or retained
-Pi/Conductor evidence in Git metadata. Existing task receipts and direction
-approvals remain historically inspectable, but **cannot authorize** a
-freshly initialized feature: Scaffold gives each new feature workflow a
-`workflow.instance_id`, and Pi binds approval and receipts to that ID.
-For existing schema-v2 features without that identity, the prior contract
-remains readable. If feature state is missing or was intentionally cleaned,
+Cleaning appends a `feature-close` entry to the selected feature's ledger. Nothing is deleted: the
+ledger, its artifacts, Git commits, branches, worktrees, source files and `.scaffold/.tasks.lock`
+are untouched. A closed feature is no longer listed or searched, so its receipts and direction
+approval **cannot authorize** a freshly initialized feature: Scaffold gives each new feature
+workflow a distinct `workflow.instance_id` and a new ledger, and the approval is an entry in that
+ledger. If feature state is missing or was intentionally cleaned,
 stop and explicitly re-run `/skill:init-feature` with fresh direction
 approval; never infer authority from a matching old ticket, baseline or receipt.
 
@@ -94,18 +92,18 @@ checkout; mocked tests run in CI on Linux and Windows. The production tool alway
 uses `scaffold` on PATH, not this test launcher.
 
 State access is limited to the current repository. The adapter rejects symlinked
-`.scaffold`, `.scaffold/tasks.json` and `.scaffold/.tasks.lock` paths, and
-rejects unexpected file types at those paths before CLI invocation. Scaffold
-uses `.scaffold/tasks.json` and the task-only `.scaffold/.tasks.lock`; no
-legacy criteria-stack state, fallback or migration is supported. As with Scaffold's
+`.scaffold` and `.scaffold/.tasks.lock` paths, and rejects unexpected file
+types at those paths before CLI invocation. Scaffold uses the per-feature ledgers under
+`.scaffold/features/` and the task-only `.scaffold/.tasks.lock`; no legacy `tasks.json`,
+criteria-stack state, fallback or migration is supported. As with Scaffold's
 own local file API, this is not a sandbox against concurrent hostile filesystem
 changes. Timeouts, aborts and protocol failures never retry: a write may already
 have persisted, so inspect full state with `list` before recovery.
 
 New Design plans can pass `design_ref: "sha256:context"` on `init` with the exact
 approved design in feature `context`. The adapter computes the digest before CLI
-invocation and checks it on returned feature state. Scaffold uses schema v2 exclusively; older task-state files are rejected without
-modification. There is no workflow selector or alternate lifecycle; immutable Git revision references remain supported. Verification
+invocation and checks it on returned feature state. Scaffold uses schema 3 exclusively; older task-state files are ignored, never read or
+modified. There is no workflow selector or alternate lifecycle; immutable Git revision references remain supported. Verification
 strategies belong in task context, not invented schema fields. See the current
 [workflow overview](../../../../workflow-overview.md) and
 `tests/pi-task-workflow.test.mjs` for planning, receipts and the checkpoint barrier.
