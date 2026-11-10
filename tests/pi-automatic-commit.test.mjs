@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
+import { failureEnvelope } from "../pi/agent/lib/failure/report.mjs";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
 import { finalizeVerifiedTask } from "../pi/agent/extensions/execution-recovery/checkpoint-recovery.mjs";
 import { invoke } from "../pi/agent/lib/conductor/client.mjs";
@@ -772,6 +773,73 @@ test(
       "executor\n",
     );
     assert.equal(f.git("rev-parse", "HEAD"), f.base);
+  },
+);
+
+test(
+  "a check that rewrites the source is named with the read-only fix, wherever it runs in the plan",
+  integration,
+  async (t) => {
+    const mutating = {
+      name: "format",
+      command: [
+        process.execPath,
+        "-e",
+        'require("fs").appendFileSync("source.txt","reformatted\\n");console.log("formatted")',
+      ],
+    };
+    const passing = {
+      name: "tests",
+      command: [process.execPath, "-e", 'console.log("3 tests passed")'],
+    };
+    for (const order of [[mutating, passing], [passing, mutating]]) {
+      const f = await fixture(t);
+      f.args.checks = order;
+      const result = await executeAndCheckpoint(f.args, f.context);
+      assert.equal(result.status, "BLOCKED", JSON.stringify(result));
+      // Not an opaque protocol mismatch: the check that changed the tree is named, with what to do.
+      assert.equal(result.reason, "CHECK_MODIFIED_SOURCE", JSON.stringify(result));
+      assert.match(result.message, /"format"/);
+      assert.match(result.message, /read-only|--check/i);
+      assert.doesNotMatch(result.message, /disagree/);
+      // Review never ran, nothing was committed, and the check's output is retained for the continuation.
+      assert.equal(await readFile(path.join(f.directory, ".git/trace"), "utf8"), "executor\n");
+      assert.equal(f.git("rev-parse", "HEAD"), f.base);
+      assert.match(await readFile(path.join(f.directory, "source.txt"), "utf8"), /reformatted/);
+      assert.ok(result.evidence?.reference, "the blocked attempt keeps its receipt");
+      const envelope = failureEnvelope("execute_and_review", result);
+      assert.equal(envelope.owner, "agent");
+      assert.match(envelope.next.join(" "), /repair_check/);
+      assert.match(envelope.next.join(" "), /previousAttempt/);
+    }
+  },
+);
+
+test(
+  "a stage that stops before retaining its receipt reports its own reason, not a protocol mismatch",
+  integration,
+  async (t) => {
+    const f = await fixture(t);
+    // The condition runs after the final check's source boundary is captured. Editing the tree here makes the
+    // review stage refuse to start ("Source/index changed before review") and exit without a receipt.
+    f.args.checks = [
+      {
+        name: "tests",
+        command: [process.execPath, "-e", 'console.log("3 tests passed")'],
+        successCondition: [
+          process.execPath,
+          "-e",
+          'require("fs").appendFileSync("source.txt","edited after the boundary\\n")',
+        ],
+      },
+    ];
+    const result = await executeAndCheckpoint(f.args, f.context);
+    assert.equal(result.status, "BLOCKED", JSON.stringify(result));
+    assert.equal(result.reason, "STAGE_RECEIPT_MISSING", JSON.stringify(result));
+    assert.match(result.message, /Source\/index changed before review/);
+    assert.doesNotMatch(result.message, /disagree/);
+    assert.equal(f.git("rev-parse", "HEAD"), f.base);
+    assert.equal(failureEnvelope("execute_and_review", result).owner, "agent");
   },
 );
 

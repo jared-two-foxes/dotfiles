@@ -101,7 +101,14 @@ The active Pi model executes the Design persona in the current conversation.
 ## Caller-selected task verification
 
 `execute_and_review` takes an ordered `checks` list defining the verification
-commands for an issue.  For example (Cargo filters are illustrative; choose
+commands for an issue. Every check must be read-only: Review accepts check
+evidence for one source snapshot, so a check that modifies the working tree
+(`cargo fmt` instead of `cargo fmt --check`, a linter with `--fix`) stops the run
+with `CHECK_MODIFIED_SOURCE`, naming the check. Its changes are kept in the working
+tree and the attempt is retained, so the correction is to swap its command for the read-only
+form with a `repair_check` context update and continue with `previousAttempt`. If a stage stops before it can retain its own
+receipt (`STAGE_RECEIPT_MISSING`), the message carries that stage's own error.
+For example (Cargo filters are illustrative; choose
 actual crate and test names for the project):
 
 ```json

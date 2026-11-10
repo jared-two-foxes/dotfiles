@@ -151,6 +151,22 @@ export async function stageResults(plan, attempted, rawRunner) {
                 : "FAILED"),
         "Stage receipt identity mismatch",
       );
+    // Review accepts check evidence for exactly one source snapshot, so a check must leave the tree as it found
+    // it. Say so as soon as the receipt shows otherwise, naming the check, instead of letting the review stage
+    // fail later for a reason the caller never sees.
+    if (
+      receipt?.sourceBefore &&
+      receipt?.sourceAfter &&
+      !equal(receipt.sourceBefore, receipt.sourceAfter)
+    )
+      throw Object.assign(
+        new Error(
+          'Check "' + spec.name + '" changed the source while it ran, so Review cannot accept its evidence. ' +
+            "Verification checks must be read-only: use the non-modifying form (for example `cargo fmt --check`, " +
+            "not `cargo fmt`) and make edits through executor operations. The changes it made are kept in the working tree.",
+        ),
+        { code: "CHECK_MODIFIED_SOURCE" },
+      );
     const stdout_path = path.join(
       directory,
       String(index).padStart(6, "0") + ".stdout",
@@ -210,6 +226,20 @@ export async function stageResults(plan, attempted, rawRunner) {
         ...(proof?.error ? { error: proof.error } : {}),
       };
     }
+    // A stage that died before writing its receipt reports why on its own stderr; show that, not a bare mismatch.
+    if (
+      rawRunner &&
+      !receipt &&
+      rawRunner.commands[index].status !== status &&
+      rawRunner.commands[index].exit_code === 125 &&
+      stderr.trim()
+    )
+      throw Object.assign(
+        new Error(
+          'Stage "' + spec.name + '" stopped before retaining its receipt: ' + stderr.trim().slice(-600),
+        ),
+        { code: "STAGE_RECEIPT_MISSING" },
+      );
     if (rawRunner)
       requireValue(
         rawRunner.commands[index].status === status ||
@@ -660,7 +690,9 @@ export async function runPipeline(meta, feature, context, options = {}) {
           problemCode,
         )
           ? "RESOURCE_PAUSED"
-          : "PROTOCOL_MISMATCH",
+          : ["CHECK_MODIFIED_SOURCE", "STAGE_RECEIPT_MISSING"].includes(error.code)
+            ? error.code
+            : "PROTOCOL_MISMATCH",
         message: error.message,
       });
     }

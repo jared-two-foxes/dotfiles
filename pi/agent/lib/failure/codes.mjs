@@ -15,6 +15,8 @@ export const FAILURE_CODES = {
   RESOURCE_PAUSED: { owner: U, next: ["A time, output or context allowance was exhausted. Source was preserved; raise the relevant limit (for example reviewContextMaxBytes) and continue with previousAttempt."] },
   EXECUTABLE_NOT_FOUND: { owner: A, next: ["A required program is missing. Install or fix it, then continue with previousAttempt and empty operations; do not reapply source changes."] },
   EXECUTION_ERROR: { owner: A, next: ["The command run failed before producing a result. Read cause and the retained logs, fix the cause, then continue with previousAttempt."] },
+  CHECK_MODIFIED_SOURCE: { owner: A, next: ["A verification check changed the source, so Review cannot accept its evidence. Swap its command for a read-only form (formatters: --check, no auto-fix flags) with contextUpdates kind repair_check, and continue with previousAttempt. Its changes are already in the working tree."] },
+  STAGE_RECEIPT_MISSING: { owner: A, next: ["A stage stopped before retaining its receipt; message carries the stage's own error. If it says the source changed, do not edit files while a run is in flight and continue with previousAttempt; if it points at Pi or Conductor internals, report it."] },
   PROTOCOL_MISMATCH: { owner: B, next: ["Conductor or Review returned something Pi could not decode. Do not retry blindly; report this with the retained request and response."] },
   CANCELLED: { owner: U, next: ["The run was cancelled. Source and receipts are preserved; continue with previousAttempt when ready."] },
   WORKFLOW_TIMEOUT: { owner: U, next: ["The workflow ran out of time. Source and receipts are preserved; raise the time limit or narrow the checks, then continue with previousAttempt."] },
