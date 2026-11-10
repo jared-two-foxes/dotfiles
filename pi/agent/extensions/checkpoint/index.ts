@@ -1,9 +1,11 @@
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { finalizeVerifiedTask } from "../execution-recovery/checkpoint-recovery.mjs";
+import { reportFailures } from "../../lib/failure/tool.mjs";
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  const registerTool = (tool: any) => pi.registerTool(reportFailures(tool));
+  registerTool({
     name: "checkpoint_verified_task",
     label: "Checkpoint verified task",
     description:

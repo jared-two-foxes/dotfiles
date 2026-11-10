@@ -25,6 +25,7 @@ export const OPERATIONS = [
   "attempt-record",
   "history-foreign",
   "history-rewrite",
+  "failure-record",
   "artifact-put",
   "artifact-get",
 ];
@@ -43,6 +44,7 @@ const taskActions = new Set([
   "issue-resume",
 ]);
 const inputActions = new Set([
+  "failure-record",
   "direction-approve",
   "attempt-record",
   "history-foreign",
@@ -158,7 +160,7 @@ export function validateRequest(params) {
   requireValue(OPERATIONS.includes(operation), "Unsupported operation");
   requireValue(text(feature_id), "feature_id is required");
   requireValue(
-    operation === "design-reopen"
+    operation === "design-reopen" || operation === "failure-record"
       ? task_id === undefined || text(task_id)
       : taskActions.has(operation)
         ? text(task_id)
@@ -199,6 +201,20 @@ export function validateRequest(params) {
       text(payload.reason) &&
         (payload.reference === undefined || isReference(payload.reference)),
       "Reason required; a suspension reference must be a ledger reference (sha256:...)",
+    );
+  } else if (operation === "failure-record") {
+    fields(payload, ["code", "message", "tool", "owner", "stage", "cause", "evidence", "next"]);
+    requireValue(
+      /^[A-Z][A-Z0-9_]{2,63}$/.test(payload.code) && /^[a-z][a-z0-9_]{0,63}$/.test(payload.tool) &&
+        ["agent", "user", "bug"].includes(payload.owner) &&
+        text(payload.message) && payload.message.length <= 2000 &&
+        (payload.stage === undefined || (text(payload.stage) && payload.stage.length <= 64)) &&
+        (payload.cause === undefined || (text(payload.cause) && payload.cause.length <= 4000)) &&
+        (payload.evidence === undefined || isReference(payload.evidence)) &&
+        (payload.next === undefined ||
+          (Array.isArray(payload.next) && payload.next.length <= 5 &&
+            payload.next.every((step) => text(step) && step.length <= 300))),
+      "Invalid failure record",
     );
   } else if (operation === "checkpoint-record") {
     fields(payload, ["commit", "parent", "tree", "reference"]);
@@ -378,6 +394,7 @@ export function validateResponse(data, params) {
     "attempt-record",
     "history-foreign",
     "history-rewrite",
+    "failure-record",
   ].includes(params.operation);
   if (needsFeature) {
     requireValue(

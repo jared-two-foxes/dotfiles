@@ -291,10 +291,13 @@ export async function hydrateContinuation(args, context) {
       code: "CONTINUATION_TASK_MISMATCH",
     });
   if (args.baseRef && args.baseRef !== previous.args.baseRef)
-    throw Object.assign(new Error("Continuation baseline mismatch"), {
-      code: "CONTINUATION_RECEIPT_INAPPLICABLE",
-      consumedAttempts: previous.attempt,
-    });
+    throw Object.assign(
+      new Error(
+        "baseRef " + args.baseRef + " differs from the baseline of the receipt you continue from (" +
+          previous.args.baseRef + "): the branch has moved since that attempt",
+      ),
+      { code: "CONTINUATION_BASELINE_MISMATCH", consumedAttempts: previous.attempt },
+    );
 
   const callerPlan = args.checks !== undefined;
   // A zero-attempt handoff has no previous verification plan to inherit.
@@ -328,8 +331,9 @@ export async function executeAndReview(args, context = {}, options = {}) {
     args = await hydrateContinuation(args, context);
   } catch (error) {
     if (isBroadCheckError(error)) return broadCheckOutcome(error);
+    // Keep the specific continuation code the error carries; only an unclassified error is a generic evidence problem.
     return outcome("BLOCKED", "EVIDENCE", {
-      reason: "EVIDENCE_RECOVERY_REQUIRED",
+      reason: /^CONTINUATION_[A-Z_]+$/.test(error.code ?? "") ? error.code : "EVIDENCE_RECOVERY_REQUIRED",
       message: error.message,
     });
   }

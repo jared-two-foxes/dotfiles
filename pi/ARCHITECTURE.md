@@ -105,11 +105,22 @@ only through the Scaffold CLI. See [`LEDGER_DESIGN.md`](LEDGER_DESIGN.md) for th
 | Completion, checkpoints | `complete` and `checkpoint-record` entries | Scaffold, after Pi verifies Git |
 | Recorded history from base to head | `history` / `head` / `base` / `epochs` in the folded state | Scaffold (`checkpoint-record`, `history-foreign`, `history-rewrite`) |
 | Feature validation results | `validation-*` entries; the full record is an artifact | Scaffold and Pi |
+| Failures | `failure-record` entry; the last 20 in `failures` in the folded state | Pi (every delivery tool), via Scaffold |
 | The checkpoint commits themselves | Git; trailer `Pi-Checkpoint: <task>` | Pi |
 
 Scaffold enforces the rules between these (a completion must cite a recorded PASSED attempt; a checkpoint must
 continue from the recorded head; `start` needs a matching approval; validation needs the recorded head). Pi
 confirms everything that needs Git, the Executor or the reviewer before appending.
+
+**Failure reporting.** Every delivery tool (execute, checkpoint, validate, recovery, `scaffold_tasks`) is wrapped by
+`lib/failure/tool.mjs`. A failure, whatever shape the tool returned it in, gains one `failure` object: `code`,
+`message`, `cause`, `stage`, `evidence`, `owner` and `next`. `owner` says who acts: `agent` (fix and retry),
+`user` (a decision or repair outside the agent's reach) or `bug` (the pipeline itself failed). `next` comes from the
+one code-to-remedy table, `lib/failure/codes.mjs`, and a test fails if the pipeline emits a code that is not in it.
+An exception a tool did not handle becomes an `INTERNAL_ERROR` failure with its cause, not a bare error. Failures that
+leave no receipt are appended to the ledger (`failure-record`) so a person can see how a run went wrong; a
+`NEEDS_DESIGN` attempt already has its receipt and is not logged twice. Recording is best effort and never replaces
+the failure it describes.
 
 **What is still outside the ledger.** A few Git refs keep saved source reachable so garbage collection cannot lose
 it: `refs/pi-issue-suspensions/` (parked source), `refs/pi-task-recoveries/` (before/after trees of a handoff chain),

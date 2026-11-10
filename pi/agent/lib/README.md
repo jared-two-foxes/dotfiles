@@ -8,6 +8,7 @@ data contracts and reusable functions needed by multiple extension callers.
 | `scaffold/` | Feature, issue, binding, and request types; structural request/response validation; issue requirement formatting |
 | `verification/` | Issue handoff storage (`issue-handoff.mjs`), verification plans and repair rules, result semantics, review handoffs, receipt applicability, attempt ancestry, and checkpoint history |
 | `evidence/` | Content-addressed receipt persistence and integrity checks |
+| `failure/` | One failure envelope for every tool: the code-to-remedy table (`codes.mjs`), envelope building and best-effort ledger recording (`report.mjs`), and the tool wrapper (`tool.mjs`) |
 | `git/` | Implementation trees, exact source/index fingerprints, temporary indexes, and tracked-input monitoring |
 | `authorization/` | Retained feature direction and amendment authority |
 | `delivery-state/` | Delivery contexts, journal audit anchors and bindings. Pure: no Scaffold dependency |

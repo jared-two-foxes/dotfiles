@@ -16,7 +16,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          ref: main
+          # TEMPORARY: failure-record is in jared-two-foxes/scaffold#23. Restore `ref: main` once it merges.
+          ref: claude/ledger-failure-record
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
@@ -45,7 +46,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: jared-two-foxes/scaffold
-          ref: main
+          # TEMPORARY: failure-record is in jared-two-foxes/scaffold#23. Restore `ref: main` once it merges.
+          ref: claude/ledger-failure-record
           path: .ci-scaffold
       - uses: actions/setup-python@v5
         with:
@@ -59,7 +61,7 @@ jobs:
         run: python -m pytest -q tests/test_scaffold_cutover.py
       - name: Verify administrative clean end to end (Windows)
         run: python -m pytest -q tests/test_scaffold_clean_e2e.py
-      - run: node --test tests/pi-feature-validation.test.mjs tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-delivery-state.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs tests/pi-conductor.test.mjs tests/conductor-v2-integration.test.mjs tests/pi-automatic-commit.test.mjs
+      - run: node --test tests/pi-feature-validation.test.mjs tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-delivery-state.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs tests/pi-conductor.test.mjs tests/conductor-v2-integration.test.mjs tests/pi-automatic-commit.test.mjs tests/pi-failure-reporting.test.mjs
       - shell: pwsh
         run: |
           ./tests/install-conductor.ps1
