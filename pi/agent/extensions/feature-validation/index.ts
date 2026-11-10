@@ -2,13 +2,15 @@ import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { featureAuthorized } from "../scaffold/feature-authorization.mjs";
 import { validateFeature, inspectFeatureValidation } from "./feature.mjs";
+import { reportFailures } from "../../lib/failure/tool.mjs";
 
 // Validation binds to the ledger's movable `base` (moved by a rebase). The authorization check compares the
 // immutable original baseline instead, so it is not given the validation base.
 const withoutValidationBase = ({ featureBaseRef: _validationBase, ...rest }: Record<string, unknown>) => rest;
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  const registerTool = (tool: any) => pi.registerTool(reportFailures(tool));
+  registerTool({
     name: "validate_feature",
     label: "Validate complete feature",
     description:
@@ -71,7 +73,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "inspect_feature_validation",
     label: "Inspect retained feature validation",
     description:

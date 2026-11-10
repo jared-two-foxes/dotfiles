@@ -4,6 +4,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { scaffoldTasks } from "./adapter.mjs";
 import { authenticateIssueMutation } from "../../lib/verification/issue-mutation.mjs";
 import { compactMutation } from "./compact-mutation.mjs";
+import { reportFailures } from "../../lib/failure/tool.mjs";
 
 const text = () => Type.String({ minLength: 1 });
 const definition = {
@@ -36,7 +37,8 @@ const parameters = Type.Object({
 }, { additionalProperties: false });
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  const registerTool = (tool: any) => pi.registerTool(reportFailures(tool));
+  registerTool({
     name: "scaffold_tasks",
     label: "Scaffold Issues",
     description: "Perform ONE explicit Scaffold task lifecycle operation in Pi's current repository. " +

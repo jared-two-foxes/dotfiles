@@ -166,9 +166,12 @@ export async function scaffoldTasks(params, context = {}, options = {}) {
       try {
         error = JSON.parse(response.stderr);
       } catch {}
+      // Say why Scaffold refused: callers that surface only `message` must still show the rule that fired.
       return failure(
         "COMMAND_FAILED",
-        "Scaffold command failed; inspect persisted state before retrying",
+        object(error) && typeof error.error === "string" && error.error.trim()
+          ? "Scaffold refused " + identity.operation + ": " + error.error
+          : "Scaffold command failed; inspect persisted state before retrying",
         {
           exit_code: response.code,
           stderr: response.stderr?.slice(0, 4000),

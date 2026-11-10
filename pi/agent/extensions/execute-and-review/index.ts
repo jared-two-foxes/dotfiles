@@ -13,9 +13,11 @@ import { inspectEvidence } from "./inspect-evidence.mjs";
 import { scaffoldCliUsage, scaffoldCliUsageSince } from "../scaffold/adapter.mjs";
 import { combineScaffoldUsage } from "../../lib/verification/timings.mjs";
 import { approveDeliveryAmendment } from "./context-amendment.mjs";
+import { reportFailures } from "../../lib/failure/tool.mjs";
 
 export default function (pi: ExtensionAPI) {
-  pi.registerTool({
+  const registerTool = (tool: any) => pi.registerTool(reportFailures(tool));
+  registerTool({
     name: "approve_delivery_amendment",
     label: "Approve material contract amendment",
     description:
@@ -50,7 +52,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "approve_feature_direction",
     label: "Approve feature direction",
     description:
@@ -80,7 +82,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "execute_and_review",
     label: "Execute and Review (Conductor)",
     description:
@@ -400,7 +402,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "inspect_conductor_evidence",
     label: "Inspect retained Conductor evidence",
     description:

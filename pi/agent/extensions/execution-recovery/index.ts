@@ -5,10 +5,12 @@ import { rewriteFeatureHistory } from "./reconciliation.mjs";
 import { adoptCommits, inspectDrift } from "./foreign-history.mjs";
 import { suspendIssue, resumeIssue } from "./issue-recovery.mjs";
 import { prepareIssueHandoff, inspectIssueHandoff, inspectIssueAttempt } from "./issue-context.mjs";
+import { reportFailures } from "../../lib/failure/tool.mjs";
 
 export default function (pi: ExtensionAPI) {
+  const registerTool = (tool: any) => pi.registerTool(reportFailures(tool));
   for (const operation of ["suspend", "resume"] as const)
-    pi.registerTool({
+    registerTool({
       name: operation === "suspend" ? "suspend_issue" : "resume_issue",
       label:
         operation === "suspend"
@@ -62,7 +64,7 @@ export default function (pi: ExtensionAPI) {
         };
       },
     });
-  pi.registerTool({
+  registerTool({
     name: "prepare_issue_handoff",
     label: "Prepare issue context",
     description:
@@ -100,7 +102,7 @@ export default function (pi: ExtensionAPI) {
     ["inspect_issue_handoff", inspectIssueHandoff],
     ["inspect_issue_attempt", inspectIssueAttempt],
   ] as const)
-    pi.registerTool({
+    registerTool({
       name,
       label:
         name === "inspect_issue_handoff"
@@ -136,7 +138,7 @@ export default function (pi: ExtensionAPI) {
         };
       },
     });
-  pi.registerTool({
+  registerTool({
     name: "rewrite_feature_history",
     label: "Verify and record a rebase",
     description:
@@ -187,7 +189,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "adopt_foreign_commits",
     label: "Record user commits in the ledger",
     description:
@@ -221,7 +223,7 @@ export default function (pi: ExtensionAPI) {
       };
     },
   });
-  pi.registerTool({
+  registerTool({
     name: "inspect_feature_drift",
     label: "Inspect feature drift",
     description:

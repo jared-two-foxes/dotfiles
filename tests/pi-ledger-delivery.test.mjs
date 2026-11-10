@@ -12,6 +12,7 @@ import { scaffoldTasks } from "../pi/agent/extensions/scaffold/adapter.mjs";
 import { approveFeatureDirection } from "../pi/agent/extensions/scaffold/feature-authorization.mjs";
 import { checkpointVerifiedTask } from "../pi/agent/extensions/checkpoint/scaffold.mjs";
 import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { failureEnvelope } from "../pi/agent/lib/failure/report.mjs";
 import { recoverAttempt } from "../pi/agent/lib/evidence/attempts.mjs";
 import { assertLatestAttempt } from "../pi/agent/lib/verification/attempt-chain.mjs";
 import { verifyHistory } from "../pi/agent/lib/verification/history.mjs";
@@ -129,6 +130,8 @@ test("a receipt is a ledger artifact, its attempt is recorded, and completion mu
     payload: { feature_id: "F1", task_id: "a", result: "PASSED", source: "conductor", reference: "sha256:" + "0".repeat(64), summary: "x" } }, f.context);
   assert.equal(forged.ok, false);
   assert.match(forged.stderr, /recorded PASSED attempt/);
+  // The message names the rule that fired, not a generic "inspect persisted state".
+  assert.match(forged.message, /^Scaffold refused complete: .*recorded PASSED attempt/);
 });
 
 test("two dependent tasks complete and checkpoint into one chain that verifies against Git", real, async (t) => {
@@ -261,4 +264,21 @@ test("a terminal receipt stored before its attempt was recorded can be finished,
   const skipped = await retainEvidence(f.dir, { ...record, attempt: 9, startedReference: undefined });
   await assert.rejects(recoverAttempt(f.dir, skipped, binding), /sequence/i);
   assert.equal((await f.feature()).tasks.a.attempts.length, 2);
+});
+
+test("continuing after someone committed to the branch names the real cause and recovery", real, async (t) => {
+  const f = await fixture(t);
+  await f.call("start", undefined, "a");
+  const first = await f.attempt("a", { status: "NEEDS_DESIGN", phase: "verification" });
+  await writeFile(path.join(f.dir, "user.txt"), "user\n");
+  f.g("add", ".");
+  f.g("commit", "-qm", "user commit");
+  const result = await f.attempt("a", { previousAttempt: first.evidence.reference });
+  assert.equal(result.status, "BLOCKED", JSON.stringify(result));
+  // Not the generic "evidence recovery": the branch moved, and the message says so.
+  assert.equal(result.reason, "CONTINUATION_BASELINE_MISMATCH");
+  assert.match(result.message, /branch has moved since that attempt/);
+  const envelope = failureEnvelope("execute_and_review", result);
+  assert.equal(envelope.owner, "agent");
+  assert.match(envelope.next.join(" "), /inspect_feature_drift/);
 });
