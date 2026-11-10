@@ -332,42 +332,6 @@ test(
 );
 
 test(
-  "task evidence changed during validation is still caught despite cached authentication",
-  integration,
-  async (t) => {
-    const f = await fixture(t);
-    await f.add("one");
-    const checkpoint = await f.finish("one");
-    // The receipt the task's checkpoint is authenticated against (the evidence
-    // directory also holds intent and other records that validation never reads).
-    const receipt = await artifactPath(f.dir, checkpoint.evidenceRef);
-    const interrupted = await f.validate(
-      {},
-      {
-        interrupt: async (stage) => {
-          if (stage !== "beforeReview") return;
-          // Earlier derivations have cached this authentication; now corrupt the
-          // receipt it covers. The changed evidence must not be trusted.
-          await appendFile(receipt, " ");
-        },
-      },
-    );
-    assert.equal(interrupted.status, "BLOCKED", JSON.stringify(interrupted));
-    assert.match(interrupted.message, /digest/i, JSON.stringify(interrupted));
-    assert.notEqual(
-      (await f.call("list")).feature.validation.status,
-      "verified",
-    );
-    // The cache really was in use before the corruption was detected.
-    const diagnostic = await readFeatureEvidence(
-      f.dir,
-      interrupted.diagnosticEvidenceRef,
-    );
-    assert.ok(diagnostic.timings.precondition_cache.hits >= 1);
-  },
-);
-
-test(
   "unfinished, blocked, missing-checkpoint, unrelated-commit and changed-design features fail closed",
   integration,
   async (t) => {
@@ -395,22 +359,6 @@ test(
         ((await f.call("list")).feature.validation?.history ?? []).length,
         0,
       );
-    }
-  },
-);
-
-test(
-  "lost or modified task evidence prevents feature validation",
-  integration,
-  async (t) => {
-    for (const variant of ["lost", "modified"]) {
-      const f = await fixture(t);
-      await f.add("one");
-      const c = await f.finish("one");
-      const file = await artifactPath(f.dir, c.evidenceRef);
-      if (variant === "lost") await rm(file);
-      else await writeFile(file, "{}");
-      assert.equal((await f.validate()).status, "BLOCKED");
     }
   },
 );

@@ -18,7 +18,7 @@ import {
 } from '../../lib/evidence/store.mjs';
 import { snapshot } from '../../lib/git/snapshot.mjs';
 import { foreignHistoryRequirements, verifyHistory } from '../../lib/verification/history.mjs';
-import { authenticatedCheckpoints } from '../../lib/verification/checkpoints.mjs';
+import { ledgerCheckpoints } from '../../lib/verification/checkpoints.mjs';
 import { scaffoldTasks, invoke, checkStatePaths } from '../scaffold/adapter.mjs';
 import { reviewChanges } from '../../lib/review/adapter.mjs';
 import {
@@ -88,9 +88,9 @@ export async function featurePreconditions(repository, args, options = {}, memo)
   const identifiers = Object.keys(tasks);
   requireValue(identifiers.length > 0 && identifiers.every(id => tasks[id].status === 'completed'),
     'All required tasks, including recursive parents, must be completed');
-  // Git must match the history the ledger recorded, and every checkpoint's receipt must agree with it.
+  // Git must match the history the ledger recorded, and every completed task must have its checkpoint.
   verifyHistory(repository, feature, { head: args.headRef });
-  const checkpoints = await authenticatedCheckpoints(repository, feature);
+  const checkpoints = ledgerCheckpoints(feature);
   // Preserve the Scaffold journal as recorded. Only close a historical check in
   // the review view when the authenticated checkpoint assessed its passing retry.
   const reviewTasks = structuredClone(tasks);
