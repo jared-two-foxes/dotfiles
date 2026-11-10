@@ -176,7 +176,7 @@ test('native tool exposes review-only parameters, propagates context and disting
     for (const field of ['input', 'operations', 'buildCommand', 'testCommand']) {
       assert.equal(Object.hasOwn(definition.parameters.properties, field), false);
     }
-    const result = await definition.execute('id', params, controller.signal, undefined, { cwd: '/session' });
+    const result = await definition.execute(params, { cwd: '/session', signal: controller.signal });
     assert.equal(result.isError, status === 'ERROR' || status === 'INDETERMINATE');
     assert.equal(JSON.parse(result.content[0].text).status, status); assert.equal(result.details.status, status);
   }
@@ -192,6 +192,6 @@ test('Pi and shared policies allow standalone review without weakening implement
   assert.match(skill, /Use the native `review_changes` tool/);
   assert.match(agents, /execute_and_review/); assert.doesNotMatch(agents, /skill:tdd|writes tests and implementation code directly/);
   assert.match(await read('shared/research-assistant/core.md'), /read-only code reviews/);
-  assert.match(await read('pi/agent/extensions/review/index.ts'), /pi\.registerTool\(createReviewTool\(Type\)\)/);
+  assert.match(await read('pi/agent/extensions/review/index.ts'), /registerPiTools\(pi, \[createReviewTool\(Type\)\]\)/);
   assert.match(await read('.github/workflows/pi.yml'), /tests\/pi-review\.test\.mjs/);
 });

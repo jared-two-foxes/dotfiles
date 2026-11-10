@@ -120,8 +120,8 @@ test('native checkpoints, recovery and validation reuse the same durable directi
   assert.match(native, /approveFeatureDirection/);
   assert.doesNotMatch(native, /registerRecoveryTools|name: "(?:validate_feature|checkpoint_verified_task)"/);
   const recovery = read('pi/agent/extensions/execution-recovery/index.ts');
-  const validation = read('pi/agent/extensions/feature-validation/index.ts');
-  const checkpoint = read('pi/agent/extensions/checkpoint/index.ts');
+  const validation = read('pi/agent/extensions/feature-validation/tools.mjs');
+  const checkpoint = read('pi/agent/extensions/checkpoint/tools.mjs');
   assert.match(checkpoint, /name: "checkpoint_verified_task"/);
   assert.doesNotMatch(recovery, /name: "checkpoint_verified_task"/);
   assert.match(validation, /name: "validate_feature"/);
