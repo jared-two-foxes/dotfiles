@@ -2,8 +2,8 @@
 // branch and Git baseline. Scaffold's per-initialization identity prevents
 // retaining authority or replaying receipts from that previous incarnation.
 //
-// Existing schema-v2 features created before Scaffold introduced instance_id
-// remain readable and keep their existing authorization/receipt contracts.
+// Scaffold schema 3 gives every feature an instance_id, and the ledger it names is the only
+// record of that feature, so a feature without one is not a supported state.
 const INSTANCE_ID = /^[a-f0-9]{32}$/;
 
 export function featureInstanceId(feature) {

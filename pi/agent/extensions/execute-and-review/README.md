@@ -595,8 +595,8 @@ projections rather than the full feature/history. The Pi Scaffold tool uses scop
 selection and compact acknowledgements by default; explicit list remains available.
 Native execution/checkpoint/recovery validation still reads complete state.
 
-`prepare_issue_handoff` persists a content-addressed capsule in the repository's
-Git metadata (`pi-issue-context`), containing scoped contracts, current Git fingerprint,
+`prepare_issue_handoff` persists a content-addressed capsule as a scratch file under
+`.scaffold/work/handoffs` (not ledger evidence), containing scoped contracts, current Git fingerprint,
 latest authenticated attempt/findings excerpt and bounded agent navigation notes.
 `inspect_issue_handoff` discovers by feature/issue or reads by reference and checks
 current graph digest, source/index/HEAD and latest attempt. Stale handoffs return

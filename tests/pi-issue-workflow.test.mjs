@@ -1068,6 +1068,7 @@ test(
       f.options.scaffoldOptions,
     );
     assert.equal(compactMutation(result).data.status, "in_progress");
+    assert.equal(compactMutation(result).data.schema_version, 3);
     assert.equal(compactMutation(result).data.task, undefined);
     assert.equal(compactMutation(result).data.feature, undefined);
     const scope = await f.call("issue", { task_id: "F" });
