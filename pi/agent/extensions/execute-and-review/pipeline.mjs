@@ -112,6 +112,12 @@ async function readStageReceipt(file) {
   return readFile(file);
 }
 
+// The end of a stage's stderr, where the stage appends its own error. `preview` keeps only the head of a
+// long log in `stderr` and the end of the file in `tail`, so a truncated log must be read from the tail.
+export function stageStderrEnd(stderr, truncated, tail, limit = 600) {
+  return String(truncated ? tail : stderr).trim().slice(-limit);
+}
+
 export async function stageResults(plan, attempted, rawRunner) {
   const commands = [],
     receipts = [],
@@ -232,11 +238,12 @@ export async function stageResults(plan, attempted, rawRunner) {
       !receipt &&
       rawRunner.commands[index].status !== status &&
       rawRunner.commands[index].exit_code === 125 &&
-      stderr.trim()
+      stageStderrEnd(stderr, stderr_truncated, stderrTail)
     )
       throw Object.assign(
         new Error(
-          'Stage "' + spec.name + '" stopped before retaining its receipt: ' + stderr.trim().slice(-600),
+          'Stage "' + spec.name + '" stopped before retaining its receipt: ' +
+            stageStderrEnd(stderr, stderr_truncated, stderrTail),
         ),
         { code: "STAGE_RECEIPT_MISSING" },
       );

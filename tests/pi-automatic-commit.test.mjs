@@ -13,6 +13,7 @@ import {
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { failureEnvelope } from "../pi/agent/lib/failure/report.mjs";
+import { stageStderrEnd } from "../pi/agent/extensions/execute-and-review/pipeline.mjs";
 import { executeAndCheckpoint } from "../pi/agent/extensions/execute-and-review/delivery.mjs";
 import { finalizeVerifiedTask } from "../pi/agent/extensions/execution-recovery/checkpoint-recovery.mjs";
 import { invoke } from "../pi/agent/lib/conductor/client.mjs";
@@ -814,6 +815,21 @@ test(
     }
   },
 );
+
+test("a long stage log is read from its end, where the stage appends its own error", () => {
+  const error = "Cannot retain command receipt: Source/index changed before review";
+  // Short log: the whole stderr is the evidence.
+  assert.equal(stageStderrEnd("noise\n" + error + "\n", false, ""), ("noise\n" + error).slice(-600));
+  assert.equal(stageStderrEnd("  " + error + "\n", false, ""), error);
+  // Long log: `stderr` is only the head (earlier command output); the stage's own error is in the tail.
+  const head = "earlier command output\n".repeat(900);
+  const tail = "...more output\n" + error + "\n";
+  const shown = stageStderrEnd(head, true, tail);
+  assert.ok(shown.endsWith(error), shown);
+  assert.ok(!shown.includes("earlier command output") || shown.length <= 600);
+  assert.equal(stageStderrEnd("", false, ""), "");
+  assert.equal(stageStderrEnd("", true, "  \n"), "");
+});
 
 test(
   "a stage that stops before retaining its receipt reports its own reason, not a protocol mismatch",
