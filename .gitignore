@@ -38,3 +38,10 @@ pi/agent/sessions/
 /.pi/
 /.scaffold/
 /pi/agent/web-search-cache/
+
+# Pi installation and extension runtime state (regenerated locally)
+/pi/agent/bin/
+/pi/agent/install/
+/pi/agent/settings.json
+/pi/agent/cache/
+/pi/agent/models-store.json
