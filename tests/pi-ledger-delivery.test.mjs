@@ -231,6 +231,13 @@ test("checkpoints still line up with completed tasks after a rebase is recorded 
   const swapped = structuredClone(after);
   swapped.history[0].task_id = "b";
   assert.throws(() => ledgerCheckpoints(swapped), /does not match its task/);
+
+  // A genuine receipt attached to a commit with different content is refused: the checkpoint's original
+  // tree (earliest epoch) must equal the tree recorded on the task's passed attempt.
+  const retreed = structuredClone(after);
+  const original = retreed.epochs?.[0]?.history ?? retreed.history;
+  original.find((s) => s.kind === "checkpoint").tree = "0".repeat(40);
+  assert.throws(() => ledgerCheckpoints(retreed), /base and tree of its task's passed attempt/);
 });
 
 test("a terminal receipt stored before its attempt was recorded can be finished, once and only for its task", real, async (t) => {
