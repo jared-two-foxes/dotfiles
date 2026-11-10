@@ -241,7 +241,9 @@ async function executeAttempt(args, context = {}, options = {}) {
     } catch (error) {
       return outcome("BLOCKED", "CONDUCTOR", {
         repository,
-        reason: "PROTOCOL_MISMATCH",
+        reason: ["CHECK_MODIFIED_SOURCE", "STAGE_RECEIPT_MISSING"].includes(error.code)
+          ? error.code
+          : "PROTOCOL_MISMATCH",
         message: error.message,
         request,
         response,
