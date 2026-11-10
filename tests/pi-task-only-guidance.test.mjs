@@ -18,7 +18,8 @@ test("feature workflow documents one task graph and distinct Pi skill boundaries
     "design-finish",
     "validate_feature",
     "scaffold_tasks",
-    ".scaffold/tasks.json",
+    ".scaffold/features/<feature>.<instance>/ledger.jsonl",
+    "schema version 3",
     ".scaffold/.tasks.lock",
     "Conductor",
   ]) {
