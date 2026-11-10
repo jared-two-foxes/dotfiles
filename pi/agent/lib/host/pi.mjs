@@ -2,13 +2,16 @@
 // This is the only place that knows Pi's `execute(toolCallId, params, signal, onUpdate, ctx)` shape.
 import { defineTool } from "./tool.mjs";
 
-/** Build the neutral `host` from Pi's execution context. `confirm` reaches the real UI lazily. */
+/**
+ * Build the neutral `host` from Pi's execution context. `confirm` reaches the real UI lazily and fails
+ * closed: with no UI (headless, print mode) it resolves false rather than approving.
+ */
 export function piHost(signal, onUpdate, ctx) {
   return {
     cwd: ctx.cwd,
     signal,
     onUpdate,
-    confirm: (title, message) => ctx.ui.confirm(title, message),
+    confirm: async (title, message) => ctx.hasUI === true && Boolean(await ctx.ui.confirm(title, message)),
   };
 }
 

@@ -44,7 +44,7 @@ test("Pi adapter maps Pi's call shape to the neutral host and forwards confirm l
   assert.equal(piTool.label, "T");
   const signal = new AbortController().signal;
   const calls = [];
-  const ctx = { cwd: "/repo", ui: { confirm: async (...a) => (calls.push(a), true) } };
+  const ctx = { cwd: "/repo", hasUI: true, ui: { confirm: async (...a) => (calls.push(a), true) } };
   assert.deepEqual(await piTool.execute("call-id", { a: 1 }, signal, undefined, ctx), { ok: true });
   assert.deepEqual(seen.params, { a: 1 });
   assert.equal(seen.host.cwd, "/repo");
@@ -112,4 +112,37 @@ test("no host-neutral module imports a host SDK or touches the UI", async () => 
   }
   // lib/host/pi.mjs is the one allowed Pi seam. Nothing else under lib/ or any *.mjs workflow may reach the host.
   assert.deepEqual(offenders, []);
+});
+
+test("Pi host confirm fails closed without a UI and passes the answer through with one", async () => {
+  const signal = new AbortController().signal;
+  let asked = 0;
+  const ui = { confirm: async () => (asked++, true) };
+  assert.equal(await piHost(signal, undefined, { cwd: "/r", hasUI: false, ui }).confirm("t", "m"), false);
+  assert.equal(await piHost(signal, undefined, { cwd: "/r", ui }).confirm("t", "m"), false);
+  assert.equal(await piHost(signal, undefined, { cwd: "/r" }).confirm("t", "m"), false);
+  assert.equal(asked, 0, "a headless context must never reach the UI");
+  assert.equal(await piHost(signal, undefined, { cwd: "/r", hasUI: true, ui }).confirm("t", "m"), true);
+  assert.equal(await piHost(signal, undefined, { cwd: "/r", hasUI: true, ui: { confirm: async () => false } }).confirm("t", "m"), false);
+  assert.equal(asked, 1);
+});
+
+test("the tool inventory is stable across hosts", async () => {
+  const { createExecuteAndReviewTools } = await import("../pi/agent/extensions/execute-and-review/tools.mjs");
+  const { createExecutionRecoveryTools } = await import("../pi/agent/extensions/execution-recovery/tools.mjs");
+  const all = [
+    ...createExecuteAndReviewTools(Type), ...createExecutionRecoveryTools(Type), ...createCheckpointTools(Type),
+    ...createFeatureValidationTools(Type), ...createScaffoldTools(Type), createReviewTool(Type),
+  ];
+  assert.deepEqual(all.map((t) => t.name).sort(), [
+    "adopt_foreign_commits", "approve_delivery_amendment", "approve_feature_direction", "checkpoint_verified_task",
+    "execute_and_review", "inspect_conductor_evidence", "inspect_feature_drift", "inspect_feature_validation",
+    "inspect_issue_attempt", "inspect_issue_handoff", "prepare_issue_handoff", "review_changes",
+    "resume_issue", "rewrite_feature_history", "scaffold_tasks", "suspend_issue", "validate_feature",
+  ].sort());
+  assert.equal(new Set(all.map((t) => t.name)).size, all.length, "tool names are unique");
+  for (const tool of all) {
+    assert.ok(tool.label && tool.description.length > 40, `${tool.name} documents itself`);
+    assert.equal(typeof tool.execute, "function");
+  }
 });

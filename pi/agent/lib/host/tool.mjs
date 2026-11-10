@@ -3,17 +3,21 @@
 // A tool is `{ name, label?, description, parameters, execute(params, host) }`.
 //   parameters  a JSON Schema object (built with an injected TypeBox-style `Type`, so no host
 //               package is imported here)
-//   host        { cwd, signal?, onUpdate?, confirm?(title, message) -> Promise<boolean> }
+//   host        { cwd, signal?, onUpdate?, confirm(title, message) -> Promise<boolean> }
+//               `confirm` MUST resolve false (never throw or approve) when there is no human to ask.
 //   execute     resolves to `toolResult(...)`: { content: [{type:"text", text}], isError, details }
 //
 // Nothing in this file or in a tool definition may import a host SDK. Hosts (Pi today, an MCP
 // server next) adapt this shape in their own adapter; see ./pi.mjs.
 import { reportFailures } from "../failure/tool.mjs";
 
-/** Standard tool result: `details` as pretty JSON text. `isError` defaults to `!details.ok`. */
-export function toolResult(details, { isError = !details?.ok, text = details } = {}) {
+/**
+ * Standard tool result: `details` as JSON text (pretty by default; `indent: 0` for compact).
+ * `isError` defaults to `!details.ok`. `text` overrides what the model sees when it differs from `details`.
+ */
+export function toolResult(details, { isError = !details?.ok, text = details, indent = 2 } = {}) {
   return {
-    content: [{ type: "text", text: JSON.stringify(text, null, 2) }],
+    content: [{ type: "text", text: JSON.stringify(text, null, indent) }],
     isError,
     details,
   };
