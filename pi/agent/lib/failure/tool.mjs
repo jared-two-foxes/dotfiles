@@ -36,7 +36,7 @@ export function reportFailures(tool, options = {}) {
       const envelope = failureEnvelope(tool.name, result);
       if (!envelope) return output;
       // A NEEDS_DESIGN attempt already left a receipt in the ledger; every other failure leaves nothing.
-      const recorded = isFailure(result) ? await recordFailure(directory, params, envelope, options) : null;
+      const recorded = isFailure(result) ? await recordFailure(directory, params, envelope, options, result) : null;
       return withFailure(output, envelope, recorded);
     },
   };

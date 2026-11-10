@@ -3,13 +3,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { git } from "../pi/agent/lib/git/tree.mjs";
-import { FAILURE_CODES, describeCode } from "../pi/agent/lib/failure/codes.mjs";
+import { FAILURE_CODES, NOT_FAILURE_CODES, describeCode } from "../pi/agent/lib/failure/codes.mjs";
 import { exceptionEnvelope, failureEnvelope, isFailure, recordFailure } from "../pi/agent/lib/failure/report.mjs";
 import { reportFailures } from "../pi/agent/lib/failure/tool.mjs";
+import { retainEvidence } from "../pi/agent/lib/evidence/store.mjs";
+import { workDirectory } from "../pi/agent/lib/git/workspace.mjs";
 import { ledgerFeature } from "./helpers/ledger-feature.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -28,17 +31,18 @@ async function sources(dir) {
 }
 
 test("every failure code the pipeline can emit has an owner and a remedy", async () => {
+  // Any UPPER_SNAKE string in the source could be a code, however it is emitted (a literal argument, a constant,
+  // a helper call, a conditional). Each must be in the table, or deliberately listed as not a code.
   const found = new Map();
   for (const file of [...(await sources(path.join(root, "pi/agent/lib"))), ...(await sources(path.join(root, "pi/agent/extensions")))]) {
     if (file.includes("/lib/failure/")) continue;
-    const text = await readFile(file, "utf8");
-    for (const m of text.matchAll(/(?:reason|code):\s*["']([A-Z][A-Z0-9_]{3,})["']/g)) found.set(m[1], file);
-    for (const m of text.matchAll(/failure\(\s*["']([A-Z][A-Z0-9_]{3,})["']/g)) found.set(m[1], file);
-    for (const m of text.matchAll(/\["((?:WORKFLOW_TIMEOUT|OUTPUT_LIMIT|CANCELLED)[A-Z_",\s]*)\]/g))
-      for (const c of m[1].match(/[A-Z_]{4,}/g)) found.set(c, file);
+    for (const m of (await readFile(file, "utf8")).matchAll(/["']([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)["']/g)) found.set(m[1], file);
   }
-  const missing = [...found].filter(([code]) => !FAILURE_CODES[code]).map(([code, file]) => `${code} (${path.relative(root, file)})`);
-  assert.deepEqual(missing, [], "add these codes to lib/failure/codes.mjs");
+  const missing = [...found]
+    .filter(([code]) => !FAILURE_CODES[code] && !NOT_FAILURE_CODES.has(code))
+    .map(([code, file]) => `${code} (${path.relative(root, file)})`);
+  assert.deepEqual(missing, [], "add each to FAILURE_CODES in lib/failure/codes.mjs, or to NOT_FAILURE_CODES if it is not a code");
+  assert.deepEqual([...NOT_FAILURE_CODES].filter((c) => FAILURE_CODES[c]), [], "a code cannot also be listed as not a code");
   for (const [code, entry] of Object.entries(FAILURE_CODES)) {
     assert.match(code, /^[A-Z][A-Z0-9_]{2,63}$/, code);
     assert.ok(["agent", "user", "bug"].includes(entry.owner), code);
@@ -77,6 +81,53 @@ test("an envelope says what failed, who acts and what to do, from any result sha
   const bug = exceptionEnvelope("validate_feature", Object.assign(new Error("boom"), { stack: "Error: boom\n  at a\n  at b" }));
   assert.deepEqual([bug.code, bug.owner], ["INTERNAL_ERROR", "bug"]);
   assert.match(bug.cause, /at a/);
+});
+
+test("a successful read is never treated as a failure, whatever status it copies", () => {
+  // inspect_issue_attempt returns ok:true and copies the retained attempt's status.
+  for (const status of ["BLOCKED", "NEEDS_DESIGN"])
+    assert.equal(failureEnvelope("inspect_issue_attempt", { ok: true, status, reason: "RESOURCE_PAUSED" }), null, status);
+  assert.equal(isFailure({ ok: true, status: "BLOCKED" }), false);
+  assert.ok(isFailure({ ok: false, status: "PASSED" }));
+});
+
+test("a blocked result without a top-level reason is diagnosed from the review engine and the verification failure", () => {
+  const blocked = (conductor) => ({ status: "BLOCKED", stage: "REVIEW", conductor });
+  const auth = failureEnvelope("execute_and_review", blocked({ review: { status: "BLOCKED", reason: "AUTHENTICATION_FAILURE", findings: [] }, checks: [] }));
+  assert.deepEqual([auth.code, auth.owner, auth.message], ["AUTHENTICATION_FAILURE", "user", "Independent review stopped: AUTHENTICATION_FAILURE"]);
+  const budget = failureEnvelope("execute_and_review", blocked({ review: { status: "BLOCKED", reason: "BUDGET_EXHAUSTED", findings: [] }, checks: [] }));
+  assert.deepEqual([budget.code, budget.owner], ["BUDGET_EXHAUSTED", "agent"]);
+  assert.match(budget.next[0], /budget/i);
+  // CHANGES_REQUESTED is a finding to fix, not an engine failure.
+  const findings = failureEnvelope("execute_and_review", blocked({ review: { status: "CHANGES_REQUESTED", reason: "REVIEW_COMPLETED", findings: [] }, checks: [] }));
+  assert.equal(findings.code, "UNSPECIFIED_FAILURE");
+
+  const engine = failureEnvelope("execute_and_review", blocked({ failure: { category: "review_engine", code: "ENGINE_CRASHED" }, checks: [] }));
+  assert.deepEqual([engine.code, engine.owner], ["ENGINE_CRASHED", "user"]);
+  assert.match(engine.message, /review_engine.*ENGINE_CRASHED/);
+  const integrity = failureEnvelope("execute_and_review", blocked({ failure: { category: "evidence_integrity", code: "TOOL_RESULT_BAD" }, checks: [] }));
+  assert.equal(integrity.owner, "bug");
+  const invocation = failureEnvelope("execute_and_review", blocked({ failure: { category: "invocation", code: "TOOL_NOT_RUN" }, checks: [] }));
+  assert.equal(invocation.owner, "agent");
+
+  const check = failureEnvelope("execute_and_review", blocked({ checks: [{ name: "build", status: "PASSED", exit_code: 0 }, { name: "test", status: "FAILED", exit_code: 1, stderr: "AssertionError at foo.test.js:14" }] }));
+  assert.equal(check.message, "Check test exited 1");
+  assert.match(check.cause, /AssertionError/);
+  // An explicit top-level reason still wins.
+  assert.equal(failureEnvelope("execute_and_review", { status: "BLOCKED", reason: "HEAD_CHANGED", conductor: { review: { status: "BLOCKED", reason: "AUTHENTICATION_FAILURE" } } }).code, "HEAD_CHANGED");
+  // The nested form used by finalization failures.
+  const nested = failureEnvelope("execute_and_review", { status: "BLOCKED", actualResult: { conductor: { review: { status: "BLOCKED", reason: "NETWORK_FAILURE" } } } });
+  assert.deepEqual([nested.code, nested.owner], ["NETWORK_FAILURE", "user"]);
+});
+
+test("correction guidance only names inputs the tool accepts", () => {
+  const guidance = (tool) => failureEnvelope(tool, { status: "NEEDS_DESIGN", message: "Project check failed: test" });
+  assert.match(guidance("execute_and_review").next.join(" "), /previousAttempt/);
+  for (const tool of ["validate_feature", "rewrite_feature_history", "some_other_tool"])
+    assert.doesNotMatch(guidance(tool).next.join(" "), /previousAttempt/, tool);
+  assert.match(guidance("validate_feature").next[0], /corrective issue/);
+  assert.equal(guidance("rewrite_feature_history").owner, "user");
+  assert.equal(guidance("some_other_tool").owner, "agent");
 });
 
 async function fixture(t) {
@@ -174,4 +225,36 @@ test("a result that is not a failure passes through untouched", real, async (t) 
   const out = await run(original, { featureId: "F1" }, f.dir);
   assert.deepEqual(out, await original.execute());
   assert.deepEqual(await failures(f), []);
+});
+
+test("a failure of a reference-only continuation is recorded against the task its reference names", real, async (t) => {
+  const f = await fixture(t);
+  const details = { status: "BLOCKED", stage: "PAUSED", reason: "RESOURCE_PAUSED", message: "Persisted review context exceeds its allowance" };
+
+  // previousAttempt: the receipt in the ledger carries the binding.
+  const receipt = await retainEvidence(f.dir, {
+    repository: f.dir, task: f.task, attempt: 1, args: { baseRef: f.ledger.baseline }, before: {}, after: {}, result: { status: "NEEDS_DESIGN" },
+  });
+  const byReceipt = await run(toolReturning("execute_and_review", details), { previousAttempt: receipt }, f.dir);
+  assert.equal(JSON.parse(byReceipt.content[0].text).failure.recorded, true);
+
+  // issueHandoffRef: the saved handoff carries the binding.
+  const bytes = JSON.stringify({ schema: "pi.issue-context/v1", repository: await realpath(f.dir), binding: f.task, recorded_at: "2026-11-10T00:00:00Z" });
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  await mkdir(workDirectory(await realpath(f.dir), "handoffs"), { recursive: true });
+  await writeFile(path.join(workDirectory(await realpath(f.dir), "handoffs"), hash + ".json"), bytes);
+  const byHandoff = await run(toolReturning("execute_and_review", details), { issueHandoffRef: "pi-issue-context:sha256:" + hash }, f.dir);
+  assert.equal(JSON.parse(byHandoff.content[0].text).failure.recorded, true);
+
+  // The result itself can name the task.
+  const byResult = await run(toolReturning("execute_and_review", { ...details, evidence: { reference: receipt, task: f.task, attempt: 1 } }), { previousAttempt: "sha256:" + "0".repeat(64) }, f.dir);
+  assert.equal(JSON.parse(byResult.content[0].text).failure.recorded, true);
+
+  // Nothing identifies a feature: not recorded, and the failure is still shown.
+  const none = await run(toolReturning("execute_and_review", details), { previousAttempt: "sha256:" + "1".repeat(64) }, f.dir);
+  assert.equal(JSON.parse(none.content[0].text).failure.recorded, false);
+
+  const recorded = await failures(f);
+  assert.equal(recorded.length, 3);
+  assert.ok(recorded.every((r) => r.code === "RESOURCE_PAUSED" && r.task_id === "a"), JSON.stringify(recorded));
 });
