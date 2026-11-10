@@ -15,7 +15,7 @@ import { readEvidence, retainEvidence } from "../pi/agent/lib/evidence/store.mjs
 import { recoverAttempt } from "../pi/agent/lib/evidence/attempts.mjs";
 import { assertLatestAttempt } from "../pi/agent/lib/verification/attempt-chain.mjs";
 import { verifyHistory } from "../pi/agent/lib/verification/history.mjs";
-import { authenticatedCheckpoints } from "../pi/agent/lib/verification/checkpoints.mjs";
+import { ledgerCheckpoints } from "../pi/agent/lib/verification/checkpoints.mjs";
 import { rewriteFeatureHistory } from "../pi/agent/extensions/execution-recovery/reconciliation.mjs";
 import { executeAndReview as executeTaskAttempt } from "./helpers/conductor-v2.mjs";
 import { requirementsFor } from "./helpers/issue-plan.mjs";
@@ -187,7 +187,7 @@ test("execution is refused while HEAD has commits the ledger has not recorded", 
   assert.equal((await f.feature()).tasks.a.attempts?.length ?? 0, 0);
 });
 
-test("receipts still authenticate after a rebase is recorded as a history-rewrite", real, async (t) => {
+test("checkpoints still line up with completed tasks after a rebase is recorded as a history-rewrite", real, async (t) => {
   const f = await fixture(t);
   for (const id of ["a", "b"]) {
     await f.call("start", undefined, id);
@@ -197,7 +197,7 @@ test("receipts still authenticate after a rebase is recorded as a history-rewrit
     assert.equal((await f.checkpoint(id, result.evidence.reference)).ok, true);
   }
   const before = await f.feature();
-  await authenticatedCheckpoints(f.dir, before);
+  ledgerCheckpoints(before);
 
   f.g("switch", "-q", "main");
   await writeFile(path.join(f.dir, "upstream.txt"), "upstream\n");
@@ -218,21 +218,26 @@ test("receipts still authenticate after a rebase is recorded as a history-rewrit
   }, f.context, { reviewOptions: { executable: node, prefixArgs: [reviewScript] } });
   assert.equal(rewritten.status, "PASSED", JSON.stringify(rewritten));
 
-  // The checkpoints now have new commits, parents and trees; their receipts describe the original history.
+  // The checkpoints now have new commits, parents and trees; each still belongs to its completed task.
   const after = await f.feature();
   assert.notEqual(after.history[0].commit, before.history[0].commit);
-  const checkpoints = await authenticatedCheckpoints(f.dir, after);
-  assert.deepEqual(checkpoints.map((c) => [c.taskId, c.commit, c.parent, c.tree]),
+  assert.deepEqual(ledgerCheckpoints(after).map((c) => [c.taskId, c.commit, c.parent, c.tree]),
     after.history.map((s) => [s.task_id, s.commit, s.parent, s.tree]));
 
-  // A retained rewrite verification that is missing or wrong is rejected.
-  const forged = structuredClone(after);
-  forged.epochs[0].verification = "sha256:" + "0".repeat(64);
-  await assert.rejects(authenticatedCheckpoints(f.dir, forged));
-  // A rewritten checkpoint that differs from what the retained verification covered is rejected.
-  const wrong = structuredClone(after);
-  wrong.history[0].tree = after.history[1].tree;
-  await assert.rejects(authenticatedCheckpoints(f.dir, wrong), /does not cover the recorded history/);
+  // A completed task with no checkpoint, or a checkpoint for another task's completion, is refused.
+  const missing = structuredClone(after);
+  missing.history.pop();
+  assert.throws(() => ledgerCheckpoints(missing), /Every completed task requires a recorded checkpoint/);
+  const swapped = structuredClone(after);
+  swapped.history[0].task_id = "b";
+  assert.throws(() => ledgerCheckpoints(swapped), /does not match its task/);
+
+  // A genuine receipt attached to a commit with different content is refused: the checkpoint's original
+  // tree (earliest epoch) must equal the tree recorded on the task's passed attempt.
+  const retreed = structuredClone(after);
+  const original = retreed.epochs?.[0]?.history ?? retreed.history;
+  original.find((s) => s.kind === "checkpoint").tree = "0".repeat(40);
+  assert.throws(() => ledgerCheckpoints(retreed), /base and tree of its task's passed attempt/);
 });
 
 test("a terminal receipt stored before its attempt was recorded can be finished, once and only for its task", real, async (t) => {

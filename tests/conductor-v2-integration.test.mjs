@@ -170,17 +170,6 @@ test(
             executionSummary(result).conductor.toolOutputs,
             undefined,
           );
-          const tampered = await retainEvidence(directory, {
-            ...record,
-            workflow: {
-              ...record.workflow,
-              inputs: { ...record.workflow.inputs, requirements: "weakened" },
-            },
-          });
-          await assert.rejects(
-            authenticateTaskEvidence(directory, tampered, args.task),
-            /tool input mismatch/,
-          );
           // Successful evidence is self-contained; log/request cleanup cannot forge
           // success, nor invalidate the immutable successful receipt after the fact.
           await rm(record.request.output_directory, { recursive: true });

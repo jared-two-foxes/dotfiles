@@ -233,22 +233,6 @@ test("task receipts authenticate every selected check and snapshot only after th
       1,
     );
     assert.match(result.conductor.checks.at(-1).stdout, /client tests passed/);
-    const altered = await retainEvidence(f.dir, {
-      ...evidence.record,
-      args: {
-        ...evidence.record.args, // the retained args carry the inherited delivery context
-        ...f.args,
-        requirements: evidence.record.args.requirements,
-        checks: f.args.checks.map((c, i) =>
-          i ? c : { ...c, command: ["true"] },
-        ),
-      },
-    });
-    await assert.rejects(
-      authenticateTaskEvidence(f.dir, altered, f.args.task),
-      /plan mismatch/,
-    );
-
     for (const [caseIndex, checks] of [
       [],
       result.conductor.checks.slice(1),

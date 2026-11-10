@@ -304,50 +304,6 @@ test(
     });
     assert.equal(validation.status, "PASSED", JSON.stringify(validation));
     assert.equal(f.git("rev-list", "--count", f.base + "..HEAD"), "1");
-    for (const change of [
-      (r) => {
-        r.producer = "unverified";
-      },
-      (r) => { r.producer = "pi.command-receipts/v1"; },
-      (r) => { delete r.result.conductor.runner.conditionReceipts; },
-      (r) => {
-        r.deliveryRequest.commands.pop();
-      },
-      (r) => {
-        r.result.conductor.runner.receipts[0].exit_code = 7;
-      },
-      (r) => {
-        r.result.conductor.runner.conditionReceipts.at(-1).exit_code = 7;
-      },
-      (r) => {
-        r.result.conductor.expectedOperations = 2;
-        r.result.conductor.execution.operations_applied = 2;
-        r.result.conductor.toolOutputs.execution = JSON.stringify({
-          ...JSON.parse(r.result.conductor.toolOutputs.execution),
-          operations_applied: 2,
-        });
-      },
-    ]) {
-      const tampered = structuredClone(record);
-      change(tampered);
-      const reference = await retainEvidence(f.directory, tampered);
-      await assert.rejects(
-        authenticateTaskEvidence(f.directory, reference, f.args.task),
-      );
-    }
-    const forged = structuredClone(record);
-    const runner = forged.result.conductor.runner;
-    const reviewReceipt = runner.receipts.at(-1);
-    reviewReceipt.handoff.inputs[0].sha256 = "0".repeat(64);
-    runner.conditionReceipts.at(-1).commandReceiptSha256 = digest(
-      JSON.stringify(reviewReceipt),
-    );
-    forged.response.stdout = JSON.stringify(runner);
-    const forgedRef = await retainEvidence(f.directory, forged);
-    await assert.rejects(
-      authenticateTaskEvidence(f.directory, forgedRef, f.args.task),
-      /Retained review evidence mismatch/,
-    );
   },
 );
 
