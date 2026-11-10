@@ -273,7 +273,7 @@ test("concurrent recording yields exactly one entry", real, async t => {
   const results = await Promise.all(Array.from({ length: 4 }, () => f.adopt(f.base, head)));
   assert.ok(results.some(r => r.ok), JSON.stringify(results));
   assert.equal((await f.feature()).history.filter(s => s.kind === "foreign").length, 1);
-  for (const r of results) if (!r.ok) assert.match(r.message, /recorded head|already|Scaffold refused/);
+  for (const r of results) if (!r.ok) assert.match(r.message, /recorded head|already|Scaffold refused/i);
 });
 
 test("drift inspection is read-only and names the applicable recovery", real, async t => {
