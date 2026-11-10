@@ -203,7 +203,8 @@ may use `["node", "--test", "tests/affected.test.mjs"]`. Include a scoped build,
 type check or lint check when it establishes relevant correctness.
 **Checks must be read-only.** Review accepts check evidence for exactly one source snapshot, so a check that
 rewrites files blocks the run (`CHECK_MODIFIED_SOURCE`). Use the non-modifying form: `cargo fmt --check`, not
-`cargo fmt`; `prettier --check`, not `--write`; no `--fix`, `--write` or auto-format flags. Formatting is applied
+`cargo fmt`, and not a chain such as `cargo fmt && cargo fmt --check`, whose first half still rewrites files;
+`prettier --check`, not `--write`; no `--fix`, `--write` or auto-format flags. Formatting is applied
 through executor operations (or by the user), then verified with the `--check` form.
 If a tool's exit code does not establish success, set that named check's optional
 `successCondition` to an explicit executable/argv array that examines the full

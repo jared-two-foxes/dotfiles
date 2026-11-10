@@ -103,7 +103,8 @@ The active Pi model executes the Design persona in the current conversation.
 `execute_and_review` takes an ordered `checks` list defining the verification
 commands for an issue. Every check must be read-only: Review accepts check
 evidence for one source snapshot, so a check that modifies the working tree
-(`cargo fmt` instead of `cargo fmt --check`, a linter with `--fix`) stops the run
+(`cargo fmt` instead of `cargo fmt --check`, a format-then-verify chain such as
+`cargo fmt && cargo fmt --check`, a linter with `--fix`) stops the run
 with `CHECK_MODIFIED_SOURCE`, naming the check. Its changes are kept in the working
 tree and the attempt is retained, so the correction is to swap its command for the read-only
 form with a `repair_check` context update and continue with `previousAttempt`. If a stage stops before it can retain its own
