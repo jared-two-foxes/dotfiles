@@ -226,6 +226,22 @@ export function authenticateFeatureRecord(
   );
 }
 
+// Every obligation the pass gate will require the final review to verify, so the review can be told
+// to assess exactly that set: feature-level ones plus unresolved, unamended obligations on each task.
+export function obligationsToAssess(tasks, featureObligations = []) {
+  const open = new Map();
+  for (const o of featureObligations)
+    if (o.status !== "independently_verified") open.set(o.id, o);
+  for (const t of Object.values(tasks)) {
+    const context = t.delivery?.context;
+    for (const o of context?.obligations ?? [])
+      if (o.status !== "independently_verified" &&
+        !(context.amendments ?? []).some((a) => a.ids.includes(o.id)))
+        open.set(o.id, o);
+  }
+  return [...open.values()];
+}
+
 export function featureObligationsVerified(tasks, review) {
   return Object.values(tasks).every((t) =>
     obligationsVerified({ deliveryContext: t.delivery?.context }, review),
