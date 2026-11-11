@@ -107,7 +107,7 @@ test("no host-neutral module imports a host SDK or touches the UI", async () => 
   const offenders = [];
   for (const file of files) {
     const text = await readFile(file, "utf8");
-    if (/@earendil-works|@mariozechner|pi-coding-agent|ExtensionAPI|\bctx\.ui\b|registerTool\(/.test(text)
+    if (/@earendil-works|@mariozechner|pi-coding-agent|@modelcontextprotocol|ExtensionAPI|\bctx\.ui\b|registerTool\(/.test(text)
       && path.relative(root, file) !== path.join("lib", "host", "pi.mjs")) offenders.push(path.relative(root, file));
   }
   // lib/host/pi.mjs is the one allowed Pi seam. Nothing else under lib/ or any *.mjs workflow may reach the host.

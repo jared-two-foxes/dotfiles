@@ -45,3 +45,6 @@ pi/agent/sessions/
 /pi/agent/settings.json
 /pi/agent/cache/
 /pi/agent/models-store.json
+
+# MCP server dependencies
+pi/mcp/node_modules/
