@@ -29,6 +29,7 @@ import {
   reviewScope,
   authenticateFeatureRecord,
   featureObligationsVerified,
+  obligationsToAssess,
 } from '../../lib/verification/feature.mjs';
 import { monitorTrackedInputs } from '../../lib/git/monitor.mjs';
 import { runCheck } from './check-process.mjs';
@@ -131,6 +132,8 @@ function assembledRequirements(pre, args) {
   const feature = { ...pre.feature, tasks: pre.reviewTasks };
   return featureRequirements(feature, pre.design) + foreignHistoryRequirements(pre.feature) + (
     '\n\nPersisted feature obligations: ' + JSON.stringify(pre.obligations) +
+    '\nOpen obligations requiring explicit assessment (feature-level and task-level): ' +
+    JSON.stringify(obligationsToAssess(pre.reviewTasks, pre.obligations).map(({ id, text, path }) => ({ id, text, path }))) +
     '\nExplicitly assess every open ID using obligation_assessments with disposition verified and concrete evidence; agent claims do not close findings.');
 }
 export async function validateFeature(args, context = {}, options = {}) {
