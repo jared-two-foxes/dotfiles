@@ -2,6 +2,7 @@ import { authenticateAmendment } from '../authorization/amendment.mjs';
 import { authenticateAttemptChain } from './attempt-chain.mjs';
 import { readEvidence } from '../evidence/store.mjs';
 import { verifiedResult } from './result.mjs';
+import { taskHasNoDelta } from './no-delta.mjs';
 import { isDeepStrictEqual as equal } from 'node:util';
 const requireValue = (ok, message) => { if (!ok) throw new Error(message); };
 const sha = x => /^[a-f0-9]{40}$/.test(x ?? '');
@@ -16,7 +17,7 @@ export async function authenticateTaskEvidence(repository, reference, binding) {
   for (const a of record.args.deliveryContext?.amendments ?? [])
     requireValue(equal(await authenticateAmendment(repository, a.reference, binding), a), 'Invalid amendment authority');
   requireValue(['featureId', 'taskId', 'designRef'].every(k => record.task[k] === binding[k]), 'Task/design identity mismatch');
-  requireValue(verifiedResult(record.result, record.args) && record.before?.head === record.args?.baseRef &&
+  requireValue(verifiedResult(record.result, record.args, { noDelta: taskHasNoDelta(repository, record.args?.baseRef, record.after?.tree) }) && record.before?.head === record.args?.baseRef &&
     record.after?.head === record.before.head && sha(record.after?.tree), 'Missing successful task-bound verification or Git tree');
   await authenticateAttemptChain(repository, reference, binding);
   return record;

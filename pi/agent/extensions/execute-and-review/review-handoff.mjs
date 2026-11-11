@@ -8,6 +8,7 @@ import { git } from '../../lib/git/tree.mjs';
 import { authenticateWorkflow } from '../../lib/verification/workflow.mjs';
 import { verificationChecks } from '../../lib/verification/checks.mjs';
 
+import { taskHasNoDelta } from '../../lib/verification/no-delta.mjs';
 import { reviewEvidence, reviewHandoff } from '../../lib/verification/review-evidence.mjs';
 
 function requireValue(ok, message) {
@@ -46,7 +47,9 @@ export async function prepareReviewHandoff(stage) {
   const runner = await stageResults(plan, stage.index);
   requireValue(runner.commands.length === stage.index && runner.commands.every(c => c.status === 'PASSED'),
     'Conductor verification prefix did not pass');
-  const handoff = reviewHandoff(plan.workflow, reviewEvidence(plan, runner, source));
+  const handoff = reviewHandoff(plan.workflow, reviewEvidence(plan, runner, source), {
+    noDelta: taskHasNoDelta(plan.repository, plan.args.baseRef, source.tree),
+  });
   requireValue(Buffer.byteLength(handoff.files[1][1], 'utf8') <= (plan.args.reviewContextMaxBytes ?? 200000),
     'Review criteria and authenticated check evidence exceed reviewContextMaxBytes; increase the allowance and continue');
   for (const [file, contents] of handoff.files)

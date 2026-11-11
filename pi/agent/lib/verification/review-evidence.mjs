@@ -2,6 +2,7 @@ import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { digest } from '../evidence/store.mjs';
 import { verificationChecks } from './checks.mjs';
+import { NO_DELTA_REVIEW_NOTE } from './no-delta.mjs';
 
 function requireValue(ok, message) {
   if (!ok) throw new Error(message);
@@ -45,7 +46,7 @@ export function reviewEvidence(plan, runner, source) {
     tree: source.tree, head: source.head, sourceDigest: source.digest, checks };
 }
 
-export function reviewHandoff(workflow, evidence) {
+export function reviewHandoff(workflow, evidence, { noDelta = false } = {}) {
   const original = JSON.parse(workflow.request.commands.at(-1).args[1]);
   const root = workflow.request.output_directory;
   const requirementsPath = path.join(root, 'review-evidence.md');
@@ -56,7 +57,8 @@ export function reviewHandoff(workflow, evidence) {
     'Conductor authenticated the following results for the reviewed source tree. ' +
     'Use them as check evidence without rerunning commands or inspecting private logs. ' +
     'For each matching failed-check obligation, cite the passing result and its stage receipt; ' +
-    'assess any separate code findings against the source.\n' + JSON.stringify(evidence);
+    'assess any separate code findings against the source.' + (noDelta ? NO_DELTA_REVIEW_NOTE : '') +
+    '\n' + JSON.stringify(evidence);
   const request = JSON.stringify({ ...workflow.inputs.review, requirements: requirementsPath });
   const files = [[requestPath, request], [requirementsPath, requirements]];
   const identity = { schema: evidence.schema, inputs: files.map(([file, contents]) => ({ file, sha256: digest(contents) })) };

@@ -25,6 +25,7 @@ import { snapshot } from "../../lib/git/snapshot.mjs";
 import { retainEvidence, readEvidence } from "../../lib/evidence/store.mjs";
 import { retainAttempt, taskReceipts } from "../../lib/evidence/attempts.mjs";
 import { verifiedResult } from "../../lib/verification/result.mjs";
+import { taskHasNoDelta } from "../../lib/verification/no-delta.mjs";
 import { requireFeatureAuthorization } from "../scaffold/feature-authorization.mjs";
 import { assertLatestAttempt } from "../../lib/verification/attempt-chain.mjs";
 import { authenticateTaskEvidence } from "../../lib/verification/task-evidence.mjs";
@@ -390,11 +391,13 @@ export async function sealVerification(plan) {
       repository: plan.repository,
       conductor,
     });
+    const after = await snapshot(plan.repository);
     requireValue(
-      verifiedResult(verified, plan.args),
+      verifiedResult(verified, plan.args, {
+        noDelta: taskHasNoDelta(plan.repository, plan.args.baseRef, after.tree),
+      }),
       "Executor, checks and completed APPROVED review are required before commit",
     );
-    const after = await snapshot(plan.repository);
     const reviewSnapshot = JSON.parse(
       await readFile(plan.boundaryPath, "utf8"),
     );

@@ -16,6 +16,7 @@ import { readEvidence, retainEvidence } from "../../lib/evidence/store.mjs";
 import { retainAttempt } from "../../lib/evidence/attempts.mjs";
 import { ensureWorkDirectory } from "../../lib/git/workspace.mjs";
 import { verifiedResult } from "../../lib/verification/result.mjs";
+import { taskHasNoDelta } from "../../lib/verification/no-delta.mjs";
 import {
   readTaskHandoff,
   assertLatestAttempt,
@@ -664,7 +665,13 @@ export async function executeAndReview(args, context = {}, options = {}) {
         return response;
       },
     });
-    if (result.status === "PASSED" && !verifiedResult(result, args)) {
+    const after = await snapshot(repository);
+    if (
+      result.status === "PASSED" &&
+      !verifiedResult(result, args, {
+        noDelta: taskHasNoDelta(repository, args.baseRef, after.tree),
+      })
+    ) {
       result = outcome("BLOCKED", "EVIDENCE", {
         repository,
         reason: "INCOMPLETE_VERIFICATION",
@@ -673,7 +680,6 @@ export async function executeAndReview(args, context = {}, options = {}) {
         conductor: result.conductor,
       });
     }
-    const after = await snapshot(repository);
     let reviewSnapshot = null;
     try {
       reviewSnapshot = JSON.parse(await readFile(boundaryPath, "utf8"));
