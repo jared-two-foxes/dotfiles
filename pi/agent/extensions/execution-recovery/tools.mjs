@@ -172,6 +172,7 @@ export function createExecutionRecoveryTools(Type) {
     })),
     withFailureReporting(defineTool({
       name: "adopt_foreign_commits",
+      interactive: true,
       label: "Record user commits in the ledger",
       description:
         "After the user committed changes that are not verified task checkpoints (for example unrelated files committed to clear a dirty tree), record them in the Scaffold ledger between tasks. Requires explicit user approval naming the recorded head and the new head, a clean tree and index, and no active task. Records a history-foreign entry: the commits are NOT verified, are never treated as task checkpoints, and remain in final-validation review scope. Idempotent. Not rebase recovery; never edits Scaffold or rewrites Git. Use inspect_feature_drift first.",

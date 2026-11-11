@@ -39,8 +39,9 @@ const describeErrors = (errors) => {
  * @param options.cwd       working directory every tool runs in
  * @param options.validate  (schema, value) => true | array of errors. Required.
  * @param options.confirm   (title, message) => Promise<boolean>. Optional; absent means "cannot ask a human".
+ * @param options.heartbeatMs  progress heartbeat interval while a tool runs (only if the call supplies `progress`).
  */
-export function createMcpCaller(tools, { cwd, validate, confirm } = {}) {
+export function createMcpCaller(tools, { cwd, validate, confirm, heartbeatMs = 15000 } = {}) {
   if (typeof validate !== "function") throw new TypeError("createMcpCaller requires a validate(schema, value) function");
   if (typeof cwd !== "string" || !cwd) throw new TypeError("createMcpCaller requires cwd");
   const byName = new Map(tools.map((tool) => [defineTool(tool).name, tool]));
@@ -59,7 +60,23 @@ export function createMcpCaller(tools, { cwd, validate, confirm } = {}) {
     },
   });
 
-  return async function callTool(name, args, { signal } = {}) {
+  // `progress(n, message)` is supplied only when the client asked for progress (it sent a progressToken).
+  // While a tool runs we send a periodic heartbeat: clients such as Pi reset their request timeout on
+  // progress, and delivery tools can run for many minutes. A failed notification never fails the call.
+  const heartbeat = (name, progress, intervalMs) => {
+    if (!progress) return () => {};
+    let n = 0;
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      const message = `${name} running (${Math.round((Date.now() - startedAt) / 1000)}s)`;
+      // Run inside the promise chain so a synchronous throw is swallowed too, not an uncaught exception.
+      Promise.resolve().then(() => progress(++n, message)).catch(() => {});
+    }, intervalMs);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  };
+
+  return async function callTool(name, args, { signal, progress } = {}) {
     const tool = byName.get(name);
     if (!tool) return failed(`Unknown tool: ${name}`);
     const input = args ?? {};
@@ -68,11 +85,14 @@ export function createMcpCaller(tools, { cwd, validate, confirm } = {}) {
       return failed(`Invalid arguments for ${name}: ${describeErrors(Array.isArray(verdict) ? verdict : [String(verdict)])}`);
     }
     let result;
+    const stop = heartbeat(name, progress, heartbeatMs);
     try {
       result = await tool.execute(input, host(signal));
     } catch (error) {
       // Delivery tools already convert exceptions into failure envelopes; this covers any that are not wrapped.
       return failed(`${name} failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      stop();
     }
     return {
       content: result.content,

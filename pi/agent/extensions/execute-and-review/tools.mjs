@@ -17,6 +17,7 @@ export function createExecuteAndReviewTools(Type) {
   return [
     withFailureReporting(defineTool({
       name: "approve_delivery_amendment",
+      interactive: true,
       label: "Approve material contract amendment",
       description:
         "Explicit user approval of a concrete material scope/criterion/finding delta. Retains original obligations, source, authorization and all execution history. Routine corrections do not use this tool. Apply the returned reference through contextUpdates.apply_amendment; approval never establishes verification.",
@@ -47,6 +48,7 @@ export function createExecuteAndReviewTools(Type) {
     })),
     withFailureReporting(defineTool({
       name: "approve_feature_direction",
+      interactive: true,
       label: "Approve feature direction",
       description:
         "The single approval for this feature's direction and local delivery loop. Persists authority for scoped design, implementation, checks, independent review, checkpoints and recovery across sessions. No per-issue confirmations. Does not authorize publishing, merging or changing the approved objectives/constraints.",

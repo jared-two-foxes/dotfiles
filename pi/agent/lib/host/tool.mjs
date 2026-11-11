@@ -5,6 +5,8 @@
 //               package is imported here)
 //   host        { cwd, signal?, onUpdate?, confirm(title, message) -> Promise<boolean> }
 //               `confirm` MUST resolve false (never throw or approve) when there is no human to ask.
+//   interactive optional. `true` when the tool needs a human through `host.confirm` (the approval tools).
+//               Pi keeps these native even when the rest are served over MCP: its MCP client cannot elicit.
 //   execute     resolves to `toolResult(...)`: { content: [{type:"text", text}], isError, details }
 //
 // Nothing in this file or in a tool definition may import a host SDK. Hosts (Pi today, an MCP

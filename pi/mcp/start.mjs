@@ -2,14 +2,12 @@
 // Entry point for MCP hosts. Checks that dependencies are installed before loading the server, because
 // server.mjs has static imports and would otherwise die with an unreadable module-resolution stack trace.
 // Messages go to stderr: stdout belongs to the MCP protocol.
-import { existsSync, readFileSync } from "node:fs";
+// `node start.mjs --check` exits 0 if the server could start, without serving.
 import { fileURLToPath } from "node:url";
+import { missingDependencies } from "../agent/lib/host/dependencies.mjs";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const { dependencies } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
-const missing = Object.keys(dependencies).filter(
-  (name) => !existsSync(new URL(`./node_modules/${name}/package.json`, import.meta.url)),
-);
+const missing = missingDependencies(here);
 
 if (missing.length) {
   process.stderr.write(
@@ -21,4 +19,7 @@ if (missing.length) {
 }
 
 const { main } = await import("./server.mjs");
+// `--check` loads the whole server module graph (SDK, ajv, typebox, every delivery tool) and stops, so a
+// caller can learn whether the server can start without running it. Pi uses this before choosing MCP.
+if (process.argv.includes("--check")) process.exit(0);
 await main();
