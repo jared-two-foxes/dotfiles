@@ -1,0 +1,5 @@
+{
+  "name": "pi-delivery",
+  "version": "0.1.0",
+  "description": "Pi's delivery pipeline for Claude Code: the Scaffold/execute_and_review tools over MCP, plus a guard that blocks direct source edits and unsafe shell commands while a delivery is active."
+}

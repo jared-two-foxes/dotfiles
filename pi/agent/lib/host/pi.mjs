@@ -84,7 +84,8 @@ export function deliveryMcpServerConfig(serverPath) {
     command: "node",
     args: [serverPath],
     cwd: ".",
-    env: { PI_DELIVERY_MCP_OMIT_INTERACTIVE: "1" },
+    // CLAUDE_PROJECT_DIR is blanked so a value inherited from a Claude Code shell cannot redirect the server.
+    env: { PI_DELIVERY_MCP_OMIT_INTERACTIVE: "1", CLAUDE_PROJECT_DIR: "" },
     exposure: "direct",
     timeout: 3600,
     description: "Pi delivery pipeline: Scaffold task graph, execute_and_review, checkpoints, validation, recovery and review.",

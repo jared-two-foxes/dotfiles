@@ -102,3 +102,12 @@ export function createMcpCaller(tools, { cwd, validate, confirm, heartbeatMs = 1
     };
   };
 }
+
+/**
+ * The repository a server should operate on. Claude Code sets CLAUDE_PROJECT_DIR (the project root) in a server's
+ * environment and does not promise the working directory of a plugin server; other hosts (Pi) start the server
+ * in the repository, so the process directory is the fallback. An empty value counts as unset.
+ */
+export function projectDirectory(env = process.env, cwd = process.cwd()) {
+  return env.CLAUDE_PROJECT_DIR || cwd;
+}
