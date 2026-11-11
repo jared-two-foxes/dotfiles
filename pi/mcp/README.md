@@ -30,9 +30,15 @@ PI_DELIVERY_TRANSPORT=mcp pi
 ```
 
 - **Default is unchanged.** Without the variable Pi registers all 17 tools natively, as before.
-- **Safe fallback.** If MCP is requested but the server or its dependencies are missing, Pi falls back to the
-  native tools and warns (`PI_DELIVERY_MCP_SERVER` points at `start.mjs` for non-standard layouts). Both
-  registration paths use `deliveryTransport()` in `pi/agent/lib/host/pi.mjs`, so they always agree.
+- **Safe fallback.** Before choosing MCP, Pi's transport check actually starts the server
+  (`node start.mjs --check` loads the whole module graph and exits). A missing file, missing or partial
+  dependencies (including ones the direct packages need), a Node too old for the SDK, or no `node` on `PATH`
+  therefore all fall back to the native tools with a warning that names the cause. The result is cached, so
+  one Pi session spawns one check. `PI_DELIVERY_MCP_SERVER` points at `start.mjs` for non-standard layouts.
+  Both registration paths use `deliveryTransport()` in `pi/agent/lib/host/pi.mjs`, so they always agree.
+  **Not covered:** a server that starts fine and dies later in a session. Pi shows it as disconnected and
+  reconnects on the next call; the native tools are not restored mid-session (Pi exposes no connection state
+  to extensions, only each server's config).
 - **Approvals stay native.** Pi 1.5.2's MCP client declares `{"roots":{}}` and no `elicitation`, so approvals
   over MCP would always fail closed. The three tools marked `interactive` (`approve_feature_direction`,
   `approve_delivery_amendment`, `adopt_foreign_commits`) therefore register natively and the server omits them
@@ -50,7 +56,8 @@ PI_DELIVERY_TRANSPORT=mcp pi
 Verified against real Pi 1.5.2 without a model (extensions loaded explicitly, `PI_DELIVERY_TRANSPORT=mcp`):
 the server registers and connects; Pi's tool list becomes 14 `mcp__pidelivery__*` tools plus the 3 native
 approval tools; the server runs in the session directory; with the variable unset all 17 tools are native; with
-a missing server path it falls back to all 17 native. **Not verified:** an actual tool call through Pi's MCP
+a missing server path, or a server whose direct dependencies are present but which cannot start, it falls
+back to all 17 native. **Not verified:** an actual tool call through Pi's MCP
 client (needs a model), and approvals and long runs in a live session.
 
 ## What the adapter does that Pi did implicitly

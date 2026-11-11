@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -151,11 +151,11 @@ test("the tool inventory is stable across hosts", async () => {
 });
 
 // ---- Transport: native by default; MCP is opt-in and falls back to native if the server cannot start.
-function fakeServer(t, { installed }) {
+function fakeServer(t, { installed, startSource = "" }) {
   const dir = mkdtempSync(path.join(tmpdir(), "pi-transport-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   writeFileSync(path.join(dir, "package.json"), JSON.stringify({ dependencies: { "@scope/pkg": "1", plain: "1" } }));
-  writeFileSync(path.join(dir, "start.mjs"), "");
+  writeFileSync(path.join(dir, "start.mjs"), startSource);
   if (installed) for (const name of ["@scope/pkg", "plain"]) {
     mkdirSync(path.join(dir, "node_modules", ...name.split("/")), { recursive: true });
     writeFileSync(path.join(dir, "node_modules", ...name.split("/"), "package.json"), "{}");
@@ -220,4 +220,23 @@ test("over MCP only the interactive tools register natively; natively everything
   const names = (transport) => { const out = []; registerPiTools({ registerTool: (t) => out.push(t.name) }, tools, { transport }); return out; };
   assert.deepEqual(names("native"), ["plain", "approve"]);
   assert.deepEqual(names("mcp"), ["approve"]);
+});
+
+test("a server whose direct dependencies exist but which cannot start falls back to native", (t) => {
+  // e.g. a partial `npm ci`: the packages named in package.json are present, one of THEIR dependencies is not.
+  const broken = fakeServer(t, { installed: true, startSource: `throw new Error("Cannot find package 'zod' imported from sdk");` });
+  const choice = deliveryTransport({ env: { PI_DELIVERY_TRANSPORT: "mcp" }, serverPath: broken });
+  assert.equal(choice.transport, "native", "must not suppress the native tools for a server that cannot start");
+  assert.match(choice.warning, /could not start/);
+  assert.match(choice.warning, /Cannot find package 'zod'/, "the reason must reach the user");
+  const nodeMissing = fakeServer(t, { installed: true });
+  assert.equal(deliveryTransport({ env: { PI_DELIVERY_TRANSPORT: "mcp", PATH: "/nonexistent" }, serverPath: nodeMissing }).transport, "native", "no `node` on PATH means Pi could not launch it either");
+});
+
+test("the startup check runs once per server per process", (t) => {
+  const counter = path.join(tmpdir(), `pi-start-count-${process.pid}-${Date.now()}`);
+  t.after(() => rmSync(counter, { force: true }));
+  const server = fakeServer(t, { installed: true, startSource: `import { appendFileSync } from "node:fs"; appendFileSync(${JSON.stringify(counter)}, "x");` });
+  for (let i = 0; i < 4; i++) assert.equal(deliveryTransport({ env: { PI_DELIVERY_TRANSPORT: "mcp" }, serverPath: server }).transport, "mcp");
+  assert.equal(readFileSync(counter, "utf8"), "x", "seven registrations in one Pi process must not spawn seven servers");
 });

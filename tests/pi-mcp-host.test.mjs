@@ -261,3 +261,23 @@ test("PI_DELIVERY_MCP_OMIT_INTERACTIVE=1 makes the served server omit the approv
     assert.equal(names.includes("approve_feature_direction"), !omit);
   }
 });
+
+// ---- start.mjs --check: lets Pi learn whether the server can start before it gives up its native tools.
+test("start.mjs --check exits 0 quietly, without serving, when the server can start", { skip: !installed && "pi/mcp dependencies not installed" }, () => {
+  const run = spawnSync(process.execPath, [fileURLToPath(new URL("../pi/mcp/start.mjs", import.meta.url)), "--check"], { encoding: "utf8", timeout: 30000 });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(run.stdout, "", "no protocol bytes: --check must not start serving");
+  assert.equal(run.signal, null, "must exit by itself, not be killed after hanging");
+});
+
+test("start.mjs --check fails with the same one-line fix when dependencies are missing", (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), "pi-mcp-check-nodeps-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(path.join(root, "pi/mcp"), { recursive: true });
+  mkdirSync(path.join(root, "pi/agent/lib/host"), { recursive: true });
+  for (const file of ["start.mjs", "package.json"]) copyFileSync(new URL(`../pi/mcp/${file}`, import.meta.url), path.join(root, "pi/mcp", file));
+  copyFileSync(new URL("../pi/agent/lib/host/dependencies.mjs", import.meta.url), path.join(root, "pi/agent/lib/host/dependencies.mjs"));
+  const run = spawnSync(process.execPath, [path.join(root, "pi/mcp/start.mjs"), "--check"], { encoding: "utf8", timeout: 30000 });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /dependencies are not installed/);
+});
