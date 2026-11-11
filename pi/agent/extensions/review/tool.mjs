@@ -1,8 +1,9 @@
 import { reviewChanges } from '../../lib/review/adapter.mjs';
+import { defineTool, toolResult } from '../../lib/host/tool.mjs';
 
-// Separate the tool definition from Pi's loader so it can be tested without Pi.
+// Host-neutral definition (see lib/host/tool.mjs), so it can be tested and served without Pi.
 export function createReviewTool(Type, reviewer = reviewChanges) {
-  return {
+  return defineTool({
     name: 'review_changes',
     label: 'Review Changes (read-only)',
     description: 'Independently review existing Git changes without applying operations or running builds/tests. ' +
@@ -21,13 +22,9 @@ export function createReviewTool(Type, reviewer = reviewChanges) {
       maxRepeatedActions: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: 'Optional identical-action limit' })),
       maxCompletionAttempts: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: 'Optional completion-attempt limit' })),
     }, { additionalProperties: false }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      const result = await reviewer(params, { directory: ctx.cwd, abort: signal });
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        isError: result.status === 'ERROR' || result.status === 'INDETERMINATE',
-        details: result,
-      };
+    async execute(params, host) {
+      const result = await reviewer(params, { directory: host.cwd, abort: host.signal });
+      return toolResult(result, { isError: result.status === 'ERROR' || result.status === 'INDETERMINATE' });
     },
-  };
+  });
 }

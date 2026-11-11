@@ -11,6 +11,7 @@ data contracts and reusable functions needed by multiple extension callers.
 | `failure/` | One failure envelope for every tool: the code-to-remedy table (`codes.mjs`), envelope building and best-effort ledger recording (`report.mjs`), and the tool wrapper (`tool.mjs`) |
 | `git/` | Implementation trees, exact source/index fingerprints, temporary indexes, and tracked-input monitoring |
 | `authorization/` | Retained feature direction and amendment authority |
+| `host/` | The host-neutral tool contract (`tool.mjs`) and the Pi adapter (`pi.mjs`), the only module that knows Pi's `execute` signature |
 | `delivery-state/` | Delivery contexts, journal audit anchors and bindings. Pure: no Scaffold dependency |
 
 The Scaffold adapter is in `extensions/scaffold/adapter.mjs`. It validates

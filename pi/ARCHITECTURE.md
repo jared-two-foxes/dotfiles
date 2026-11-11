@@ -134,8 +134,11 @@ appending a forged entry, and it cannot detect removal of the newest whole entri
 
 ```
 skills/ + SYSTEM.md          guidance for Pi (text; no enforcement)
-extensions/*/index.ts        tool registration + user-facing confirmations
+extensions/*/index.ts        Pi registration only: registerPiTools(pi, createXTools(Type))
+lib/host/pi.mjs              the one Pi adapter: Pi's execute(...) shape <-> the neutral host
+extensions/*/tools.mjs       host-neutral tool definitions: schema + execute(params, host)
 extensions/*/*.mjs           workflows: coordinate, perform lifecycle writes
+lib/host/tool.mjs            neutral tool contract, toolResult, failure-envelope wrapper
 lib/verification             authenticate evidence, chains, checkpoints (pure checks)
 lib/authorization            feature/amendment authority
 lib/evidence, scaffold, git  ledger artifact client, Scaffold CLI client, Git snapshots, contracts
@@ -144,6 +147,14 @@ external: Scaffold, Conductor, Executor, Review
 
 Rule (from `lib/README.md`): **`lib` never imports from `extensions`.** Coordinators fetch fresh
 Scaffold data and pass it in; libraries validate it.
+
+**Host neutrality.** A tool is `{ name, label, description, parameters, execute(params, host) }` with
+`host = { cwd, signal, onUpdate, confirm }` (`lib/host/tool.mjs`). `confirm` resolves `false`, never
+approves, when no human can be asked. No `.mjs` module may import a host SDK or touch `ctx.ui`; a test
+enforces this, so a second host (for example an MCP server) can load `tools.mjs` unchanged and write only
+its own adapter beside `lib/host/pi.mjs`. Schemas are built with an injected TypeBox-style `Type`.
+Pi-only by design: `/conductor` and `/implement-next` (slash commands that drive the UI or replace the
+session), and `plan` and `linear` (not yet converted; they overlap host file and Linear tools).
 
 ## 6. Where the invariant is enforced
 
