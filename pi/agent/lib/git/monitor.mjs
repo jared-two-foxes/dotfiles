@@ -9,7 +9,9 @@ export function monitorTrackedInputs(repository) {
   const files = git(repository, ["ls-files", "-z"]).split("\0").filter(Boolean);
   const watchers = [];
   const events = [];
+  let total = 0;
   const record = (kind, dir, name) => {
+    total++;
     if (events.length >= MAX_EVENTS) return;
     const file = name ? path.relative(repository, path.resolve(dir, name.toString())) : null;
     events.push({ kind, path: file ? file.split(path.sep).join("/") : null,
@@ -36,11 +38,11 @@ export function monitorTrackedInputs(repository) {
   return {
     events: () => events.slice(),
     assert: () => {
-      if (!events.length) return;
+      if (!total) return;
       const first = events[0];
       const detail = events.slice(0, 3).map((e) => `${e.kind} ${e.path ?? "<unnamed in " + e.dir + ">"} @${e.at}`).join("; ");
       throw new Error("Tracked implementation inputs changed during validation; reconcile" +
-        ` (${events.length} notification${events.length === 1 ? "" : "s"}, first ${first.kind} ${first.path ?? "<unnamed>"}: ${detail})`);
+        ` (${total} notification${total === 1 ? "" : "s"}, first ${first.kind} ${first.path ?? "<unnamed>"}: ${detail}${total > events.length ? `; ${total - events.length} more not recorded` : ""})`);
     },
     close: () => watchers.forEach((w) => w.close()),
   };
