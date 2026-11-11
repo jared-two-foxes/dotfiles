@@ -152,7 +152,8 @@ Scaffold data and pass it in; libraries validate it.
 `host = { cwd, signal, onUpdate, confirm }` (`lib/host/tool.mjs`). `confirm` resolves `false`, never
 approves, when no human can be asked. No `.mjs` module may import a host SDK or touch `ctx.ui`; a test
 enforces this, so a second host (for example an MCP server) can load `tools.mjs` unchanged and write only
-its own adapter beside `lib/host/pi.mjs`. Schemas are built with an injected TypeBox-style `Type`.
+its own adapter beside `lib/host/pi.mjs`. That second adapter now exists: `lib/host/mcp.mjs` plus the server in
+`pi/mcp/` (see its README, including what it does not yet enforce). Schemas are built with an injected TypeBox-style `Type`.
 Pi-only by design: `/conductor` and `/implement-next` (slash commands that drive the UI or replace the
 session), and `plan` and `linear` (not yet converted; they overlap host file and Linear tools).
 
