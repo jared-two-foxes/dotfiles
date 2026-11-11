@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { decide, deliveryRoot, guardMode, posixShellVerdict, powershellVerdict, tokenize } from "../pi/agent/lib/guard/index.mjs";
+import { decide, deliveryRoot, guardActive, guardMode, posixShellVerdict, powershellVerdict, tokenize } from "../pi/agent/lib/guard/index.mjs";
+import { piGuardVerdict } from "../pi/agent/lib/guard/pi.mjs";
+import { createToolCallGuard } from "../pi/agent/lib/host/pi.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -319,4 +321,124 @@ test("server project directory: Claude Code's CLAUDE_PROJECT_DIR wins, otherwise
   assert.equal(projectDirectory({}, "/cwd"), "/cwd");
   assert.equal(projectDirectory({ CLAUDE_PROJECT_DIR: "" }, "/cwd"), "/cwd", "empty counts as unset");
   assert.equal(deliveryMcpServerConfig("/x/start.mjs").env.CLAUDE_PROJECT_DIR, "", "Pi blanks it so a value inherited from a Claude Code shell cannot redirect Pi's server");
+});
+
+/* ------------------------------------------------------------------------------------------- Pi's tool_call */
+
+const piCall = (toolName, input, cwd, env = {}) => piGuardVerdict({ toolName, input }, { cwd, env });
+
+test("Pi: edit and write are blocked in an active delivery whichever way the path is spelled", (t) => {
+  const dir = repo(t);
+  for (const tool of ["edit", "write"]) {
+    for (const p of [path.join(dir, "src", "a.mjs"), "src/a.mjs", "./src/a.mjs", "@src/a.mjs", "@" + path.join(dir, "src", "a.mjs"), "../" + path.basename(dir) + "/src/a.mjs"]) {
+      const v = piCall(tool, { path: p, content: "x", edits: [] }, dir);
+      assert.equal(v.decision, "deny", `${tool} ${p}`);
+      assert.match(v.reason, /execute_and_review/);
+    }
+  }
+  assert.equal(piCall("write", {}, dir).decision, "deny", "a call with no path is refused, not waved through");
+  assert.equal(piCall("edit", { path: 42 }, dir).decision, "deny");
+});
+
+test("Pi: a relative path is resolved against the session directory, so another repo's delivery is caught", (t) => {
+  const active = repo(t);
+  const plain = repo(t, { feature: false });
+  const rel = path.relative(plain, path.join(active, "src", "a.mjs"));
+  assert.equal(piCall("write", { path: rel }, plain).decision, "deny", "writes into an active delivery from outside it");
+  assert.equal(piCall("write", { path: "src/a.mjs" }, plain).decision, "pass", "the same spelling inside a plain repo is fine");
+});
+
+test("Pi: read-only built-ins and unknown tools are never touched", (t) => {
+  const dir = repo(t);
+  for (const tool of ["read", "grep", "find", "ls", "write_plan", "scaffold_tasks", "execute_and_review", "mcp__pidelivery__execute_and_review", "lsp", undefined]) {
+    assert.equal(piCall(tool, { path: "x", command: "rm x" }, dir).decision, "pass", String(tool));
+  }
+  assert.equal(piGuardVerdict(undefined, { cwd: dir }).decision, "pass");
+});
+
+test("Pi: bash and powershell go through the shell policy", (t) => {
+  const dir = repo(t);
+  assert.equal(piCall("bash", { command: "git status" }, dir).decision, "pass");
+  assert.equal(piCall("bash", { command: "rm -rf x" }, dir).decision, "deny");
+  assert.equal(piCall("bash", { command: "git commit -m x" }, dir).decision, "ask");
+  assert.equal(piCall("bash", { command: "echo hi > f" }, dir).decision, "deny");
+  assert.equal(piCall("bash", { command: "scaffold clean --all" }, dir).decision, "deny");
+  assert.equal(piCall("bash", {}, dir).decision, "deny");
+  assert.equal(piCall("powershell", { command: "git status" }, dir).decision, "pass");
+  assert.equal(piCall("powershell", { command: "Remove-Item x" }, dir).decision, "deny");
+  assert.equal(piCall("bash", { command: "rm -rf x" }, repo(t, { feature: false })).decision, "pass", "no delivery, no guard");
+});
+
+test("Pi: write_ticket_file may only write .ticket-*.md while a delivery is active", (t) => {
+  const dir = repo(t);
+  for (const ok of [".ticket-adhoc-cache-fix.md", ".ticket-x.md", ".ticket-A_b-1.2.md"]) assert.equal(piCall("write_ticket_file", { filename: ok }, dir).decision, "pass", ok);
+  for (const bad of ["README.md", "docs.md", ".ticket-.md", ".ticket-x.txt", "ticket-x.md", ".ticket-../x.md", ".ticket-x.md/../README.md", "", undefined]) {
+    assert.equal(piCall("write_ticket_file", { filename: bad }, dir).decision, "deny", String(bad));
+  }
+  assert.equal(piCall("write_ticket_file", { filename: "README.md" }, repo(t, { feature: false })).decision, "pass", "unguarded elsewhere");
+  assert.equal(piCall("write_ticket_file", { filename: "README.md" }, dir, { PI_DELIVERY_GUARD: "off" }).decision, "pass");
+});
+
+test("guardActive is what decide and the Pi adapter both use", (t) => {
+  const dir = repo(t);
+  const plain = repo(t, { feature: false });
+  assert.equal(guardActive({ cwd: dir, env: {} }), true);
+  assert.equal(guardActive({ cwd: plain, env: {} }), false);
+  assert.equal(guardActive({ cwd: plain, target: path.join(dir, "x"), env: {} }), true);
+  assert.equal(guardActive({ cwd: dir, env: { PI_DELIVERY_GUARD: "off" } }), false);
+  assert.equal(guardActive({ cwd: plain, env: { PI_DELIVERY_GUARD: "on" } }), true);
+});
+
+const handle = (event, ctx, env = {}) => createToolCallGuard({ env })(event, ctx);
+
+test("Pi handler: deny blocks with the reason, pass returns nothing", async (t) => {
+  const dir = repo(t);
+  const denied = await handle({ toolName: "write", input: { path: "a.txt", content: "x" } }, { cwd: dir, hasUI: true });
+  assert.equal(denied.block, true);
+  assert.match(denied.reason, /execute_and_review/);
+  assert.equal("terminate" in denied, false, "do not end the agent loop: the model should read the reason and adapt");
+  assert.equal(await handle({ toolName: "read", input: { path: "a" } }, { cwd: dir }), undefined);
+  assert.equal(await handle({ toolName: "bash", input: { command: "git status" } }, { cwd: dir }), undefined);
+});
+
+test("Pi handler: ask is the user's decision, and every way of not getting a yes is a block", async (t) => {
+  const dir = repo(t);
+  const event = { toolName: "bash", input: { command: "git commit -m x" } };
+  const asked = [];
+  const ui = (answer) => ({ confirm: async (...a) => { asked.push(a); if (answer instanceof Error) throw answer; return answer; } });
+
+  assert.equal(await handle(event, { cwd: dir, hasUI: true, ui: ui(true) }), undefined, "an explicit yes runs it");
+  assert.match(asked[0][1], /git commit -m x/, "the prompt shows the command");
+  assert.match(asked[0][1], /explicitly asked to publish/, "and why it needs a human");
+
+  for (const answer of [false, undefined, null, "yes", 1, new Error("prompt crashed")]) {
+    const result = await handle(event, { cwd: dir, hasUI: true, ui: ui(answer) });
+    assert.equal(result?.block, true, `answer ${String(answer)}`);
+  }
+  const headless = await handle(event, { cwd: dir, hasUI: false, ui: ui(true) });
+  assert.equal(headless.block, true);
+  assert.match(headless.reason, /no user interface/);
+  assert.equal((await handle(event, { cwd: dir, ui: ui(true) })).block, true, "hasUI must be exactly true");
+});
+
+test("Pi handler: an unexpected error blocks instead of letting the call through", async (t) => {
+  const dir = repo(t);
+  const broken = { toolName: "bash", get input() { throw new Error("boom"); } };
+  const result = await handle(broken, { cwd: dir });
+  assert.equal(result.block, true);
+  assert.match(result.reason, /delivery guard failed \(boom\)/);
+});
+
+test("Pi handler: PI_DELIVERY_GUARD=off disables it, and a typo does not", async (t) => {
+  const dir = repo(t);
+  const event = { toolName: "write", input: { path: "a" } };
+  assert.equal(await handle(event, { cwd: dir }, { PI_DELIVERY_GUARD: "off" }), undefined);
+  assert.equal((await handle(event, { cwd: dir }, { PI_DELIVERY_GUARD: "0" })).block, true);
+});
+
+test("the Pi extension is just the handler, registered for tool_call", () => {
+  const source = readFileSync(path.join(root, "pi/agent/extensions/delivery-guard/index.ts"), "utf8");
+  assert.match(source, /pi\.on\("tool_call", createToolCallGuard\(\)\)/);
+  assert.equal((source.match(/pi\.on\(/g) ?? []).length, 1, "one handler, nothing else");
+  assert.doesNotMatch(source, /block: false|return undefined|setActiveTools/, "no logic here that could widen what the guard allows");
 });

@@ -29,13 +29,13 @@ interactive session. In a non-interactive (`-p`) run Claude Code cancels the req
 | Layer | What it is | Pi today | Claude Code with this plugin |
 |---|---|---|---|
 | Instructions | `SYSTEM.md` and the skills tell the agent not to edit directly | yes | partly (skills not ported yet) |
-| **Prevention** | A hook refuses the edit or command before it runs | **no** | **yes (this guard)** |
+| **Prevention** | A hook refuses the edit or command before it runs | yes (`delivery-guard` extension) | yes (this guard) |
 | Detection | The ledger and `checkpointHistory()` flag any commit that is not an authenticated checkpoint | yes | yes (same shared tools) |
 
-**Pi does not enforce its own "never edit directly" rule.** There is no `tool_call` handler, no excluded tool
-and no tool restriction in its settings; the rule is text, backed by detection. This guard is therefore
-stronger than what Pi has, and `lib/guard/` is host-neutral so Pi could apply it through its own `tool_call`
-event later.
+**Pi used not to enforce its own "never edit directly" rule.** There was no `tool_call` handler, no excluded tool and
+no tool restriction; the rule was text, backed by detection. The `delivery-guard` extension now applies the same
+policy (`lib/guard/`) through Pi's `tool_call` event, so both hosts share one set of rules. See
+`../agent/extensions/delivery-guard/README.md`.
 
 ## What the guard does
 

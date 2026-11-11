@@ -12,6 +12,7 @@ data contracts and reusable functions needed by multiple extension callers.
 | `git/` | Implementation trees, exact source/index fingerprints, temporary indexes, and tracked-input monitoring |
 | `authorization/` | Retained feature direction and amendment authority |
 | `host/` | The host-neutral tool contract (`tool.mjs`) and the Pi adapter (`pi.mjs`), the only module that knows Pi's `execute` signature |
+| `guard/` | The delivery guard policy: which tool calls are refused or confirmed while a Scaffold delivery is active (`index.mjs`, `shell.mjs`), plus the pure Pi event mapping (`pi.mjs`). Host-neutral; the handler that touches Pi's UI is `createToolCallGuard` in `host/pi.mjs`, and the hosts' glue lives in `extensions/delivery-guard/` and `pi/claude/` |
 | `delivery-state/` | Delivery contexts, journal audit anchors and bindings. Pure: no Scaffold dependency |
 
 The Scaffold adapter is in `extensions/scaffold/adapter.mjs`. It validates

@@ -44,6 +44,16 @@ export function guardMode(env = process.env) {
   return mode === "off" || mode === "on" ? mode : "auto";
 }
 
+/** Whether the guard applies to `cwd` (and optionally a file `target` elsewhere). Honors PI_DELIVERY_GUARD. */
+export function guardActive({ cwd, target, env = process.env } = {}) {
+  const mode = guardMode(env);
+  if (mode === "off") return false;
+  if (mode === "on") return true;
+  if (deliveryRoot(cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()) !== null) return true;
+  // A file tool names its target: touching another repository's active delivery counts too.
+  return typeof target === "string" && deliveryRoot(path.dirname(target)) !== null;
+}
+
 /**
  * @param event  Claude Code PreToolUse input: { tool_name, tool_input, cwd }
  * @returns {{ decision: "pass" } | { decision: "ask" | "deny", reason: string }}
@@ -51,28 +61,21 @@ export function guardMode(env = process.env) {
 export function decide(event, { env = process.env } = {}) {
   const tool = event?.tool_name;
   const input = event?.tool_input ?? {};
-  const mode = guardMode(env);
-  if (mode === "off") return PASS;
+  if (guardMode(env) === "off") return PASS;
 
   const isFile = FILE_TOOLS.has(tool);
   const isShell = POSIX_SHELL_TOOLS.has(tool) || tool === "PowerShell";
   if (!isFile && !isShell) return PASS;
 
-  let active = mode === "on";
-  if (!active) {
-    const cwd = event?.cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd();
-    active = deliveryRoot(cwd) !== null;
-    // A file tool names its target: editing another repository's delivery from here counts too.
-    const target = input.file_path ?? input.notebook_path;
-    if (!active && isFile && typeof target === "string") active = deliveryRoot(path.dirname(target)) !== null;
-  }
+  const target = input.file_path ?? input.notebook_path;
+  const active = guardActive({ cwd: event?.cwd, target: isFile ? target : undefined, env });
   if (!active) return PASS;
 
   if (isFile) {
-    const target = input.file_path ?? input.notebook_path ?? "(unknown file)";
+    const shown = target ?? "(unknown file)";
     return {
       decision: "deny",
-      reason: `${tool} on ${target} is blocked: a Scaffold delivery is active in this repository, so source is changed only ` +
+      reason: `${tool} on ${shown} is blocked: a Scaffold delivery is active in this repository, so source is changed only ` +
         `through the delivery tools (execute_and_review), which build, test and review each change. ${GUARD_HINT}`,
     };
   }
