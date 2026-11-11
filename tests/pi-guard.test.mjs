@@ -1,0 +1,322 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { decide, deliveryRoot, guardMode, posixShellVerdict, powershellVerdict, tokenize } from "../pi/agent/lib/guard/index.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+// Each row is the verdict a SECURE policy must give: "pass" (no opinion), "ask" (a human confirms) or "deny".
+const POSIX = [
+  // --- read-only inspection passes
+  ["git status", "pass"], ["git status --porcelain=v2", "pass"], ["git diff HEAD~1 --stat", "pass"],
+  ["git log --oneline -5 | head", "pass"], ["git --no-pager log -p -S foo", "pass"], ["git show HEAD:README.md", "pass"],
+  ["git -C other status", "pass"], ["git log --format='%h %s'", "pass"], ["git diff --no-index a b", "pass"],
+  ["git branch", "pass"], ["git branch -a", "pass"], ["git branch -vv", "pass"], ["git branch --list 'feature/*'", "pass"],
+  ["git branch --contains abc123", "pass"], ["git tag", "pass"], ["git tag -l", "pass"],
+  ["git remote -v", "pass"], ["git remote show origin", "pass"], ["git config --get user.name", "pass"], ["git config --list", "pass"],
+  ["git stash list", "pass"], ["git stash show -p", "pass"], ["git worktree list", "pass"], ["git reflog", "pass"], ["git rev-parse --show-toplevel", "pass"],
+  ["ls -la", "pass"], ["ls", "pass"], ["cat package.json | jq .name", "pass"], ['grep -rn "foo" src', "pass"],
+  ["rg -n x --glob '*.ts'", "pass"], ["cd pi && ls", "pass"], ["find . -name '*.mjs' -type f", "pass"], ["wc -l *.mjs", "pass"],
+  ["test -f x && echo yes || echo no", "pass"], ["[ -f x ]", "pass"], ["sort -u f", "pass"], ["sort -T /tmp f", "pass"], ["tail -n 20 log", "pass"],
+  ["echo 'a;b'", "pass"], ['echo "a|b"', "pass"], ["echo '$(rm x)'", "pass"], ["ls '>' file", "pass"], ["ls # comment ; rm x", "pass"],
+  ["git status 2>&1", "pass"], ["git log > /dev/null", "pass"], ["ls 2>/dev/null", "pass"], ["ls &>/dev/null", "pass"], ["ls >> /dev/null", "pass"], ["ls >&2", "pass"],
+  ["gh pr view 12", "pass"], ["gh pr list --state open", "pass"], ["gh api repos/o/r/pulls/1/comments", "pass"], ["gh run view 1 --log", "pass"], ["gh status", "pass"],
+  ["date", "pass"], ["diff a b", "pass"], ["printf '%s' x", "pass"],
+
+  // --- publishing writes ask a human
+  ["git add -A", "ask"], ["git commit -m 'msg'", "ask"], ["git add . && git commit -m x", "ask"], ["git push origin feature/x", "ask"],
+  ["git push -u origin feature/x", "ask"], ["git push", "ask"], ["git checkout -b feature/y", "ask"], ["git switch -c feature/y", "ask"],
+  ["git branch newfeature", "ask"], ["git fetch origin", "ask"], ["git restore --staged f", "ask"], ["git push --force-with-lease origin feature/x", "ask"],
+  ["gh pr create --title x", "ask"], ["gh pr edit 1 --title x", "ask"],
+
+  // --- writes, forbidden git/gh, delivery CLIs and merges are denied
+  ["rm -rf x", "deny"], ["cp a b", "deny"], ["mv a b", "deny"], ["mkdir x", "deny"], ["touch x", "deny"], ["curl http://x", "deny"], ["wget http://x", "deny"],
+  ["sed -i s/a/b/ f", "deny"], ["sed -n 1p f", "deny"], ["awk '{print}' f", "deny"], ["python -c 'print(1)'", "deny"], ["node -e 1", "deny"],
+  ["npm test", "deny"], ["cargo build", "deny"], ["make", "deny"], ["./script.sh", "deny"], ["/bin/rm x", "deny"], ["bash -c 'rm x'", "deny"],
+  ["sh -c ls", "deny"], ["eval ls", "deny"], ["exec ls", "deny"], ["env rm x", "deny"], ["sudo ls", "deny"], ["time ls", "deny"], ["nohup ls", "deny"],
+  ["xargs rm", "deny"], ["ls | xargs rm", "deny"], ["timeout 5 ls", "deny"], ["command ls", "deny"], ["watch ls", "deny"], ["tee out", "deny"],
+  ["scaffold summary --feature X", "deny"], ["executor run", "deny"], ["review-cli --help", "deny"], ["conductor run", "deny"],
+  ["git reset --hard", "deny"], ["git reset HEAD f", "deny"], ["git stash", "deny"], ["git stash pop", "deny"], ["git stash drop", "deny"], ["git stash push", "deny"],
+  ["git merge x", "deny"], ["git pull", "deny"], ["git rebase main", "deny"], ["git cherry-pick abc", "deny"], ["git revert abc", "deny"], ["git am p", "deny"],
+  ["git apply p", "deny"], ["git clean -fd", "deny"], ["git gc", "deny"], ["git update-ref -d x", "deny"], ["git filter-branch", "deny"], ["git clone x", "deny"],
+  ["git checkout main", "deny"], ["git checkout -- f", "deny"], ["git switch main", "deny"], ["git checkout -b x -f", "deny"], ["git restore f", "deny"],
+  ["git restore --staged --worktree f", "deny"], ["git branch -D x", "deny"], ["git branch -d x", "deny"], ["git branch -m a b", "deny"], ["git branch -f x", "deny"],
+  ["git tag v1", "deny"], ["git tag -d v1", "deny"], ["git remote add x y", "deny"], ["git remote set-url o u", "deny"], ["git config user.name x", "deny"],
+  ["git config --global user.name x", "deny"], ["git config --get x --unset", "deny"], ["git worktree add p", "deny"], ["git reflog expire --all", "deny"],
+  ["git push origin main", "deny"], ["git push origin master", "deny"], ["git push origin HEAD:main", "deny"], ["git push origin f:refs/heads/main", "deny"],
+  ["git push -f origin x", "deny"], ["git push --force origin x", "deny"], ["git push -fu origin x", "deny"], ["git push origin +x", "deny"], ["git push origin :x", "deny"],
+  ["git push --delete origin x", "deny"], ["git push --all", "deny"], ["git push --mirror", "deny"],
+  ["git -c core.fsmonitor=evil status", "deny"], ["git --git-dir=x status", "deny"], ["git --exec-path=x status", "deny"],
+  ["git diff --output=out.txt", "deny"], ["git log --output out", "deny"], ["git show --ext-diff", "deny"], ["git grep -Ofoo x", "deny"],
+  ["gh pr merge 1", "deny"], ["gh pr merge --auto", "deny"], ["gh pr merge 1 --admin", "deny"], ["gh pr close 1", "deny"], ["gh pr comment 1 -b x", "deny"],
+  ["gh issue create", "deny"], ["gh workflow run x", "deny"], ["gh api -X POST repos/o/r/issues", "deny"], ["gh api repos/o/r --method DELETE", "deny"],
+  ["gh api graphql -f query=x", "deny"], ["gh api repos/o/r/issues -f title=x", "deny"], ["gh release create v1", "deny"], ["gh repo delete x", "deny"],
+  ["find . -delete", "deny"], ["find . -exec rm {} \;", "deny"], ["find . -ok rm {} ;", "deny"], ["find . -fprint out", "deny"], ['find . "-exec" rm {} +', "deny"],
+  ["sort -o out in", "deny"], ["sort -ro out in", "deny"], ["sort --output=out in", "deny"], ["rg --pre cmd x", "deny"], ["rg --pre=cmd x", "deny"], ["rg -z x", "deny"],
+  ["date -s '2020-01-01'", "deny"], ["file -C", "deny"], ["tree -o out", "deny"],
+
+  // --- syntax that hides or performs writes is denied outright
+  ["echo hi > file", "deny"], ["echo hi >> file", "deny"], ["echo x>file", "deny"], ["cat file>out", "deny"], ["echo x >|file", "deny"], ["echo x 3>file", "deny"],
+  ["echo x >(cat)", "deny"], ["ls > /dev/nullx", "deny"], ["ls >/dev/null/x", "deny"], ["ls <(cat x)", "deny"], ["cat <<EOF", "deny"], ["cat <<< x", "deny"], ["wc -l < f", "deny"],
+  ["echo $(rm x)", "deny"], ['echo "$(rm x)"', "deny"], ["echo `rm x`", "deny"], ['echo "`rm x`"', "deny"], ["ls $HOME", "deny"], ["echo $'a'", "deny"], ["echo ${x}", "deny"],
+  ["(cd x && rm y)", "deny"], ["{ rm x; }", "deny"], ["ls; rm x", "deny"], ["ls;rm x", "deny"], ["ls && rm x", "deny"], ["ls&&rm x", "deny"], ["ls || rm x", "deny"],
+  ["ls | rm x", "deny"], ["ls\nrm x", "deny"], ["ls &\nrm x", "deny"], ["ls #x\nrm y", "deny"], ["git status; git push --force", "deny"], ["ls >/dev/null; rm x", "deny"],
+  ["FOO=1 git status", "deny"], ["GIT_EXTERNAL_DIFF=evil git diff", "deny"], ["for f in *; do rm $f; done", "deny"], ["if true; then rm x; fi", "deny"], ["! rm x", "deny"],
+  // found by attacking the first version of the policy: each of these used to pass
+  ["find . -{exec,name} rm {} +", "deny"], ["find . -{delete,name}", "deny"], ["sort -{o,u} out in", "deny"], ["echo a{1,2}", "deny"],
+  ["find . -exe? rm {} +", "deny"], ["find . -ex* rm {} +", "deny"], ["ls -[a]", "deny"],
+  ["gh api -XPOST repos/o/r/issues", "deny"], ["gh api -XDELETE repos/o/r", "deny"], ["gh api repos/o/r/issues -fTitle=x", "deny"],
+  ["gh api repos/o/r -Fa=@file", "deny"], ["gh api -ipf k=v repos/o/r", "deny"], ["gh api -i repos/o/r", "pass"], ["gh api repos/o/r -q .name", "pass"],
+  ["rg -nz foo", "deny"], ["rg -n foo", "pass"], ["tree -ao out", "deny"], ["tree -a", "pass"], ["file -bC", "deny"], ["file -b x", "pass"],
+  ["git ls-remote --upload-pack=evil .", "deny"], ["git fetch --upload-pack=evil .", "deny"], ["git push --receive-pack=evil o f", "deny"],
+  ["git ls-remote ext::sh", "deny"], ["git fetch ext::sh", "deny"], ["git ls-remote origin", "pass"],
+  // long options may be abbreviated to any unambiguous prefix (verified on this machine: `sort --outp=f` writes a file)
+  ["sort --outp=out in", "deny"], ["sort --out=out in", "deny"], ["sort --o=out in", "deny"], ["sort --comp=cmd in", "deny"],
+  ["date --se=x", "deny"], ["date --s=x", "deny"], ["file --comp", "deny"], ["rg --pr=cmd x", "deny"], ["rg --pre-g x", "deny"],
+  ["git ls-remote --upload=cmd .", "deny"], ["git ls-remote --up=cmd .", "deny"], ["git fetch --receive=cmd .", "deny"], ["git ls-remote --ex=cmd .", "deny"],
+  ["git log --outp=x", "deny"], ["git diff --ext=x", "deny"], ["git grep --open-f=x y", "deny"],
+  ["git push --fo origin f", "deny"], ["git push --forc origin f", "deny"], ["git push --del origin f", "deny"], ["git push --mir", "deny"], ["git push --al", "deny"],
+  ["git restore --staged --work f", "deny"], ["git checkout --crea x", "ask"], ["git config --get --unset-a k", "deny"], ["git config --get --remove-sec x", "deny"],
+  ["sort --reverse f", "pass"], ["sort --unique f", "pass"], ["sort --ra f", "pass"], ["date --iso-8601", "pass"], ["rg --pretty foo", "pass"], ["rg --smart-case foo", "pass"],
+  ["git log --oneline", "pass"], ["git diff --stat", "pass"], ["git diff --no-ext-diff", "pass"], ["git log --graph --decorate", "pass"], ["git push --force-with-lease origin f", "ask"],
+  ["ls 'unterminated", "deny"], ['ls "unterminated', "deny"], ["ls \\", "deny"], ["", "deny"], ["   ", "deny"],
+];
+
+test("POSIX shell policy: every row gets the secure verdict", () => {
+  const wrong = POSIX.filter(([command, want]) => posixShellVerdict(command).decision !== want)
+    .map(([command, want]) => `${JSON.stringify(command)}: wanted ${want}, got ${posixShellVerdict(command).decision}`);
+  assert.deepEqual(wrong, []);
+  assert.ok(POSIX.length > 220, "keep the table broad");
+});
+
+test("verdicts carry a reason that tells the agent what to do instead", () => {
+  assert.match(posixShellVerdict("rm x").reason, /execute_and_review/);
+  assert.match(posixShellVerdict("scaffold summary").reason, /bypasses the delivery tools/);
+  assert.match(posixShellVerdict("gh pr merge 1").reason, /human-controlled/);
+  assert.match(posixShellVerdict("git push origin main").reason, /protected branch/);
+  assert.match(posixShellVerdict("git commit -m x").reason, /never during an active implementation loop/);
+  assert.match(posixShellVerdict("git commit -m x && git push origin f").reason, /publishes a branch/, "ask reasons are combined");
+  assert.equal(posixShellVerdict(42).decision, "deny");
+  assert.equal(posixShellVerdict(undefined).decision, "deny");
+});
+
+test("one denied segment denies the whole command, even next to an ask", () => {
+  assert.equal(posixShellVerdict("git add . && rm x").decision, "deny");
+  assert.equal(posixShellVerdict("git add . && git push origin main").decision, "deny");
+});
+
+test("tokenizer: quotes are data, operators split, only /dev/null redirects survive", () => {
+  assert.deepEqual(tokenize("echo 'a;b' \"c|d\" e").segments, [["echo", "a;b", "c|d", "e"]]);
+  assert.deepEqual(tokenize("a && b | c; d").segments, [["a"], ["b"], ["c"], ["d"]]);
+  assert.deepEqual(tokenize("ls 2>&1").segments, [["ls"]], "the fd digit is not an argument");
+  assert.deepEqual(tokenize("ls 2>/dev/null | wc").segments, [["ls"], ["wc"]]);
+  assert.deepEqual(tokenize("find . \"-exec\" x").segments, [["find", ".", "-exec", "x"]], "quote removal exposes the real flag");
+  assert.equal(tokenize("echo $x").ok, false);
+  assert.equal(tokenize("echo > f").ok, false);
+});
+
+const PS = [
+  ["git status", "pass"], ["git log --format=\"%h %s\"", "pass"], ["git diff --stat", "pass"], ["gh pr view 1", "pass"],
+  ["Get-ChildItem -Recurse src", "pass"], ["ls", "pass"], ["dir src", "pass"], ["Get-Content package.json", "pass"], ["cat package.json", "pass"], ["Select-String -Pattern x -Path y", "pass"],
+  ["Get-Location", "pass"], ["Test-Path x", "pass"], ["Get-Content -Path 'a b'", "pass"],
+  ["git add .", "ask"], ["git commit -m x", "ask"], ["gh pr create", "ask"],
+  ["git push --force", "deny"], ["git push origin main", "deny"], ["git reset --hard", "deny"], ["gh pr merge 1", "deny"],
+  ["Remove-Item x", "deny"], ["rm x", "deny"], ["Set-Content x y", "deny"], ["Out-File x", "deny"], ["New-Item x", "deny"], ["Copy-Item a b", "deny"],
+  ["Invoke-Expression ls", "deny"], ["iex ls", "deny"], ["Invoke-WebRequest http://x", "deny"], ["Start-Process x", "deny"], ["node -e 1", "deny"], ["npm test", "deny"],
+  ["git status; rm x", "deny"], ["git status | Out-File x", "deny"], ["Get-Content x | Set-Content y", "deny"], ["& git status", "deny"], ["git status > out", "deny"],
+  ["Get-Content (Get-Item x)", "deny"], ["Get-Content $env:TEMP", "deny"], ["Get-Content `x", "deny"], ["ls @(1)", "deny"], ["git status && git push", "deny"],
+  ["Get-Content 'it''s'", "deny"], ["git log \"\"x\"\"", "deny"], ["Get-Content ./x.ps1 ; calc", "deny"], ["", "deny"], ["scaffold summary", "deny"],
+];
+
+test("PowerShell policy: only a single read-only git/gh command or plain Get-* cmdlet passes", () => {
+  const wrong = PS.filter(([command, want]) => powershellVerdict(command).decision !== want)
+    .map(([command, want]) => `${JSON.stringify(command)}: wanted ${want}, got ${powershellVerdict(command).decision}`);
+  assert.deepEqual(wrong, []);
+});
+
+/* ------------------------------------------------------------------------------------ activation & routing */
+
+function repo(t, { feature = true, git = true } = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), "pi-guard-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  if (git) mkdirSync(path.join(dir, ".git"));
+  if (feature) mkdirSync(path.join(dir, ".scaffold", "features", "F-1.abc"), { recursive: true });
+  mkdirSync(path.join(dir, "src"), { recursive: true });
+  return dir;
+}
+
+const call = (tool_name, tool_input, cwd, env = {}) => decide({ tool_name, tool_input, cwd }, { env });
+
+test("file tools are denied where a delivery is active, from the root or any subdirectory", (t) => {
+  const dir = repo(t);
+  for (const tool of ["Edit", "Write", "NotebookEdit", "MultiEdit"]) {
+    for (const cwd of [dir, path.join(dir, "src")]) {
+      const v = call(tool, { file_path: path.join(dir, "src", "a.mjs"), notebook_path: path.join(dir, "n.ipynb") }, cwd);
+      assert.equal(v.decision, "deny", `${tool} from ${cwd}`);
+      assert.match(v.reason, /execute_and_review/);
+    }
+  }
+});
+
+test("ordinary repositories and empty feature directories are untouched", (t) => {
+  const plain = repo(t, { feature: false });
+  assert.equal(call("Edit", { file_path: path.join(plain, "a") }, plain).decision, "pass");
+  assert.equal(call("Bash", { command: "rm -rf x" }, plain).decision, "pass");
+  const empty = repo(t, { feature: false });
+  mkdirSync(path.join(empty, ".scaffold", "features"), { recursive: true });
+  assert.equal(call("Write", { file_path: path.join(empty, "a") }, empty).decision, "pass");
+  assert.equal(call("Write", { file_path: "/x" }, path.join(tmpdir(), "no-such-dir-xyz")).decision, "pass", "unreadable tree means no delivery");
+});
+
+test("the walk stops at the nearest repository root, so a nested repository is judged on its own", (t) => {
+  const outer = repo(t);
+  const inner = path.join(outer, "vendor", "lib");
+  mkdirSync(path.join(inner, ".git"), { recursive: true });
+  assert.equal(deliveryRoot(inner), null);
+  assert.equal(deliveryRoot(path.join(outer, "src")), outer);
+  assert.equal(call("Edit", { file_path: path.join(inner, "a") }, inner).decision, "pass");
+});
+
+test("a file tool aimed at an active delivery elsewhere is denied even when cwd is not in it", (t) => {
+  const active = repo(t);
+  const elsewhere = repo(t, { feature: false });
+  assert.equal(call("Edit", { file_path: path.join(active, "src", "a.mjs") }, elsewhere).decision, "deny");
+  assert.equal(call("NotebookEdit", { notebook_path: path.join(active, "n.ipynb") }, elsewhere).decision, "deny");
+  assert.equal(call("Edit", { file_path: path.join(elsewhere, "a") }, elsewhere).decision, "pass");
+});
+
+test("shell tools are routed: Bash and Monitor to the POSIX policy, PowerShell to its own", (t) => {
+  const dir = repo(t);
+  assert.equal(call("Bash", { command: "git status" }, dir).decision, "pass");
+  assert.equal(call("Bash", { command: "rm x" }, dir).decision, "deny");
+  assert.equal(call("Monitor", { command: "rm x" }, dir).decision, "deny");
+  assert.equal(call("Bash", { command: "git add ." }, dir).decision, "ask");
+  assert.equal(call("PowerShell", { command: "git status" }, dir).decision, "pass");
+  assert.equal(call("PowerShell", { command: "Remove-Item x" }, dir).decision, "deny");
+  assert.equal(call("Bash", {}, dir).decision, "deny", "a shell call with no command is refused, not waved through");
+  assert.equal(call("Bash", { command: ["rm", "x"] }, dir).decision, "deny");
+});
+
+test("other tools are never touched", (t) => {
+  const dir = repo(t);
+  for (const tool of ["Read", "Grep", "Glob", "WebFetch", "Skill", "TodoWrite", "mcp__x__y", undefined]) {
+    assert.equal(call(tool, { file_path: "/x", command: "rm x" }, dir).decision, "pass", String(tool));
+  }
+  assert.equal(decide(null).decision, "pass");
+  assert.equal(decide({}).decision, "pass");
+});
+
+test("PI_DELIVERY_GUARD: only exactly off disables; on forces; anything else stays automatic", (t) => {
+  const dir = repo(t);
+  const plain = repo(t, { feature: false });
+  assert.equal(guardMode({}), "auto");
+  for (const [value, mode] of [["off", "off"], [" OFF ", "off"], ["on", "on"], ["ON", "on"], ["0", "auto"], ["false", "auto"], ["disabled", "auto"], ["", "auto"], ["offf", "auto"]]) {
+    assert.equal(guardMode({ PI_DELIVERY_GUARD: value }), mode, JSON.stringify(value));
+  }
+  assert.equal(call("Edit", { file_path: "/x" }, dir, { PI_DELIVERY_GUARD: "off" }).decision, "pass");
+  assert.equal(call("Edit", { file_path: "/x" }, dir, { PI_DELIVERY_GUARD: "0" }).decision, "deny", "a typo must not disable the guard");
+  assert.equal(call("Edit", { file_path: "/x" }, plain, { PI_DELIVERY_GUARD: "on" }).decision, "deny");
+});
+
+test("cwd falls back to CLAUDE_PROJECT_DIR, then the process directory", (t) => {
+  const dir = repo(t);
+  assert.equal(decide({ tool_name: "Bash", tool_input: { command: "rm x" } }, { env: { CLAUDE_PROJECT_DIR: dir } }).decision, "deny");
+});
+
+/* ---------------------------------------------------------------------------------- the hook as Claude runs it */
+
+const hook = (event, env = {}) => spawnSync(process.execPath, [path.join(root, "pi/claude/guard.mjs")], {
+  input: typeof event === "string" ? event : JSON.stringify(event),
+  encoding: "utf8", timeout: 30000, env: { ...process.env, PI_DELIVERY_GUARD: "", ...env },
+});
+
+test("hook contract: deny is exit 2 with the reason on stderr and nothing on stdout", (t) => {
+  const dir = repo(t);
+  const run = hook({ tool_name: "Edit", tool_input: { file_path: path.join(dir, "a") }, cwd: dir });
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /execute_and_review/);
+  assert.equal(run.stdout, "");
+});
+
+test("hook contract: ask is exit 0 with a PreToolUse ask decision", (t) => {
+  const dir = repo(t);
+  const run = hook({ tool_name: "Bash", tool_input: { command: "git commit -m x" }, cwd: dir });
+  assert.equal(run.status, 0);
+  const out = JSON.parse(run.stdout);
+  assert.equal(out.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(out.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(out.hookSpecificOutput.permissionDecisionReason, /git commit/);
+});
+
+test("hook contract: pass is silent exit 0 (the guard never grants access)", (t) => {
+  const dir = repo(t);
+  for (const event of [{ tool_name: "Bash", tool_input: { command: "git status" }, cwd: dir }, { tool_name: "Read", tool_input: {}, cwd: dir }]) {
+    const run = hook(event);
+    assert.deepEqual([run.status, run.stdout, run.stderr], [0, "", ""]);
+  }
+});
+
+test("hook contract: unreadable input blocks, and the user override works", (t) => {
+  const dir = repo(t);
+  for (const bad of ["", "not json", "{"]) assert.equal(hook(bad).status, 2, JSON.stringify(bad));
+  const run = hook({ tool_name: "Edit", tool_input: { file_path: "/x" }, cwd: dir }, { PI_DELIVERY_GUARD: "off" });
+  assert.equal(run.status, 0);
+});
+
+/* ------------------------------------------------------------------------------ the Claude Code plugin files */
+
+import { readFileSync, existsSync } from "node:fs";
+import { projectDirectory } from "../pi/agent/lib/host/mcp.mjs";
+import { deliveryMcpServerConfig } from "../pi/agent/lib/host/pi.mjs";
+
+const json = (file) => JSON.parse(readFileSync(path.join(root, file), "utf8"));
+const inPlugin = (p) => path.join(root, "pi", p.replace("${CLAUDE_PLUGIN_ROOT}/", ""));
+
+test("plugin manifest names the plugin and sits at the plugin root", () => {
+  const manifest = json("pi/.claude-plugin/plugin.json");
+  assert.equal(manifest.name, "pi-delivery");
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+});
+
+test("the guard hook is registered so that it fails CLOSED and covers every way to change files", () => {
+  const entries = json("pi/hooks/hooks.json").hooks.PreToolUse;
+  assert.equal(entries.length, 1);
+  const [{ matcher, hooks }] = entries;
+  const matched = matcher.split("|");
+  for (const tool of ["Edit", "Write", "NotebookEdit", "MultiEdit", "Bash", "PowerShell"]) {
+    assert.ok(matched.includes(tool), `${tool} must be guarded`);
+  }
+  assert.equal(hooks.length, 1);
+  const [hook] = hooks;
+  assert.equal(hook.type, "command");
+  // Claude Code lets a failing hook (crash, timeout, missing script) through by default. A guard must not.
+  assert.equal(hook.onFailure, "block", "without onFailure=block a crashing guard silently allows everything");
+  assert.ok(hook.timeout > 0 && hook.timeout <= 30);
+  // Exec form: no shell, so paths with spaces or quotes cannot be mangled.
+  assert.equal(hook.command, "node");
+  assert.deepEqual(hook.args.length, 1);
+  assert.ok(existsSync(inPlugin(hook.args[0])), `${hook.args[0]} must exist inside the plugin`);
+});
+
+test("the MCP entry launches the server from inside the plugin, so the plugin is self-contained", () => {
+  const { mcpServers } = json("pi/.mcp.json");
+  assert.deepEqual(Object.keys(mcpServers), ["pidelivery"]);
+  const server = mcpServers.pidelivery;
+  assert.equal(server.command, "node");
+  for (const arg of server.args) {
+    assert.ok(arg.startsWith("${CLAUDE_PLUGIN_ROOT}/"), "paths must be plugin-relative (a path that escapes the plugin root is rejected)");
+    assert.ok(existsSync(inPlugin(arg)), `${arg} must exist`);
+    assert.ok(!arg.includes(".."), "no parent-directory escapes");
+  }
+});
+
+test("server project directory: Claude Code's CLAUDE_PROJECT_DIR wins, otherwise the process directory", () => {
+  assert.equal(projectDirectory({ CLAUDE_PROJECT_DIR: "/proj" }, "/cwd"), "/proj");
+  assert.equal(projectDirectory({}, "/cwd"), "/cwd");
+  assert.equal(projectDirectory({ CLAUDE_PROJECT_DIR: "" }, "/cwd"), "/cwd", "empty counts as unset");
+  assert.equal(deliveryMcpServerConfig("/x/start.mjs").env.CLAUDE_PROJECT_DIR, "", "Pi blanks it so a value inherited from a Claude Code shell cannot redirect Pi's server");
+});

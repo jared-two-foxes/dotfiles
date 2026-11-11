@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { createMcpCaller, mcpToolList } from "../agent/lib/host/mcp.mjs";
+import { createMcpCaller, mcpToolList, projectDirectory } from "../agent/lib/host/mcp.mjs";
 import { createCheckpointTools } from "../agent/extensions/checkpoint/tools.mjs";
 import { createExecuteAndReviewTools } from "../agent/extensions/execute-and-review/tools.mjs";
 import { createExecutionRecoveryTools } from "../agent/extensions/execution-recovery/tools.mjs";
@@ -80,7 +80,7 @@ export function createDeliveryServer({ cwd = process.cwd(), tools = deliveryTool
 /** Serve over stdio in the current directory. `start.mjs` calls this after checking dependencies. */
 export async function main(env = process.env) {
   const tools = deliveryTools({ includeInteractive: env.PI_DELIVERY_MCP_OMIT_INTERACTIVE !== "1" });
-  await createDeliveryServer({ tools }).connect(new StdioServerTransport());
+  await createDeliveryServer({ tools, cwd: projectDirectory(env) }).connect(new StdioServerTransport());
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

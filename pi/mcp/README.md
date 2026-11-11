@@ -71,10 +71,12 @@ client (needs a model), and approvals and long runs in a live session.
 
 ## What this does NOT give you yet
 
-**The trust model.** In Pi the orchestrator cannot edit source; only these tools can. Claude Code and
-Copilot have their own edit tools, so connecting this server does not stop an agent bypassing
-`execute_and_review`. The ledger and checkpoint checks will still detect stray edits as drift, but
-prevention needs host configuration (deny rules / a `PreToolUse` hook for Claude Code). That is the next step.
+**The trust model.** Connecting this server only *offers* the delivery tools; on its own it does not stop an
+agent using the host's own edit tools instead of `execute_and_review`. Be precise about what that means: in Pi
+today the rule "never use direct edit/write" is an instruction in `SYSTEM.md`, and **nothing in Pi enforces
+it**. What the code does enforce is detection: the ledger and `checkpointHistory()` flag any commit that is
+not an authenticated checkpoint. For Claude Code there is now a guard that *prevents* direct edits and unsafe
+shell commands while a delivery is active; see [`../claude/README.md`](../claude/README.md).
 
 Also unverified: behaviour under a real Claude Code or VS Code session (the tests use the SDK's own
 client), and approval UX in either. Headless runs cannot approve; they need a separate design.
