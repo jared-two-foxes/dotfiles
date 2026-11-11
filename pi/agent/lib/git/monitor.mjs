@@ -1,21 +1,31 @@
 import { watch } from "node:fs";
 import path from "node:path";
 import { git } from "./tree.mjs";
+const MAX_EVENTS = 20;
+// Any notification on a tracked path (or one that names no path) still trips the monitor, because a
+// write-then-revert is invisible to the Git fingerprint. The offending events are recorded so a trip
+// can be told apart as a real edit, a touch/antivirus metadata event, or an unnamed overflow.
 export function monitorTrackedInputs(repository) {
   const files = git(repository, ["ls-files", "-z"]).split("\0").filter(Boolean);
   const watchers = [];
-  let changed = false;
+  const events = [];
+  const record = (kind, dir, name) => {
+    if (events.length >= MAX_EVENTS) return;
+    const file = name ? path.relative(repository, path.resolve(dir, name.toString())) : null;
+    events.push({ kind, path: file ? file.split(path.sep).join("/") : null,
+      dir: path.relative(repository, dir).split(path.sep).join("/") || ".", at: new Date().toISOString() });
+  };
   try {
     const tracked = new Set(files.map((f) => path.resolve(repository, f)));
     for (const dir of new Set(
       files.map((f) => path.dirname(path.resolve(repository, f))),
     )) {
-      const watcher = watch(dir, (_event, name) => {
-        if (!name || tracked.has(path.resolve(dir, name.toString())))
-          changed = true;
+      const watcher = watch(dir, (event, name) => {
+        if (!name) record("unnamed:" + event, dir, null);
+        else if (tracked.has(path.resolve(dir, name.toString()))) record(event, dir, name);
       });
-      watcher.on("error", () => {
-        changed = true;
+      watcher.on("error", (error) => {
+        record("watcher-error:" + (error?.code ?? error?.message ?? "unknown"), dir, null);
       });
       watchers.push(watcher);
     }
@@ -24,8 +34,13 @@ export function monitorTrackedInputs(repository) {
     throw error;
   }
   return {
+    events: () => events.slice(),
     assert: () => {
-      if (changed) throw new Error("Tracked implementation inputs changed during validation; reconcile");
+      if (!events.length) return;
+      const first = events[0];
+      const detail = events.slice(0, 3).map((e) => `${e.kind} ${e.path ?? "<unnamed in " + e.dir + ">"} @${e.at}`).join("; ");
+      throw new Error("Tracked implementation inputs changed during validation; reconcile" +
+        ` (${events.length} notification${events.length === 1 ? "" : "s"}, first ${first.kind} ${first.path ?? "<unnamed>"}: ${detail})`);
     },
     close: () => watchers.forEach((w) => w.close()),
   };
