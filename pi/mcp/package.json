@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "description": "MCP server exposing the Pi delivery tools (scaffold, execute_and_review, checkpoint, validation, recovery, review) to any MCP host.",
-  "bin": { "pi-delivery-mcp": "./server.mjs" },
+  "bin": { "pi-delivery-mcp": "./start.mjs" },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
     "ajv": "8.20.0",

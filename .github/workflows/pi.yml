@@ -67,3 +67,4 @@ jobs:
           ./tests/install-conductor.ps1
           ./tests/install-executor.ps1
           ./tests/install-review.ps1
+          ./tests/install-mcp.ps1

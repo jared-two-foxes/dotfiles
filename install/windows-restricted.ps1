@@ -345,6 +345,10 @@ Write-Host "[review CLI]" -ForegroundColor White
 Write-Host "[conductor CLI]" -ForegroundColor White
 & (Join-Path $PSScriptRoot 'conductor.ps1') -Force:$Force -WhatIf:$WhatIfPreference
 
+# --- Pi delivery MCP server dependencies ---
+Write-Host "[Pi MCP server]" -ForegroundColor White
+& (Join-Path $PSScriptRoot 'mcp.ps1') -Force:$Force -WhatIf:$WhatIfPreference
+
 # --- Copilot cleanup -----------------------------------------
 Write-Host "
 [Copilot Cleanup]" -ForegroundColor White

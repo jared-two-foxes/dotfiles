@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { createMcpCaller, mcpToolList } from "../pi/agent/lib/host/mcp.mjs";
 import { defineTool, toolResult } from "../pi/agent/lib/host/tool.mjs";
 
@@ -148,4 +152,27 @@ test("a client that cannot elicit can never approve", { skip: !installed && "pi/
   const { client, close } = await connect([approvalTool()]);
   t.after(close);
   assert.equal(await approvedBy(await client.callTool({ name: "approve", arguments: {} })), false);
+});
+
+// ---- Launcher (start.mjs): the entry point hosts run.
+test("launcher without dependencies exits 1 with a one-line fix on stderr and nothing on stdout", (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "pi-mcp-nodeps-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const file of ["start.mjs", "package.json"]) copyFileSync(new URL(`../pi/mcp/${file}`, import.meta.url), path.join(dir, file));
+  const run = spawnSync(process.execPath, [path.join(dir, "start.mjs")], { encoding: "utf8", timeout: 30000 });
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, "", "stdout is the MCP protocol channel and must stay clean");
+  assert.match(run.stderr, /dependencies are not installed \(missing: @modelcontextprotocol\/sdk, ajv, typebox\)/);
+  assert.match(run.stderr, /npm ci --prefix/);
+  assert.doesNotMatch(run.stderr, /ERR_MODULE_NOT_FOUND|node:internal/, "no raw module-resolution stack trace");
+});
+
+test("launcher serves all 17 tools over real stdio", { skip: !installed && "pi/mcp dependencies not installed" }, async (t) => {
+  const { Client } = await sdk("client/index.js");
+  const { StdioClientTransport } = await sdk("client/stdio.js");
+  const transport = new StdioClientTransport({ command: process.execPath, args: [fileURLToPath(new URL("../pi/mcp/start.mjs", import.meta.url))], cwd: process.cwd() });
+  const client = new Client({ name: "test", version: "0" }, { capabilities: {} });
+  t.after(() => client.close());
+  await client.connect(transport);
+  assert.equal((await client.listTools()).tools.length, 17);
 });

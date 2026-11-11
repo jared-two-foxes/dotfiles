@@ -6,12 +6,17 @@ It loads the host-neutral definitions in `pi/agent/extensions/*/tools.mjs`; noth
 The adapter logic is `pi/agent/lib/host/mcp.mjs` (dependency-free and unit-tested); this directory only
 wires in the MCP SDK, TypeBox and a JSON Schema validator.
 
+Only `package.json` and `package-lock.json` are committed; the dependencies are downloaded at setup:
+
 ```sh
-npm ci --prefix pi/mcp
-node pi/mcp/server.mjs          # stdio; runs in the current directory, which must be the target repository
+npm ci --prefix pi/mcp          # the Windows installers run this via install/mcp.ps1
+node pi/mcp/start.mjs           # stdio; runs in the current directory, which must be the target repository
 ```
 
-Claude Code: `claude mcp add pi-delivery -- node /absolute/path/to/pi/mcp/server.mjs`, run from the repository
+`start.mjs` is the entry point to give a host. If the dependencies are missing it prints the one-line fix on
+stderr and exits 1, rather than failing with a module-resolution stack trace.
+
+Claude Code: `claude mcp add pi-delivery -- node /absolute/path/to/pi/mcp/start.mjs`, run from the repository
 you are delivering in. VS Code: add the same command to `.vscode/mcp.json` (`"type": "stdio"`).
 The external CLIs (`scaffold`, Conductor, Executor, Review) must be on `PATH`, as they are for Pi.
 

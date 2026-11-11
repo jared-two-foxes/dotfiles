@@ -70,6 +70,9 @@ export function createDeliveryServer({ cwd = process.cwd(), tools = deliveryTool
   return server;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/** Serve over stdio in the current directory. `start.mjs` calls this after checking dependencies. */
+export async function main() {
   await createDeliveryServer().connect(new StdioServerTransport());
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
