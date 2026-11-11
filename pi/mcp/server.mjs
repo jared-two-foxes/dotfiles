@@ -22,8 +22,9 @@ import { createFeatureValidationTools } from "../agent/extensions/feature-valida
 import { createReviewTool } from "../agent/extensions/review/tool.mjs";
 import { createScaffoldTools } from "../agent/extensions/scaffold/tools.mjs";
 
-export function deliveryTools() {
-  return [
+/** All delivery tools. `includeInteractive: false` omits the approval tools, for hosts that keep those native. */
+export function deliveryTools({ includeInteractive = true } = {}) {
+  const tools = [
     ...createScaffoldTools(Type),
     ...createExecuteAndReviewTools(Type),
     ...createCheckpointTools(Type),
@@ -31,6 +32,7 @@ export function deliveryTools() {
     ...createExecutionRecoveryTools(Type),
     createReviewTool(Type),
   ];
+  return includeInteractive ? tools : tools.filter((tool) => !tool.interactive);
 }
 
 /** JSON Schema validation with a per-schema compile cache. `strict: false` tolerates TypeBox's extra keywords. */
@@ -60,19 +62,25 @@ function elicitApproval(server) {
   };
 }
 
-export function createDeliveryServer({ cwd = process.cwd(), tools = deliveryTools() } = {}) {
+export function createDeliveryServer({ cwd = process.cwd(), tools = deliveryTools(), heartbeatMs } = {}) {
   const server = new Server({ name: "pi-delivery", version: "0.1.0" }, { capabilities: { tools: {} } });
   const list = mcpToolList(tools);
-  const call = createMcpCaller(tools, { cwd: path.resolve(cwd), validate: createValidator(), confirm: elicitApproval(server) });
+  const call = createMcpCaller(tools, { cwd: path.resolve(cwd), validate: createValidator(), confirm: elicitApproval(server), heartbeatMs });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: list }));
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) =>
-    call(request.params.name, request.params.arguments, { signal: extra?.signal }));
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    // Progress heartbeats only if the client asked for progress by sending a token.
+    const token = request.params._meta?.progressToken;
+    const progress = token === undefined ? undefined : (n, message) =>
+      extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: n, message } });
+    return call(request.params.name, request.params.arguments, { signal: extra?.signal, progress });
+  });
   return server;
 }
 
 /** Serve over stdio in the current directory. `start.mjs` calls this after checking dependencies. */
-export async function main() {
-  await createDeliveryServer().connect(new StdioServerTransport());
+export async function main(env = process.env) {
+  const tools = deliveryTools({ includeInteractive: env.PI_DELIVERY_MCP_OMIT_INTERACTIVE !== "1" });
+  await createDeliveryServer({ tools }).connect(new StdioServerTransport());
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();
