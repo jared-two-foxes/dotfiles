@@ -1,7 +1,7 @@
 # Pi configuration
 
 The repository stores the personal agent instructions (`agent/AGENTS.md`,
-`agent/APPEND_SYSTEM.md`), a few personal extensions and skills, and
+`agent/APPEND_SYSTEM.md`), the lsp extension config and
 `agent/settings.json.template`. Pi owns the files it writes while installing,
 updating and running:
 
@@ -51,3 +51,11 @@ are now ignored. Alternatively, reinstall Pi to regenerate its installation and
 launchers, and restore your live settings. If Git reports local modifications,
 keep the backup before resolving those changes; do not discard live settings or
 installation metadata without a copy.
+
+## Moved to `shared/pi/`
+
+This directory was previously `pi/` at the repository root. A machine whose Pi
+agent directory (`PI_CODING_AGENT_DIR` or a symlink) points at this checkout must
+be repointed to `shared/pi/agent`. The ignored runtime files (`settings.json`,
+`bin/`, `install/`, `cache/`, `git/`, `npm/`, `models-store.json`) do not move with
+git; copy them from the old `pi/agent` directory or reinstall Pi and the packages.
