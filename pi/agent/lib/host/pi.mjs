@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { missingDependencies } from "./dependencies.mjs";
+import { describeToolCall, piGuardVerdict } from "../guard/pi.mjs";
 import { defineTool } from "./tool.mjs";
 
 export const MCP_SERVER_NAME = "pidelivery";
@@ -125,4 +126,34 @@ export function registerPiTools(pi, tools, { transport = deliveryTransport().tra
     if (transport === "mcp" && !tool.interactive) continue;
     pi.registerTool(toPiTool(tool));
   }
+}
+
+/**
+ * The delivery guard's `tool_call` handler: `pi.on("tool_call", createToolCallGuard())` (extensions/delivery-guard).
+ *   deny -> { block: true, reason }       (the model reads the reason in the tool result and can adapt)
+ *   ask  -> the user confirms in Pi's UI; no UI, a "no", a cancel or a crashed prompt all block
+ *   pass -> undefined (Pi runs the tool; the guard never grants anything)
+ * An unexpected error blocks the call: a guard that fails open is not a guard.
+ */
+export function createToolCallGuard({ env = process.env } = {}) {
+  return async function toolCallGuard(event, ctx) {
+    let verdict;
+    try {
+      verdict = piGuardVerdict(event, { cwd: ctx.cwd, env });
+    } catch (error) {
+      return { block: true, reason: `The delivery guard failed (${error?.message ?? error}); blocking the call.` };
+    }
+    if (verdict.decision === "pass") return undefined;
+    if (verdict.decision === "deny") return { block: true, reason: verdict.reason };
+
+    if (ctx.hasUI !== true) {
+      return { block: true, reason: `${verdict.reason} Refused: there is no user interface to confirm it.` };
+    }
+    let confirmed = false;
+    try {
+      // Exactly `true` approves. piHost().confirm coerces with Boolean(), which would let a truthy non-boolean through.
+      confirmed = (await ctx.ui.confirm("Confirm this action?", `${describeToolCall(event)}\n\n${verdict.reason}`)) === true;
+    } catch { /* a broken prompt is a refusal */ }
+    return confirmed ? undefined : { block: true, reason: `The user did not confirm this action. ${verdict.reason}` };
+  };
 }

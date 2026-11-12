@@ -29,13 +29,13 @@ interactive session. In a non-interactive (`-p`) run Claude Code cancels the req
 | Layer | What it is | Pi today | Claude Code with this plugin |
 |---|---|---|---|
 | Instructions | `SYSTEM.md` and the skills tell the agent not to edit directly | yes | partly (skills not ported yet) |
-| **Prevention** | A hook refuses the edit or command before it runs | **no** | **yes (this guard)** |
+| **Prevention** | A hook refuses the edit or command before it runs | yes (`delivery-guard` extension) | yes (this guard) |
 | Detection | The ledger and `checkpointHistory()` flag any commit that is not an authenticated checkpoint | yes | yes (same shared tools) |
 
-**Pi does not enforce its own "never edit directly" rule.** There is no `tool_call` handler, no excluded tool
-and no tool restriction in its settings; the rule is text, backed by detection. This guard is therefore
-stronger than what Pi has, and `lib/guard/` is host-neutral so Pi could apply it through its own `tool_call`
-event later.
+**Pi used not to enforce its own "never edit directly" rule.** There was no `tool_call` handler, no excluded tool and
+no tool restriction; the rule was text, backed by detection. The `delivery-guard` extension now applies the same
+policy (`lib/guard/`) through Pi's `tool_call` event, so both hosts share one set of rules. See
+`../agent/extensions/delivery-guard/README.md`.
 
 ## What the guard does
 
@@ -49,6 +49,9 @@ found by walking up to the repository root). Elsewhere it does nothing, so ordin
 | `git add/commit/push/fetch`, `git checkout -b`, `git restore --staged`, `gh pr create/edit` | **Ask:** a human confirms each one (the publishing exception in `SYSTEM.md`, now enforced). |
 | Merges, `--force`/`--delete`/`--all` pushes, pushes to `main`/`master`, `git reset/stash/clean/rebase/merge`, `gh pr merge`, running `scaffold`/`executor`/`review-cli`/`conductor` directly | **Denied.** |
 | Everything else (`Read`, `Grep`, MCP tools, ...) | Not touched. |
+
+Paths are canonicalised (symlinks followed, including a symlinked working directory and a dangling link) before the guard
+decides whether a delivery is active, so an `Edit` that lands in one through a link is caught.
 
 The guard only ever restricts. It returns deny, ask, or nothing, so Claude Code's normal permission flow still
 decides everything it lets through; it never grants access.

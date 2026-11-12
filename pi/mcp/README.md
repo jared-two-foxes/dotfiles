@@ -72,11 +72,11 @@ client (needs a model), and approvals and long runs in a live session.
 ## What this does NOT give you yet
 
 **The trust model.** Connecting this server only *offers* the delivery tools; on its own it does not stop an
-agent using the host's own edit tools instead of `execute_and_review`. Be precise about what that means: in Pi
-today the rule "never use direct edit/write" is an instruction in `SYSTEM.md`, and **nothing in Pi enforces
-it**. What the code does enforce is detection: the ledger and `checkpointHistory()` flag any commit that is
-not an authenticated checkpoint. For Claude Code there is now a guard that *prevents* direct edits and unsafe
-shell commands while a delivery is active; see [`../claude/README.md`](../claude/README.md).
+agent using the host's own edit tools instead of `execute_and_review`. Prevention comes from a guard
+(`../agent/lib/guard/`) applied per host: Claude Code's plugin hook (`../claude/README.md`) and Pi's
+`delivery-guard` extension (`../agent/extensions/delivery-guard/README.md`). Before the Pi extension existed, Pi's
+"never edit directly" rule was only text in `SYSTEM.md`, backed by the ledger's detection
+(`checkpointHistory()` flags any commit that is not an authenticated checkpoint).
 
 Also unverified: behaviour under a real Claude Code or VS Code session (the tests use the SDK's own
 client), and approval UX in either. Headless runs cannot approve; they need a separate design.
