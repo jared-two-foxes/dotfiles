@@ -6,6 +6,7 @@
   "packages": [
     "npm:pi-ollama-cloud",
     "git:github.com/jalbarrang/pi-lsp",
-    "npm:pi-web-access"
+    "npm:pi-web-access",
+    "git:github.com/jared-two-foxes/delivery-pipeline"
   ]
 }

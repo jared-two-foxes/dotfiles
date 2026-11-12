@@ -1,9 +1,0 @@
-{
-  "name": "pi-execution-recovery",
-  "version": "0.1.0",
-  "type": "module",
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "typebox": "*"
-  }
-}

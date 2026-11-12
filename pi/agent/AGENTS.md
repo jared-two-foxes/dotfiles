@@ -1,6 +1,6 @@
 # Pi workflow
 
-Follow SYSTEM.md. Use /skill:init-feature to prepare an approved Scaffold feature
+Follow the delivery rules (from the delivery-pipeline package) and APPEND_SYSTEM.md. Use /skill:init-feature to prepare an approved Scaffold feature
 from a Linear ticket or supplied requirements without executing; use
 /skill:feature-delivery for full multi-task delivery and /skill:design for
 standalone engineering design. Use Research → Design → Implement with one
@@ -20,7 +20,7 @@ are not approval or verification. Use scoped issue views and retained handoffs.
 
 Never directly apply source edits or run executor/review-cli from Bash. Never merge
 PRs or rewrite protected branches. Finish/suspend an active verification/correction loop
-before Git/GitHub publishing. Publish only when requested, following SYSTEM.md;
+before Git/GitHub publishing. Publish only when requested, following the Git and GitHub publishing policy in APPEND_SYSTEM.md;
 the feature direction grant does not authorize publishing or unrelated source edits.
 
 Use Linear tools only when the user explicitly asks to manage shared tickets.
