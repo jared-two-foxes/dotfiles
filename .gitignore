@@ -44,4 +44,6 @@ pi/agent/sessions/
 /pi/agent/install/
 /pi/agent/settings.json
 /pi/agent/cache/
+/pi/agent/git/
+/pi/agent/npm/
 /pi/agent/models-store.json
