@@ -30,7 +30,7 @@ import { requireFeatureAuthorization } from "../scaffold/feature-authorization.m
 import { assertLatestAttempt } from "../../lib/verification/attempt-chain.mjs";
 import { authenticateTaskEvidence } from "../../lib/verification/task-evidence.mjs";
 import { git } from "../../lib/git/tree.mjs";
-import { reviewEvidence, reviewHandoff, testCounts } from "../../lib/verification/review-evidence.mjs";
+import { taskReviewHandoff, testCounts } from "../../lib/verification/review-evidence.mjs";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 const requireValue = (ok, message) => {
@@ -409,10 +409,7 @@ export async function sealVerification(plan) {
         !reviewSnapshot.bookkeepingVisible,
       "Source/index changed during review; commit prohibited",
     );
-    const expectedReview = reviewHandoff(
-      plan.workflow,
-      reviewEvidence(plan, conductor.runner, reviewSnapshot),
-    );
+    const expectedReview = taskReviewHandoff(plan, conductor.runner, reviewSnapshot);
     requireValue(
       equal(conductor.runner.receipts.at(-1).handoff, expectedReview.identity),
       "Review did not receive the authenticated check evidence",
