@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { decide, deliveryRoot, guardActive, guardMode, posixShellVerdict, powershellVerdict, tokenize } from "../pi/agent/lib/guard/index.mjs";
-import { piGuardVerdict } from "../pi/agent/lib/guard/pi.mjs";
+import { canonicalPath, decide, deliveryRoot, guardActive, guardMode, posixShellVerdict, powershellVerdict, tokenize } from "../pi/agent/lib/guard/index.mjs";
+import { piGuardVerdict, resolvePiPath } from "../pi/agent/lib/guard/pi.mjs";
 import { createToolCallGuard } from "../pi/agent/lib/host/pi.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -441,4 +441,125 @@ test("the Pi extension is just the handler, registered for tool_call", () => {
   assert.match(source, /pi\.on\("tool_call", createToolCallGuard\(\)\)/);
   assert.equal((source.match(/pi\.on\(/g) ?? []).length, 1, "one handler, nothing else");
   assert.doesNotMatch(source, /block: false|return undefined|setActiveTools/, "no logic here that could widen what the guard allows");
+});
+
+/* ---------------------------------------------- review findings on #103: aliases of a path, and links */
+
+// Expected values are what Pi's own resolver (utils/paths.js resolvePath, with normalizeUnicodeSpaces and
+// stripAtPrefix) returned for these inputs with HOME=/home/someone and cwd=/work/repo, captured from Pi 1.5.2.
+// A spelling the guard reads differently from Pi is a bypass, so these must match exactly.
+const HOME = "/home/someone", CWD = "/work/repo";
+const PI_RESOLVES = [
+  ["~", "/home/someone"], ["~/x", "/home/someone/x"], ["@~/x", "/home/someone/x"], ["~//x", "/home/someone/x"],
+  ["~x", "/work/repo/~x"], ["~user/x", "/work/repo/~user/x"], ["@@x", "/work/repo/@x"], [" x", "/work/repo/ x"],
+  ["a b/c", "/work/repo/a b/c"], ["file:///tmp/a%20b", "/tmp/a b"], ["@file:///tmp/a", "/tmp/a"],
+  ["./x/../y", "/work/repo/y"], ["x/./y//z", "/work/repo/x/y/z"], ["/abs/x", "/abs/x"], ["x", "/work/repo/x"],
+];
+
+test("resolvePiPath matches Pi's own resolver for tilde, file:// URLs, Unicode spaces and @", () => {
+  const wrong = PI_RESOLVES.filter(([input, want]) => resolvePiPath(input, CWD, { home: HOME, platform: "linux" }) !== want)
+    .map(([input, want]) => `${JSON.stringify(input)}: wanted ${want}, got ${resolvePiPath(input, CWD, { home: HOME, platform: "linux" })}`);
+  assert.deepEqual(wrong, []);
+  assert.throws(() => resolvePiPath("file://some-host/share/x", CWD, { home: HOME, platform: "linux" }), "a non-local file URL throws, as in Pi");
+});
+
+test("Pi: every alias of a write into an active delivery is caught from OUTSIDE it", (t) => {
+  const active = repo(t);                       // .../pi-guard-XXXX
+  const plain = repo(t, { feature: false });
+  const home = path.dirname(active);            // so "~/<name>/..." names the active repo
+  const name = path.basename(active);
+  const verdict = (p) => piGuardVerdict({ toolName: "write", input: { path: p, content: "x" } }, { cwd: plain, env: {}, home, platform: "linux" });
+  for (const alias of [`~/${name}/src/a.txt`, `@~/${name}/src/a.txt`, `~//${name}/src/a.txt`, `file://${path.join(active, "src", "a.txt")}`,
+    `@file://${path.join(active, "src", "a.txt")}`, path.join(active, "src", "a.txt"), path.relative(plain, path.join(active, "src", "a.txt"))]) {
+    assert.equal(verdict(alias).decision, "deny", alias);
+  }
+  assert.equal(verdict("~/no-such-repo-here/a.txt").decision, "pass", "the same spelling into a place with no delivery is fine");
+  assert.equal(verdict(`~/${path.basename(plain)}/a.txt`).decision, "pass");
+});
+
+test("Pi handler: a path Pi cannot resolve is blocked, not waved through", async (t) => {
+  const dir = repo(t, { feature: false });
+  const result = await createToolCallGuard({ env: {} })({ toolName: "write", input: { path: "file://remote-host/x" } }, { cwd: dir });
+  assert.equal(result.block, true);
+  assert.match(result.reason, /delivery guard failed/);
+});
+
+// Linux/macOS: creating symlinks needs privileges on Windows, so skip there instead of failing.
+function link(t, fn) {
+  try { fn(); } catch (error) { if (["EPERM", "EACCES", "ENOSYS"].includes(error.code)) { t.skip("cannot create links here"); return false; } throw error; }
+  return true;
+}
+
+test("a symlinked directory or working directory cannot hide the delivery it leads into (both hosts)", (t) => {
+  const active = repo(t);
+  const plain = repo(t, { feature: false });
+  if (!link(t, () => symlinkSync(path.join(active, "src"), path.join(plain, "alias")))) return;
+  symlinkSync(active, path.join(plain, "whole"));
+  const target = path.join(plain, "alias", "a.txt");
+  assert.equal(decide({ tool_name: "Write", tool_input: { file_path: target }, cwd: plain }, { env: {} }).decision, "deny", "Claude Code: write through a directory link");
+  assert.equal(piGuardVerdict({ toolName: "write", input: { path: "alias/a.txt" } }, { cwd: plain, env: {} }).decision, "deny", "Pi: same");
+  assert.equal(piGuardVerdict({ toolName: "write", input: { path: "whole/src/a.txt" } }, { cwd: plain, env: {} }).decision, "deny");
+  assert.equal(decide({ tool_name: "Bash", tool_input: { command: "rm x" }, cwd: path.join(plain, "whole") }, { env: {} }).decision, "deny", "the working directory itself reached through a link");
+  assert.equal(deliveryRoot(path.join(plain, "whole", "src")), realpathSync(active));
+  assert.equal(piGuardVerdict({ toolName: "write", input: { path: "plain-file.txt" } }, { cwd: plain, env: {} }).decision, "pass", "control: no link, no delivery");
+});
+
+test("a symlinked FILE, including a dangling one, is judged by where it really leads", (t) => {
+  const active = repo(t);
+  const plain = repo(t, { feature: false });
+  writeFileSync(path.join(active, "src", "real.txt"), "x");
+  if (!link(t, () => symlinkSync(path.join(active, "src", "real.txt"), path.join(plain, "file-link")))) return;
+  symlinkSync(path.join(active, "src", "not-yet.txt"), path.join(plain, "dangling-link"));
+  for (const name of ["file-link", "dangling-link"]) {
+    assert.equal(piGuardVerdict({ toolName: "write", input: { path: name } }, { cwd: plain, env: {} }).decision, "deny", name);
+    assert.equal(decide({ tool_name: "Edit", tool_input: { file_path: path.join(plain, name) }, cwd: plain }, { env: {} }).decision, "deny", name);
+  }
+});
+
+test("canonicalPath follows links, keeps a missing remainder, and never throws", (t) => {
+  const dir = repo(t, { feature: false });
+  if (!link(t, () => symlinkSync(path.join(dir, "src"), path.join(dir, "l")))) return;
+  const real = realpathSync(dir);
+  assert.equal(canonicalPath(path.join(dir, "l", "missing", "x.txt")), path.join(real, "src", "missing", "x.txt"));
+  assert.equal(canonicalPath(path.join(dir, "nope", "x")), path.join(real, "nope", "x"));
+  symlinkSync("loop-b", path.join(dir, "loop-a")); symlinkSync("loop-a", path.join(dir, "loop-b"));
+  assert.equal(typeof canonicalPath(path.join(dir, "loop-a")), "string", "a symlink loop does not hang or throw");
+  assert.equal(typeof canonicalPath(""), "string");
+});
+
+test("planning tools may not write through a link while a delivery is active", (t) => {
+  const dir = repo(t);
+  writeFileSync(path.join(dir, "README.md"), "readme");
+  const ticket = (filename) => piGuardVerdict({ toolName: "write_ticket_file", input: { filename } }, { cwd: dir, env: {} });
+  const plan = () => piGuardVerdict({ toolName: "write_plan", input: { content: "x" } }, { cwd: dir, env: {} });
+
+  assert.equal(ticket(".ticket-new.md").decision, "pass", "a name that does not exist yet");
+  writeFileSync(path.join(dir, ".ticket-plain.md"), "old");
+  assert.equal(ticket(".ticket-plain.md").decision, "pass", "overwriting an ordinary ticket file is the tool's purpose");
+  assert.equal(plan().decision, "pass", "no .pi directory yet");
+
+  if (!link(t, () => symlinkSync("README.md", path.join(dir, ".ticket-fix.md")))) return;
+  const v = ticket(".ticket-fix.md");
+  assert.equal(v.decision, "deny", "a name the filename rule accepts, but which is a symlink to README.md");
+  assert.match(v.reason, /through a link/);
+  symlinkSync("missing-target.md", path.join(dir, ".ticket-dangling.md"));
+  assert.equal(ticket(".ticket-dangling.md").decision, "deny", "a dangling link would create its target");
+  linkSync(path.join(dir, "README.md"), path.join(dir, ".ticket-hard.md"));
+  assert.equal(ticket(".ticket-hard.md").decision, "deny", "a hard link to another file");
+
+  // write_plan has the same weakness through .pi/plan.md and through a linked .pi directory
+  mkdirSync(path.join(dir, ".pi"));
+  symlinkSync("../README.md", path.join(dir, ".pi", "plan.md"));
+  assert.equal(plan().decision, "deny", ".pi/plan.md -> README.md");
+  rmSync(path.join(dir, ".pi"), { recursive: true });
+  symlinkSync(path.join(dir, "src"), path.join(dir, ".pi"));
+  assert.equal(plan().decision, "deny", ".pi -> src/");
+});
+
+test("planning-tool link rules apply only while a delivery is active", (t) => {
+  const dir = repo(t, { feature: false });
+  writeFileSync(path.join(dir, "README.md"), "readme");
+  if (!link(t, () => symlinkSync("README.md", path.join(dir, ".ticket-fix.md")))) return;
+  assert.equal(piGuardVerdict({ toolName: "write_ticket_file", input: { filename: ".ticket-fix.md" } }, { cwd: dir, env: {} }).decision, "pass");
+  assert.equal(piGuardVerdict({ toolName: "write_ticket_file", input: { filename: ".ticket-fix.md" } }, { cwd: dir, env: { PI_DELIVERY_GUARD: "on" } }).decision, "deny");
 });

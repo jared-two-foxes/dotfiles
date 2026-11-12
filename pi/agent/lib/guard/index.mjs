@@ -6,7 +6,7 @@
 //   PI_DELIVERY_GUARD=auto (default)  enforce where a delivery is active
 //   PI_DELIVERY_GUARD=on              enforce everywhere
 //   PI_DELIVERY_GUARD=off             disabled (set by the user in their own environment; exactly "off" only)
-import { readdirSync, existsSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { GUARD_HINT, posixShellVerdict, powershellVerdict } from "./shell.mjs";
 
@@ -15,6 +15,30 @@ export { GUARD_HINT, posixShellVerdict, powershellVerdict, tokenize } from "./sh
 const PASS = { decision: "pass" };
 const FILE_TOOLS = new Set(["Edit", "Write", "NotebookEdit", "MultiEdit"]);
 const POSIX_SHELL_TOOLS = new Set(["Bash", "Monitor"]);
+
+/**
+ * The real location of `p`: symlinks followed in every component, including a final one that dangles, with a
+ * not-yet-existing remainder kept as written. Tools that write follow links, so "is this inside an active delivery"
+ * must be asked of where the write will LAND, not of how the path was spelled. Never throws.
+ */
+export function canonicalPath(p) {
+  let current = path.resolve(String(p));
+  const rest = [];
+  for (let hops = 0; hops < 64; hops++) {
+    try { return path.join(realpathSync(current), ...[...rest].reverse()); } catch { /* not fully resolvable yet */ }
+    try {
+      if (lstatSync(current).isSymbolicLink()) { // a dangling link: continue from where it points
+        current = path.resolve(path.dirname(current), readlinkSync(current));
+        continue;
+      }
+    } catch { /* does not exist */ }
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    rest.push(path.basename(current));
+    current = parent;
+  }
+  return path.resolve(String(p));
+}
 
 function hasFeatures(dir) {
   try { return readdirSync(dir).length > 0; } catch { return false; }
@@ -27,7 +51,7 @@ function hasFeatures(dir) {
 export function deliveryRoot(start) {
   if (typeof start !== "string" || !start) return null;
   try {
-    let dir = path.resolve(start);
+    let dir = canonicalPath(start); // a symlinked working directory must not hide the delivery it sits in
     for (let i = 0; i < 64; i++) {
       if (hasFeatures(path.join(dir, ".scaffold", "features"))) return dir;
       if (existsSync(path.join(dir, ".git"))) return null; // reached the repository root with no delivery
@@ -50,8 +74,10 @@ export function guardActive({ cwd, target, env = process.env } = {}) {
   if (mode === "off") return false;
   if (mode === "on") return true;
   if (deliveryRoot(cwd ?? env.CLAUDE_PROJECT_DIR ?? process.cwd()) !== null) return true;
-  // A file tool names its target: touching another repository's active delivery counts too.
-  return typeof target === "string" && deliveryRoot(path.dirname(target)) !== null;
+  // A file tool names its target: touching another repository's active delivery counts too, whether the
+  // delivery is reached by the spelled path or only where a symlink in it (even the file itself) really leads.
+  if (typeof target !== "string") return false;
+  return deliveryRoot(path.dirname(target)) !== null || deliveryRoot(path.dirname(canonicalPath(target))) !== null;
 }
 
 /**

@@ -50,6 +50,9 @@ found by walking up to the repository root). Elsewhere it does nothing, so ordin
 | Merges, `--force`/`--delete`/`--all` pushes, pushes to `main`/`master`, `git reset/stash/clean/rebase/merge`, `gh pr merge`, running `scaffold`/`executor`/`review-cli`/`conductor` directly | **Denied.** |
 | Everything else (`Read`, `Grep`, MCP tools, ...) | Not touched. |
 
+Paths are canonicalised (symlinks followed, including a symlinked working directory and a dangling link) before the guard
+decides whether a delivery is active, so an `Edit` that lands in one through a link is caught.
+
 The guard only ever restricts. It returns deny, ask, or nothing, so Claude Code's normal permission flow still
 decides everything it lets through; it never grants access.
 
