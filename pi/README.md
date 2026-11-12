@@ -1,6 +1,7 @@
 # Pi configuration
 
-The repository stores the agent instructions, skills, extension source code and
+The repository stores the personal agent instructions (`agent/AGENTS.md`,
+`agent/APPEND_SYSTEM.md`), a few personal extensions and skills, and
 `agent/settings.json.template`. Pi owns the files it writes while installing,
 updating and running:
 
@@ -14,6 +15,16 @@ updating and running:
 These runtime paths are ignored so Pi and downloaded extension updates do not
 require dotfiles commits. Package manifests and lockfiles belonging to extension
 source under `agent/extensions/` remain tracked.
+
+## Delivery pipeline
+
+The research/design/implement orchestration (Scaffold-backed delivery tools,
+guard, skills and the orchestrator rules) lives in
+[jared-two-foxes/delivery-pipeline](https://github.com/jared-two-foxes/delivery-pipeline)
+and is installed as a Pi package listed in `agent/settings.json.template`:
+`pi install git:github.com/jared-two-foxes/delivery-pipeline`. It adds its rules
+to Pi's system prompt; `agent/APPEND_SYSTEM.md` holds the personal Git and GitHub
+publishing, communication and planning policy that complements them.
 
 ## Fresh installation
 

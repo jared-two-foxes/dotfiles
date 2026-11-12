@@ -1,4 +1,4 @@
-name: Pi and CLI installers
+name: Prompt policy and installers
 
 on:
   push:
@@ -6,65 +6,21 @@ on:
   pull_request:
 
 jobs:
-  node:
+  policy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - uses: actions/checkout@v4
-        with:
-          repository: jared-two-foxes/scaffold
-          ref: main
-          path: .ci-scaffold
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install Scaffold and pytest
-        run: python -m pip install -e ./.ci-scaffold pytest
-      - name: Verify native Scaffold task lifecycle (Linux)
-        working-directory: .ci-scaffold
-        run: python -m pytest -q tests
-      - name: Verify task-only cross-repository CLI (Linux)
-        run: python -m pytest -q tests/test_scaffold_cutover.py
-      - name: Verify administrative clean end to end (Linux)
-        run: python -m pytest -q tests/test_scaffold_clean_e2e.py
-      - name: Install MCP server dependencies
-        run: npm ci --prefix pi/mcp
-      - name: Run Pi and real-Scaffold integration tests
-        run: node --test tests/*.test.mjs
-        env:
-          SCAFFOLD_SOURCE: ${{ github.workspace }}/.ci-scaffold
+      - run: node --test tests/*.test.mjs
 
   installers:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: actions/checkout@v4
-        with:
-          repository: jared-two-foxes/scaffold
-          ref: main
-          path: .ci-scaffold
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install Scaffold and pytest
-        run: python -m pip install -e ./.ci-scaffold pytest
-      - name: Verify native Scaffold task lifecycle (Windows)
-        working-directory: .ci-scaffold
-        run: python -m pytest -q tests
-      - name: Verify task-only cross-repository CLI (Windows)
-        run: python -m pytest -q tests/test_scaffold_cutover.py
-      - name: Verify administrative clean end to end (Windows)
-        run: python -m pytest -q tests/test_scaffold_clean_e2e.py
-      - run: node --test tests/pi-feature-validation.test.mjs tests/pi-review.test.mjs tests/pi-scaffold.test.mjs tests/pi-delivery-state.test.mjs tests/pi-task-workflow.test.mjs tests/pi-checkpoint.test.mjs tests/pi-conductor.test.mjs tests/conductor-v2-integration.test.mjs tests/pi-automatic-commit.test.mjs tests/pi-failure-reporting.test.mjs
       - shell: pwsh
         run: |
           ./tests/install-conductor.ps1
           ./tests/install-executor.ps1
           ./tests/install-review.ps1
-          ./tests/install-mcp.ps1

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "pidelivery": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/start.mjs"]
-    }
-  }
-}
