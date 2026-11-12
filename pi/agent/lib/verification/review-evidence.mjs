@@ -2,7 +2,7 @@ import path from 'node:path';
 import { isDeepStrictEqual as equal } from 'node:util';
 import { digest } from '../evidence/store.mjs';
 import { verificationChecks } from './checks.mjs';
-import { NO_DELTA_REVIEW_NOTE } from './no-delta.mjs';
+import { NO_DELTA_REVIEW_NOTE, taskHasNoDelta } from './no-delta.mjs';
 
 function requireValue(ok, message) {
   if (!ok) throw new Error(message);
@@ -66,4 +66,13 @@ export function reviewHandoff(workflow, evidence, { noDelta = false } = {}) {
   return { args: [workflow.request.commands.at(-1).args[0], JSON.stringify({
     ...original, args, inputs: [...original.inputs, ...identity.inputs],
   })], files, identity };
+}
+
+// The one way to build the review handoff. The handoff step (what the reviewer is given) and the seal step
+// (what the commit gate expects it was given) must derive identical contents, including the no-delta note,
+// or the gate rejects the receipt as "Review did not receive the authenticated check evidence".
+export function taskReviewHandoff(plan, runner, source) {
+  return reviewHandoff(plan.workflow, reviewEvidence(plan, runner, source), {
+    noDelta: taskHasNoDelta(plan.repository, plan.args.baseRef, source.tree),
+  });
 }
